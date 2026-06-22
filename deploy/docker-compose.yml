@@ -1,0 +1,19 @@
+services:
+  hopscotch:
+    image: ghcr.io/USER/hopscotch:latest
+    container_name: hopscotch
+    restart: unless-stopped
+    ports:
+      - "8080:8080"       # SOCKS5 proxy
+      - "9090:9090"       # Admin HTTP (health + metrics)
+    volumes:
+      - ./config.yaml:/etc/hopscotch/config.yaml:ro
+      - ./keys:/etc/hopscotch/keys:ro
+    environment:
+      - TZ=Europe/Budapest
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

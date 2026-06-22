@@ -1,0 +1,39 @@
+tunnels:
+  - name: prod
+    host: jump.prod.example.com
+    port: 22
+    user: myuser
+    identity_file: /etc/hopscotch/keys/id_prod
+    local_port: 1080
+    keepalive_interval: 30
+    keepalive_max_fails: 3
+    reconnect_delay: 5
+
+  - name: dev
+    host: jump.dev.example.com
+    user: myuser
+    identity_file: /etc/hopscotch/keys/id_dev
+    local_port: 1081
+
+  - name: staging
+    host: jump.staging.example.com
+    user: myuser
+    local_port: 1082
+
+proxy:
+  port: 8080
+  rules:
+    - pattern: "*.prod.example.com"
+      tunnel: prod
+    - pattern: "*.dev.example.com"
+      tunnel: dev
+    - pattern: "*.staging.example.com"
+      tunnel: staging
+    - pattern: "10.0.1.*"
+      tunnel: prod
+    - pattern: "*"
+      via: direct
+
+admin:
+  port: 9090
+  bind: "127.0.0.1"   # use "0.0.0.0" in containers
