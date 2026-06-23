@@ -109,6 +109,10 @@
           </div>
         </div>
 
+        <div class="tc-reason"
+             :class="$store.hop.tunnels[name]?.last_error ? 'has-error' : 'no-error'"
+             x-text="$store.hop.tunnels[name]?.last_error || '—'"></div>
+
         <div class="tc-chart-wrap">
           <canvas class="tc-canvas"></canvas>
         </div>
@@ -132,6 +136,7 @@
                 x-text="$store.hop.direct.active + ' conn'"></span>
         </div>
       </div>
+      <div class="tc-reason no-error">—</div>
       <div class="tc-chart-wrap">
         <canvas class="tc-canvas"></canvas>
       </div>

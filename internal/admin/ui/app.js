@@ -17,8 +17,6 @@ window.fmtUptime = function(sec) {
 
 // ── Chart management ─────────────────────────────────────────────────────────
 
-const PALETTE = ['#38bdf8', '#818cf8', '#34d399', '#f59e0b', '#f87171'];
-const DIRECT_COLOR = '#64748b';
 const WINDOW_SIZE = 60;
 const charts = {};
 
@@ -27,22 +25,32 @@ window.initChart = function(name, el) {
   const canvas = el.querySelector('.tc-canvas');
   if (!canvas) return;
 
-  const names = Object.keys(Alpine.store('hop').tunnels).sort();
-  const color = name === 'direct' ? DIRECT_COLOR : PALETTE[names.indexOf(name) % PALETTE.length];
-
   charts[name] = new Chart(canvas, {
     type: 'line',
     data: {
       labels:   Array(WINDOW_SIZE).fill(''),
-      datasets: [{
-        data:            Array(WINDOW_SIZE).fill(null),
-        borderColor:     color,
-        backgroundColor: color + '18',
-        borderWidth:     1.5,
-        pointRadius:     0,
-        tension:         0.4,
-        fill:            true,
-      }],
+      datasets: [
+        {
+          // Download (↓) — positive, fills upward
+          data:            Array(WINDOW_SIZE).fill(null),
+          borderColor:     '#38bdf8',
+          backgroundColor: '#38bdf814',
+          borderWidth:     1.5,
+          pointRadius:     0,
+          tension:         0.3,
+          fill:            'origin',
+        },
+        {
+          // Upload (↑) — stored as negative, fills downward
+          data:            Array(WINDOW_SIZE).fill(null),
+          borderColor:     '#818cf8',
+          backgroundColor: '#818cf814',
+          borderWidth:     1.5,
+          pointRadius:     0,
+          tension:         0.3,
+          fill:            'origin',
+        },
+      ],
     },
     options: {
       animation:           false,
@@ -51,14 +59,13 @@ window.initChart = function(name, el) {
       scales: {
         x: { display: false },
         y: {
-          display:     true,
-          beginAtZero: true,
-          grid:        { color: 'rgba(26,37,53,0.8)' },
+          display: true,
+          grid:    { color: 'rgba(26,37,53,0.8)' },
           ticks: {
             color:         '#475569',
             maxTicksLimit: 3,
             font:          { size: 9, family: "'JetBrains Mono', monospace" },
-            callback:      v => fmtBytes(v) + '/s',
+            callback:      v => v === 0 ? '' : fmtBytes(Math.abs(v)) + '/s',
           },
         },
       },
@@ -70,13 +77,15 @@ window.initChart = function(name, el) {
   });
 };
 
-function pushChart(name, value) {
+function pushChart(name, bpsIn, bpsOut) {
   const c = charts[name];
   if (!c) return;
   c.data.labels.push('');
   c.data.labels.shift();
-  c.data.datasets[0].data.push(value);
+  c.data.datasets[0].data.push(bpsIn  ?? null);
   c.data.datasets[0].data.shift();
+  c.data.datasets[1].data.push(bpsOut != null ? -bpsOut : null);
+  c.data.datasets[1].data.shift();
   c.update('none');
 }
 
@@ -142,6 +151,7 @@ async function refreshStatus() {
         uptime_seconds:     t.uptime_seconds,
         reconnect_count:    t.reconnect_count,
         keepalive_failures: t.keepalive_failures || 0,
+        last_error:         t.last_error || '',
         bps_in:             prev.bps_in       ?? 0,
         bps_out:            prev.bps_out      ?? 0,
         active:             prev.active       ?? 0,
@@ -172,7 +182,7 @@ function connectSSE() {
         store.tunnels[name].active       = t.active;
         store.tunnels[name].reconnect_in = t.reconnect_in ?? null;
       }
-      pushChart(name, t.bps_in + t.bps_out);
+      pushChart(name, t.bps_in, t.bps_out);
     }
 
     store.direct = {
@@ -180,7 +190,7 @@ function connectSSE() {
       bps_out: d.direct?.bps_out ?? 0,
       active:  d.direct?.active  ?? 0,
     };
-    pushChart('direct', (d.direct?.bps_in ?? 0) + (d.direct?.bps_out ?? 0));
+    pushChart('direct', d.direct?.bps_in ?? 0, d.direct?.bps_out ?? 0);
   };
 
   es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };

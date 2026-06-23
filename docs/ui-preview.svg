@@ -1,196 +1,213 @@
-<svg width="1000" height="600" viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
+<svg width="1000" height="740" viewBox="0 0 1000 740" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="logo-grad" x1="0" y1="0" x2="1" y2="0">
+    <linearGradient id="lg" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#38bdf8"/>
       <stop offset="100%" stop-color="#818cf8"/>
     </linearGradient>
-    <!-- chart clip regions (inside each card, below the header row) -->
-    <clipPath id="c1"><rect x="52" y="120" width="896" height="72"/></clipPath>
-    <clipPath id="c2"><rect x="52" y="242" width="896" height="72"/></clipPath>
-    <clipPath id="c3"><rect x="52" y="364" width="896" height="72"/></clipPath>
+    <!-- chart clip regions -->
+    <clipPath id="c1"><rect x="52" y="196" width="896" height="66"/></clipPath>
+    <clipPath id="c2"><rect x="52" y="336" width="896" height="66"/></clipPath>
+    <clipPath id="c3"><rect x="52" y="476" width="896" height="66"/></clipPath>
+    <clipPath id="c4"><rect x="52" y="616" width="896" height="66"/></clipPath>
   </defs>
 
-  <!-- ── background ── -->
-  <rect width="1000" height="600" fill="#080c14"/>
+  <rect width="1000" height="740" fill="#080c14"/>
 
-  <!-- ══════════════════════════════════════════════════════════
-       HEADER
-  ══════════════════════════════════════════════════════════ -->
-  <line x1="0" y1="52" x2="1000" y2="52" stroke="#1a2535" stroke-width="1"/>
-
-  <!-- logo icon -->
-  <circle cx="32" cy="38" r="4.2" fill="#38bdf8" opacity=".9"/>
-  <circle cx="52" cy="38" r="4.2" fill="#818cf8" opacity=".9"/>
-  <path d="M36 38 Q42 26 48 38" stroke="url(#logo-grad)" stroke-width="2.1" stroke-linecap="round" fill="none"/>
-  <circle cx="42" cy="29" r="2.4" fill="#38bdf8" opacity=".85"/>
-
-  <!-- wordmark -->
-  <text x="62" y="34" font-family="system-ui,-apple-system,BlinkMacSystemFont,sans-serif"
+  <!-- ══ HEADER ══════════════════════════════════════════════════════ -->
+  <circle cx="44"  cy="26" r="4.2" fill="#38bdf8" opacity=".9"/>
+  <circle cx="64"  cy="26" r="4.2" fill="#818cf8" opacity=".9"/>
+  <path d="M48 26 Q56 14 60 26" stroke="url(#lg)" stroke-width="2.1" stroke-linecap="round" fill="none"/>
+  <circle cx="54" cy="17" r="2.4" fill="#38bdf8" opacity=".85"/>
+  <text x="76" y="32" font-family="'Space Grotesk',system-ui,sans-serif"
         font-size="17" font-weight="600" fill="#e2e8f0" letter-spacing="-0.5">hopscotch</text>
 
-  <!-- healthy badge -->
-  <rect x="178" y="18" width="66" height="19" rx="9.5"
-        fill="rgba(52,211,153,0.12)" stroke="rgba(52,211,153,0.25)" stroke-width="1"/>
-  <text x="211" y="31.5" font-family="'Courier New',Courier,monospace"
-        font-size="9.5" fill="#34d399" text-anchor="middle" font-weight="500" letter-spacing="0.8">HEALTHY</text>
+  <rect x="194" y="15" width="70" height="20" rx="10"
+        fill="rgba(251,191,36,.12)" stroke="rgba(251,191,36,.25)" stroke-width="1"/>
+  <text x="229" y="29" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="9.5" fill="#fbbf24" text-anchor="middle" letter-spacing=".8">DEGRADED</text>
 
-  <!-- meta -->
-  <text x="254" y="31" font-family="'Courier New',Courier,monospace"
-        font-size="11" fill="#475569">v0.1.0 · PID 82341 · up 5m 23s</text>
+  <text x="276" y="30" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">v0.4.0 · PID 12345 · up 8h 46m</text>
 
-  <!-- nav: Status (active) -->
-  <rect x="842" y="15" width="60" height="24" rx="6"
-        fill="rgba(255,255,255,0.08)" stroke="#1a2535" stroke-width="1"/>
-  <text x="872" y="31" font-family="system-ui,-apple-system,sans-serif"
+  <line x1="0" y1="52" x2="1000" y2="52" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ TAB BAR ═════════════════════════════════════════════════════ -->
+  <text x="167" y="76" font-family="'Space Grotesk',system-ui,sans-serif"
         font-size="13" font-weight="500" fill="#e2e8f0" text-anchor="middle">Status</text>
-  <!-- nav: Docs -->
-  <text x="940" y="31" font-family="system-ui,-apple-system,sans-serif"
+  <line x1="52"  y1="90" x2="281" y2="90" stroke="#38bdf8" stroke-width="2"/>
+  <text x="500" y="76" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="500" fill="#475569" text-anchor="middle">Logs</text>
+  <text x="833" y="76" font-family="'Space Grotesk',system-ui,sans-serif"
         font-size="13" font-weight="500" fill="#475569" text-anchor="middle">Docs</text>
+  <line x1="333" y1="57" x2="333" y2="88" stroke="#1a2535" stroke-width="1"/>
+  <line x1="666" y1="57" x2="666" y2="88" stroke="#1a2535" stroke-width="1"/>
+  <line x1="0"   y1="90" x2="1000" y2="90" stroke="#1a2535" stroke-width="1"/>
 
-  <!-- ══════════════════════════════════════════════════════════
-       SECTION LABEL
-  ══════════════════════════════════════════════════════════ -->
-  <text x="48" y="75" font-family="'Courier New',Courier,monospace"
+  <!-- ══ STATS BAR ════════════════════════════════════════════════════ -->
+  <text x="28"  y="111" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#38bdf8">↓ 3.2 KB/s</text>
+  <text x="118" y="111" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#334155">·</text>
+  <text x="130" y="111" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#818cf8">↑ 980 B/s</text>
+  <text x="216" y="111" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#334155">·</text>
+  <text x="228" y="111" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#475569">5 conn total</text>
+  <line x1="0" y1="122" x2="1000" y2="122" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- section label -->
+  <text x="48" y="138" font-family="'JetBrains Mono','Courier New',monospace"
         font-size="10" font-weight="600" fill="#475569" letter-spacing="2">TUNNELS</text>
 
-  <!-- ══════════════════════════════════════════════════════════
-       CARD 1 — go-a-preprod-jump  (connected, blue)
-  ══════════════════════════════════════════════════════════ -->
-  <rect x="48" y="82" width="904" height="112" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
-  <rect x="48" y="82" width="3"   height="112" rx="2" fill="#38bdf8"/>
+  <!-- ══ CARD 1 — go-a-preprod-jump  (connected) ═══════════════════ -->
+  <rect x="48" y="145" width="904" height="130" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="48" y="145" width="3"   height="130" rx="2" fill="#34d399"/>
 
-  <!-- header row -->
-  <text x="72" y="108" font-family="system-ui,-apple-system,sans-serif"
+  <text x="72"  y="171" font-family="'Space Grotesk',system-ui,sans-serif"
         font-size="13.5" font-weight="600" fill="#e2e8f0">go-a-preprod-jump</text>
-  <text x="224" y="108" font-family="'Courier New',Courier,monospace"
-        font-size="11" fill="#475569">10.215.11.2:22</text>
+  <text x="248" y="171" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">10.0.0.1:22</text>
 
-  <!-- pulsing green dot -->
-  <circle cx="326" cy="104" r="3.5" fill="#34d399"/>
-  <circle cx="326" cy="104" r="3.5" fill="#34d399" opacity="0.3">
+  <circle cx="338" cy="167" r="3.5" fill="#34d399"/>
+  <circle cx="338" cy="167" r="3.5" fill="#34d399" opacity=".3">
     <animate attributeName="r"       values="3.5;6.5;3.5" dur="2.4s" repeatCount="indefinite"/>
     <animate attributeName="opacity" values="0.3;0;0.3"   dur="2.4s" repeatCount="indefinite"/>
   </circle>
-  <text x="335" y="108" font-family="'Courier New',Courier,monospace"
+  <text x="348" y="171" font-family="'JetBrains Mono','Courier New',monospace"
         font-size="11" fill="#34d399" font-weight="500">connected</text>
+  <text x="444" y="171" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">:1082</text>
+  <text x="492" y="171" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">8h 46m</text>
 
-  <text x="420" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">:1082</text>
-  <text x="468" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">5m 23s</text>
+  <text x="682" y="171" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">↓ 2.1 KB/s</text>
+  <text x="782" y="171" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">↑ 640 B/s</text>
+  <text x="882" y="171" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">3 conn</text>
 
-  <!-- bps — right side -->
-  <text x="700" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#38bdf8">↓ 4.8 KB/s</text>
-  <text x="800" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#818cf8">↑ 1.2 KB/s</text>
-  <text x="900" y="108" font-family="'Courier New',Courier,monospace" font-size="10" fill="#475569">2 conn</text>
+  <text x="72" y="190" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10.5" fill="#475569" opacity=".45">—</text>
 
-  <!-- sparkline chart 1 (blue) -->
   <g clip-path="url(#c1)">
-    <line x1="52" y1="153" x2="948" y2="153" stroke="#1a2535" stroke-width="0.5"/>
-    <path d="M52,192 C90,192 110,190 140,186 S185,179 215,173
-             S265,163 295,168 S345,173 375,162 S425,148 455,140
-             S505,133 535,127 S575,133 605,140 S655,136 685,128
-             S725,122 755,129 S795,135 825,127 S865,120 895,128
-             S925,133 948,130 L948,192 Z"
-          fill="rgba(56,189,248,0.09)"/>
-    <path d="M52,192 C90,192 110,190 140,186 S185,179 215,173
-             S265,163 295,168 S345,173 375,162 S425,148 455,140
-             S505,133 535,127 S575,133 605,140 S655,136 685,128
-             S725,122 755,129 S795,135 825,127 S865,120 895,128
-             S925,133 948,130"
+    <line x1="56" y1="229" x2="944" y2="229" stroke="#1a2535" stroke-width=".7"/>
+    <path d="M56,229 C90,225 128,220 168,214 S240,209 282,213 S336,219 378,212
+             S432,206 474,210 S528,215 570,209 S622,203 664,207
+             S716,213 758,206 S812,200 854,205 S908,210 944,207 L944,229 Z"
+          fill="rgba(56,189,248,.15)"/>
+    <path d="M56,229 C90,225 128,220 168,214 S240,209 282,213 S336,219 378,212
+             S432,206 474,210 S528,215 570,209 S622,203 664,207
+             S716,213 758,206 S812,200 854,205 S908,210 944,207"
           fill="none" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="56" y="152" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">5 KB/s</text>
-    <text x="56" y="171" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">2 KB/s</text>
-    <text x="56" y="191" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">0 B/s</text>
+    <path d="M56,229 L944,229
+             C908,232 866,237 824,241 S762,246 720,242 S668,237 626,242
+             S574,247 532,243 S480,238 438,243 S386,248 344,244
+             S292,239 250,244 S194,249 152,245 S100,240 56,244 Z"
+          fill="rgba(129,140,248,.12)"/>
+    <path d="M56,244 C100,240 152,245 194,249 S250,244 292,239 S344,244 386,248
+             S438,243 480,238 S532,243 574,247 S626,242 668,237
+             S720,242 762,246 S824,241 866,237 S908,232 944,229"
+          fill="none" stroke="#818cf8" stroke-width="1.5"/>
+    <text x="58" y="202" font-family="'JetBrains Mono','Courier New',monospace" font-size="8" fill="#475569">3 KB/s</text>
+    <text x="58" y="258" font-family="'JetBrains Mono','Courier New',monospace" font-size="8" fill="#475569">1 KB/s</text>
   </g>
 
-  <!-- ══════════════════════════════════════════════════════════
-       CARD 2 — go-b-preprod-jump  (connecting, purple — shows countdown)
-  ══════════════════════════════════════════════════════════ -->
-  <rect x="48" y="204" width="904" height="112" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
-  <rect x="48" y="204" width="3"   height="112" rx="2" fill="#fbbf24"/>
+  <!-- ══ CARD 2 — go-d-staging-jump  (connecting, error) ═══════════ -->
+  <rect x="48" y="285" width="904" height="130" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="48" y="285" width="3"   height="130" rx="2" fill="#fbbf24"/>
 
-  <text x="72" y="230" font-family="system-ui,-apple-system,sans-serif"
-        font-size="13.5" font-weight="600" fill="#e2e8f0">go-b-preprod-jump</text>
-  <text x="224" y="230" font-family="'Courier New',Courier,monospace"
-        font-size="11" fill="#475569">10.215.27.2:22</text>
+  <text x="72"  y="311" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13.5" font-weight="600" fill="#e2e8f0">go-d-staging-jump</text>
+  <text x="252" y="311" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">10.0.3.1:22</text>
 
-  <!-- blinking amber dot -->
-  <circle cx="326" cy="226" r="3.5" fill="#fbbf24">
+  <circle cx="342" cy="307" r="3.5" fill="#fbbf24">
     <animate attributeName="opacity" values="1;0.25;1" dur="1s" repeatCount="indefinite"/>
   </circle>
-  <text x="335" y="230" font-family="'Courier New',Courier,monospace"
+  <text x="352" y="311" font-family="'JetBrains Mono','Courier New',monospace"
         font-size="11" fill="#fbbf24" font-weight="500">connecting</text>
+  <text x="448" y="311" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">:1085</text>
+  <text x="496" y="311" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#fbbf24">next in 12s</text>
+  <text x="604" y="311" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">recon 1</text>
 
-  <text x="420" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">:1083</text>
-  <!-- reconnect countdown -->
-  <text x="468" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#fbbf24">next in 14s</text>
-  <!-- recon count -->
-  <text x="572" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">recon 2</text>
+  <text x="782" y="311" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">↓ 0 B/s</text>
+  <text x="872" y="311" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">↑ 0 B/s</text>
+  <text x="882" y="311" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">0 conn</text>
 
-  <text x="700" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#38bdf8">↓ 0 B/s</text>
-  <text x="800" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#818cf8">↑ 0 B/s</text>
-  <text x="900" y="230" font-family="'Courier New',Courier,monospace" font-size="10" fill="#475569">0 conn</text>
+  <text x="72" y="330" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10.5" fill="#f87171">TCP dial 10.0.3.1:22: i/o timeout</text>
 
-  <!-- sparkline chart 2 (purple, mostly flat — was active, now dropped) -->
   <g clip-path="url(#c2)">
-    <line x1="52" y1="275" x2="948" y2="275" stroke="#1a2535" stroke-width="0.5"/>
-    <path d="M52,314 C90,314 120,313 150,311 S195,307 225,302
-             S265,296 295,291 S345,286 375,280 S425,274 455,268
-             S490,263 510,267 S540,275 570,282 S610,289 640,295
-             S680,306 720,310 S770,314 820,314 S880,314 948,314 L948,314 Z"
-          fill="rgba(129,140,248,0.09)"/>
-    <path d="M52,314 C90,314 120,313 150,311 S195,307 225,302
-             S265,296 295,291 S345,286 375,280 S425,274 455,268
-             S490,263 510,267 S540,275 570,282 S610,289 640,295
-             S680,306 720,310 S770,314 820,314 S880,314 948,314"
-          fill="none" stroke="#818cf8" stroke-width="1.5" opacity="0.6"/>
-    <text x="56" y="274" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">2 KB/s</text>
-    <text x="56" y="293" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">1 KB/s</text>
-    <text x="56" y="313" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">0 B/s</text>
+    <line x1="56" y1="369" x2="944" y2="369" stroke="#1a2535" stroke-width=".7"/>
+    <path d="M56,369 C200,368 400,370 600,368 S800,369 944,369"
+          fill="none" stroke="#38bdf8" stroke-width="1" opacity=".2"/>
   </g>
 
-  <!-- ══════════════════════════════════════════════════════════
-       CARD 3 — direct  (gray)
-  ══════════════════════════════════════════════════════════ -->
-  <rect x="48" y="326" width="904" height="112" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
-  <rect x="48" y="326" width="3"   height="112" rx="2" fill="#475569"/>
+  <!-- ══ CARD 3 — go-e-prod-jump  (disconnected, error) ════════════ -->
+  <rect x="48" y="425" width="904" height="130" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="48" y="425" width="3"   height="130" rx="2" fill="#f87171"/>
 
-  <text x="72" y="352" font-family="system-ui,-apple-system,sans-serif"
+  <text x="72"  y="451" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13.5" font-weight="600" fill="#e2e8f0">go-e-prod-jump</text>
+  <text x="234" y="451" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">10.0.4.1:22</text>
+
+  <circle cx="324" cy="447" r="3.5" fill="#f87171"/>
+  <text x="334" y="451" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#f87171" font-weight="500">connecting</text>
+  <text x="430" y="451" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">:1086</text>
+  <text x="568" y="451" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">recon 1</text>
+
+  <text x="782" y="451" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">↓ 0 B/s</text>
+  <text x="872" y="451" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">↑ 0 B/s</text>
+  <text x="882" y="451" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">0 conn</text>
+
+  <text x="72" y="470" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10.5" fill="#f87171">SSH handshake: ssh: unable to authenticate, attempted methods [none publickey]</text>
+
+  <g clip-path="url(#c3)">
+    <line x1="56" y1="509" x2="944" y2="509" stroke="#1a2535" stroke-width=".7"/>
+    <path d="M56,509 C200,508 400,510 600,508 S800,509 944,509"
+          fill="none" stroke="#38bdf8" stroke-width="1" opacity=".2"/>
+  </g>
+
+  <!-- ══ CARD 4 — direct  (gray) ═══════════════════════════════════ -->
+  <rect x="48" y="565" width="904" height="130" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="48" y="565" width="3"   height="130" rx="2" fill="#475569"/>
+
+  <text x="72" y="591" font-family="'Space Grotesk',system-ui,sans-serif"
         font-size="13.5" font-weight="600" fill="#e2e8f0">direct</text>
 
-  <text x="700" y="352" font-family="'Courier New',Courier,monospace" font-size="11" fill="#38bdf8">↓ 12.4 KB/s</text>
-  <text x="800" y="352" font-family="'Courier New',Courier,monospace" font-size="11" fill="#818cf8">↑ 8.1 KB/s</text>
-  <text x="900" y="352" font-family="'Courier New',Courier,monospace" font-size="10" fill="#475569">5 conn</text>
+  <text x="682" y="591" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">↓ 1.1 KB/s</text>
+  <text x="782" y="591" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">↑ 340 B/s</text>
+  <text x="882" y="591" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">2 conn</text>
 
-  <!-- sparkline chart 3 (gray, heavier direct traffic) -->
-  <g clip-path="url(#c3)">
-    <line x1="52" y1="400" x2="948" y2="400" stroke="#1a2535" stroke-width="0.5"/>
-    <path d="M52,436 C80,434 100,426 130,414 S170,400 200,390
-             S240,380 270,387 S310,396 340,388 S380,378 410,368
-             S450,358 480,352 S510,358 540,365 S570,358 600,350
-             S640,344 670,350 S710,357 740,351 S780,345 810,351
-             S850,358 880,353 S925,350 948,348 L948,436 Z"
-          fill="rgba(100,116,139,0.12)"/>
-    <path d="M52,436 C80,434 100,426 130,414 S170,400 200,390
-             S240,380 270,387 S310,396 340,388 S380,378 410,368
-             S450,358 480,352 S510,358 540,365 S570,358 600,350
-             S640,344 670,350 S710,357 740,351 S780,345 810,351
-             S850,358 880,353 S925,350 948,348"
-          fill="none" stroke="#64748b" stroke-width="1.5"/>
-    <text x="56" y="399" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">15 KB/s</text>
-    <text x="56" y="418" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">8 KB/s</text>
-    <text x="56" y="435" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">0 B/s</text>
+  <text x="72" y="610" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10.5" fill="#475569" opacity=".45">—</text>
+
+  <g clip-path="url(#c4)">
+    <line x1="56" y1="649" x2="944" y2="649" stroke="#1a2535" stroke-width=".7"/>
+    <path d="M56,649 C88,644 122,639 160,633 S224,628 266,632 S318,637 360,631
+             S412,625 454,629 S506,634 548,628 S600,623 642,627
+             S694,632 736,626 S790,620 832,625 S886,630 944,627 L944,649 Z"
+          fill="rgba(56,189,248,.13)"/>
+    <path d="M56,649 C88,644 122,639 160,633 S224,628 266,632 S318,637 360,631
+             S412,625 454,629 S506,634 548,628 S600,623 642,627
+             S694,632 736,626 S790,620 832,625 S886,630 944,627"
+          fill="none" stroke="#38bdf8" stroke-width="1.5"/>
+    <path d="M56,649 L944,649
+             C886,652 832,657 790,661 S736,666 694,662 S642,657 600,661
+             S548,666 506,662 S454,657 412,661 S360,666 318,662
+             S266,657 224,662 S160,667 120,663 S80,658 56,662 Z"
+          fill="rgba(129,140,248,.1)"/>
+    <path d="M56,662 C80,658 120,663 160,667 S224,662 266,657 S318,662 360,666
+             S412,661 454,657 S506,662 548,666 S600,661 642,657
+             S694,662 736,666 S790,661 832,657 S886,652 944,649"
+          fill="none" stroke="#818cf8" stroke-width="1.5"/>
+    <text x="58" y="626" font-family="'JetBrains Mono','Courier New',monospace" font-size="8" fill="#475569">2 KB/s</text>
+    <text x="58" y="678" font-family="'JetBrains Mono','Courier New',monospace" font-size="8" fill="#475569">500 B/s</text>
   </g>
 
-  <!-- ══════════════════════════════════════════════════════════
-       FOOTER
-  ══════════════════════════════════════════════════════════ -->
-  <line x1="0" y1="558" x2="1000" y2="558" stroke="#1a2535" stroke-width="1"/>
-  <text x="28" y="582" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">
-    <tspan opacity="0.5">SOCKS5</tspan> :8888
+  <!-- ══ FOOTER ══════════════════════════════════════════════════════ -->
+  <line x1="0" y1="706" x2="1000" y2="706" stroke="#1a2535" stroke-width="1"/>
+  <text x="28" y="726" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">
+    <tspan opacity=".55">SOCKS5</tspan> :8080
   </text>
-  <text x="124" y="582" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">
-    <tspan opacity="0.5">ADMIN</tspan> :8889
+  <text x="128" y="726" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">
+    <tspan opacity=".55">ADMIN</tspan> :9090
   </text>
-  <text x="972" y="582" font-family="'Courier New',Courier,monospace"
-        font-size="11" fill="#475569" text-anchor="end">10:01:26</text>
+  <text x="972" y="726" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569" text-anchor="end">09:32:17</text>
 </svg>

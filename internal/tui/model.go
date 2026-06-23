@@ -81,7 +81,7 @@ const (
 	numTabs   = 2
 )
 
-const headerHeight = 5 // blank · title+tabs · stats · label · separator
+const headerHeight = 6 // blank · title+tabs · stats · blank · label · separator
 
 func (m Model) headerHeight() int { return headerHeight }
 
@@ -568,6 +568,7 @@ func (m Model) renderHeader() string {
 	var b strings.Builder
 	b.WriteString(m.renderTitleLine())
 	b.WriteString(m.renderStatsLine())
+	b.WriteString("\n")
 
 	if m.activeTab == tabStatus {
 		hdr := func(s lipgloss.Style, label string) string {
@@ -591,7 +592,7 @@ func (m Model) renderHeader() string {
 			reasonHdr,
 		)
 	} else {
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "  %s\n", styleMuted.Render("LOGS"))
 	}
 	fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 
@@ -719,8 +720,9 @@ func (m Model) buildStatusContent() string {
 		dBpsOut = dw.bpsOut
 		dActive = dw.active
 	}
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
+	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s\n",
 		styleColName.Foreground(colorMuted).Render("direct"),
+		styleColHost.Render(""),
 		styleColPort.Render(""),
 		styleColStatus.Render(""),
 		styleColUptime.Render(""),

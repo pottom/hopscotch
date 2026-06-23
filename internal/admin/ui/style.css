@@ -25,7 +25,8 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* ── HEADER ───────────────────────────────── */
@@ -111,7 +112,7 @@ body {
 }
 
 /* ── TAB PANELS ──────────────────────────── */
-.tab-panel { display: none; flex: 1; flex-direction: column; }
+.tab-panel { display: none; flex: 1; flex-direction: column; min-height: 0; }
 .tab-panel.active { display: flex; }
 
 /* ── LOG PANEL ───────────────────────────── */
@@ -409,6 +410,18 @@ main, main.main {
 .tc-bps-in  { color: var(--accent); }
 .tc-bps-out { color: var(--accent2); }
 .tc-active  { color: var(--muted); font-size: 0.68rem; }
+
+/* error reason line */
+.tc-reason {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  padding: 0 1.25rem 0.4rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tc-reason.no-error  { color: var(--muted); opacity: .45; }
+.tc-reason.has-error { color: var(--disconnected); }
 
 /* chart area */
 .tc-chart-wrap {
