@@ -245,6 +245,47 @@ main, main.main {
   padding: 1rem 0;
 }
 
+/* ── TRAFFIC CHART ──────────────────────── */
+.traffic-section {
+  margin-top: 2rem;
+  padding: 0 3rem;
+}
+
+.chart-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 1rem 1.25rem 0.75rem;
+  position: relative;
+  height: 200px;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+@media (max-width: 580px) {
+  .traffic-section { padding-left: 1.25rem; padding-right: 1.25rem; }
+}
+
 /* ── FOOTER ─────────────────────────────── */
 .footer {
   display: flex;
