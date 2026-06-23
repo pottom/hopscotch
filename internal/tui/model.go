@@ -18,18 +18,6 @@ import (
 	"hopscotch/internal/admin"
 )
 
-// ── Palette (mirrors app.js) ──────────────────────────────────────────────────
-
-var palette = []lipgloss.Color{
-	"#38bdf8",
-	"#818cf8",
-	"#34d399",
-	"#f59e0b",
-	"#f87171",
-}
-
-const directColor = lipgloss.Color("#64748b")
-
 var (
 	colorBpsIn  = lipgloss.Color("#38bdf8")
 	colorBpsOut = lipgloss.Color("#818cf8")
@@ -48,7 +36,6 @@ var (
 
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(colorBright)
 	styleMuted  = lipgloss.NewStyle().Foreground(colorMuted)
-	styleAccent = lipgloss.NewStyle().Foreground(colorAccent)
 	styleText   = lipgloss.NewStyle().Foreground(colorText)
 
 	styleConnected    = lipgloss.NewStyle().Foreground(colorConnected)
@@ -82,8 +69,6 @@ const (
 )
 
 const headerHeight = 6 // blank · title+tabs · stats · blank · label · separator
-
-func (m Model) headerHeight() int { return headerHeight }
 
 const footerHeight = 2 // separator newline + hints+ports line
 
