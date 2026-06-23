@@ -13,7 +13,8 @@ set -euo pipefail
 # ── Configuration ─────────────────────────────────────────────────────────────
 BINARY_NAME="hopscotch"
 REGISTRY="ghcr.io"
-IMAGE_REPO="${REGISTRY}/${GITHUB_USER:-myuser}/${BINARY_NAME}"
+GITHUB_USER="${GITHUB_USER:-pottom}"
+IMAGE_REPO="${REGISTRY}/${GITHUB_USER}/${BINARY_NAME}"
 DIST_DIR="dist"
 
 # ── Version ───────────────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ cmd_publish() {
     echo "▶ Building and pushing multiarch container image (${VERSION})..."
 
     echo "${GITHUB_TOKEN:?GITHUB_TOKEN is required}" | \
-        docker login "${REGISTRY}" -u "${GITHUB_USER:?GITHUB_USER is required}" --password-stdin
+        docker login "${REGISTRY}" -u "${GITHUB_USER}" --password-stdin
 
     docker buildx inspect hopscotch-builder &>/dev/null || \
         docker buildx create --name hopscotch-builder --use
@@ -160,7 +161,7 @@ case "${1:-help}" in
         echo "  clean        Remove dist/ directory"
         echo ""
         echo "Environment variables for publish:"
-        echo "  GITHUB_USER    GitHub username (registry prefix)"
-        echo "  GITHUB_TOKEN   GitHub Personal Access Token (write:packages)"
+        echo "  GITHUB_USER    GitHub username (default: baistvan)"
+        echo "  GITHUB_TOKEN   GitHub Personal Access Token (write:packages scope)"
         ;;
 esac

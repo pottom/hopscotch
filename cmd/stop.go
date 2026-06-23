@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 
-	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
 	"hopscotch/internal/state"
@@ -22,7 +22,12 @@ var stopCmd = &cobra.Command{
 
 		pid, err := stateMgr.ReadPID()
 		if err != nil {
-			return fmt.Errorf("hopscotch does not appear to be running: %w", err)
+			return fmt.Errorf("hopscotch is not running")
+		}
+
+		if !isRunning(pid) {
+			stateMgr.Remove()
+			return fmt.Errorf("hopscotch is not running (stale PID %d removed)", pid)
 		}
 
 		proc, err := os.FindProcess(pid)
@@ -34,9 +39,16 @@ var stopCmd = &cobra.Command{
 			return fmt.Errorf("sending SIGTERM to %d: %w", pid, err)
 		}
 
-		log.Info("sent SIGTERM", "pid", pid)
-		fmt.Printf("hopscotch (PID %d) is stopping.\n", pid)
-		return nil
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if !isRunning(pid) {
+				fmt.Printf("hopscotch stopped (PID %d)\n", pid)
+				return nil
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+
+		return fmt.Errorf("process %d did not stop within 5 seconds; try kill -9 %d", pid, pid)
 	},
 }
 
