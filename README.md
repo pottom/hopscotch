@@ -72,9 +72,10 @@ tunnels:
     local_port: 1080
     # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent)
     dial_timeout: 15                 # seconds; TCP connect + SSH handshake
-    keepalive_interval: 30           # seconds between keepalive probes
-    keepalive_max_fails: 3           # consecutive failures → reconnect
-    reconnect_delay: 5               # initial backoff (doubles each attempt, max 2m)
+    keepalive_interval: 5            # seconds between keepalive probes
+    keepalive_max_fails: 2           # consecutive failures → reconnect
+    reconnect_delay: 5               # initial backoff seconds (doubles each attempt)
+    reconnect_max_delay: 30          # backoff cap seconds
 
   - name: staging-jump
     host: 10.0.1.1
