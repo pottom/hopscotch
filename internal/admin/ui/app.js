@@ -1,198 +1,187 @@
-// ── Utilities ────────────────────────────────────────────────────────────────
+// ── Helpers (global so Alpine templates can call them) ───────────────────────
 
-function fmt(sec) {
+window.fmtBytes = function(n) {
+  if (!n) return '0 B';
+  if (n < 1024)    return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+};
+
+window.fmtUptime = function(sec) {
+  if (!sec) return '—';
   sec = Math.floor(sec);
   if (sec < 60)   return sec + 's';
   if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
   return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
-}
+};
 
-function fmtBytes(bps) {
-  if (bps < 1024)        return bps + ' B/s';
-  if (bps < 1024 * 1024) return (bps / 1024).toFixed(1) + ' KB/s';
-  return (bps / (1024 * 1024)).toFixed(2) + ' MB/s';
-}
+// ── Chart management ─────────────────────────────────────────────────────────
 
-// ── Status polling ───────────────────────────────────────────────────────────
-
-async function refresh() {
-  try {
-    const st = await fetch('/status').then(r => r.json());
-
-    document.title = `hopscotch v${st.version}`;
-
-    const badge = document.getElementById('overall-badge');
-    badge.textContent = st.status;
-    badge.className = 'badge ' + st.status;
-
-    document.getElementById('header-meta').textContent =
-      `v${st.version} · PID ${st.pid} · up ${st.uptime}`;
-
-    const names = Object.keys(st.tunnels).sort();
-    const grid = document.getElementById('grid');
-
-    grid.innerHTML = names.length === 0
-      ? '<div class="empty">no tunnels configured</div>'
-      : names.map(name => {
-          const t = st.tunnels[name];
-          const up = t.status === 'connected' ? fmt(t.uptime_seconds) : '—';
-          return `<div class="card ${t.status}">
-            <div class="card-name" title="${name}">${name}</div>
-            <div class="card-host">${t.host}</div>
-            <div class="card-status">
-              <span class="dot ${t.status}"></span>
-              <span class="status-label ${t.status}">${t.status}</span>
-            </div>
-            <div class="card-stats">
-              <div class="stat"><div class="stat-label">Socks5</div><div class="stat-value">:${t.local_port}</div></div>
-              <div class="stat"><div class="stat-label">Uptime</div><div class="stat-value">${up}</div></div>
-              <div class="stat"><div class="stat-label">Recon</div><div class="stat-value">${t.reconnect_count}</div></div>
-            </div>
-          </div>`;
-        }).join('');
-
-    document.getElementById('footer-ports').innerHTML =
-      `<div class="port-item"><span>PROXY</span>:${st.proxy_port}</div>` +
-      `<div class="port-item"><span>ADMIN</span>:${st.admin_port}</div>`;
-
-  } catch {
-    document.getElementById('overall-badge').className = 'badge offline';
-    document.getElementById('overall-badge').textContent = 'offline';
-    document.getElementById('grid').innerHTML =
-      '<div class="empty">could not reach /status</div>';
-  }
-
-  document.getElementById('footer-ts').textContent =
-    'updated ' + new Date().toLocaleTimeString();
-}
-
-refresh();
-setInterval(refresh, 5000);
-
-// ── Traffic chart (SSE) ──────────────────────────────────────────────────────
-
-const WINDOW   = 60;  // seconds of history to display
-const PALETTE  = ['#38bdf8', '#818cf8', '#34d399', '#f59e0b', '#f87171'];
+const PALETTE = ['#38bdf8', '#818cf8', '#34d399', '#f59e0b', '#f87171'];
 const DIRECT_COLOR = '#64748b';
+const WINDOW_SIZE = 60;
+const charts = {};
 
-const chartCtx = document.getElementById('traffic-chart').getContext('2d');
-const chart = new Chart(chartCtx, {
-  type: 'line',
-  data: { labels: [], datasets: [] },
-  options: {
-    animation: false,
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: 'index', intersect: false },
-    scales: {
-      x: {
-        grid:  { color: 'rgba(26,37,53,0.9)' },
-        ticks: { color: '#475569', maxTicksLimit: 8, font: { family: "'JetBrains Mono', monospace", size: 10 } },
-      },
-      y: {
-        beginAtZero: true,
-        grid:  { color: 'rgba(26,37,53,0.9)' },
-        ticks: {
-          color: '#475569',
-          font: { family: "'JetBrains Mono', monospace", size: 10 },
-          callback: v => fmtBytes(v),
+window.initChart = function(name, el) {
+  if (charts[name]) return;
+  const canvas = el.querySelector('.tc-canvas');
+  if (!canvas) return;
+
+  const names = Object.keys(Alpine.store('hop').tunnels).sort();
+  const color = name === 'direct' ? DIRECT_COLOR : PALETTE[names.indexOf(name) % PALETTE.length];
+
+  charts[name] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels:   Array(WINDOW_SIZE).fill(''),
+      datasets: [{
+        data:            Array(WINDOW_SIZE).fill(null),
+        borderColor:     color,
+        backgroundColor: color + '18',
+        borderWidth:     1.5,
+        pointRadius:     0,
+        tension:         0.4,
+        fill:            true,
+      }],
+    },
+    options: {
+      animation:           false,
+      responsive:          true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: false },
+        y: {
+          display:     true,
+          beginAtZero: true,
+          grid:        { color: 'rgba(26,37,53,0.8)' },
+          ticks: {
+            color:         '#475569',
+            maxTicksLimit: 3,
+            font:          { size: 9, family: "'JetBrains Mono', monospace" },
+            callback:      v => fmtBytes(v) + '/s',
+          },
         },
       },
-    },
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: '#0f1623',
-        borderColor: '#1a2535',
-        borderWidth: 1,
-        titleColor: '#94a3b8',
-        bodyColor: '#cbd5e1',
-        callbacks: {
-          label: ctx => ` ${ctx.dataset.label}: ${fmtBytes(ctx.parsed.y)}`,
-        },
+      plugins: {
+        legend:  { display: false },
+        tooltip: { enabled: false },
       },
     },
-  },
+  });
+};
+
+function pushChart(name, value) {
+  const c = charts[name];
+  if (!c) return;
+  c.data.labels.push('');
+  c.data.labels.shift();
+  c.data.datasets[0].data.push(value);
+  c.data.datasets[0].data.shift();
+  c.update('none');
+}
+
+// ── Alpine store ─────────────────────────────────────────────────────────────
+
+document.addEventListener('alpine:init', () => {
+  Alpine.store('hop', {
+    tunnels: {},
+    direct:  { bps_in: 0, bps_out: 0, active: 0 },
+    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, admin_port: 0, status: '…' },
+
+    tunnelList() {
+      return Object.keys(this.tunnels).sort();
+    },
+  });
 });
 
-// dataset index by source name
-const dsIndex = {};
+// ── Status polling ────────────────────────────────────────────────────────────
 
-function ensureDataset(name, color) {
-  if (dsIndex[name] !== undefined) return;
-  const idx = chart.data.datasets.length;
-  dsIndex[name] = idx;
-  chart.data.datasets.push({
-    label: name,
-    data: Array(chart.data.labels.length).fill(0),
-    borderColor: color,
-    backgroundColor: color + '1a',  // 10% opacity fill
-    borderWidth: 1.5,
-    pointRadius: 0,
-    tension: 0.3,
-    fill: true,
-  });
+async function refreshStatus() {
+  try {
+    const st = await fetch('/status').then(r => r.json());
+    const store = Alpine.store('hop');
 
-  // update legend
-  const legend = document.getElementById('chart-legend');
-  const item = document.createElement('div');
-  item.className = 'legend-item';
-  item.innerHTML = `<span class="legend-dot" style="background:${color}"></span>${name}`;
-  legend.appendChild(item);
+    store.meta = {
+      version:    st.version,
+      pid:        st.pid,
+      uptime:     st.uptime,
+      proxy_port: st.proxy_port,
+      admin_port: st.admin_port,
+      status:     st.status,
+    };
+
+    // Rebuild tunnel map, preserving live bps/active values from SSE.
+    const next = {};
+    for (const [name, t] of Object.entries(st.tunnels || {})) {
+      const prev = store.tunnels[name] || {};
+      next[name] = {
+        status:          t.status,
+        host:            t.host,
+        local_port:      t.local_port,
+        uptime_seconds:  t.uptime_seconds,
+        reconnect_count: t.reconnect_count,
+        bps_in:          prev.bps_in       ?? 0,
+        bps_out:         prev.bps_out      ?? 0,
+        active:          prev.active       ?? 0,
+        reconnect_in:    prev.reconnect_in ?? null,
+      };
+    }
+    store.tunnels = next;
+
+    document.title = `hopscotch v${st.version}`;
+  } catch {
+    Alpine.store('hop').meta.status = 'offline';
+  }
 }
 
-function pushTick(label, sources) {
-  // add time label, drop oldest if window full
-  chart.data.labels.push(label);
-  if (chart.data.labels.length > WINDOW) chart.data.labels.shift();
-
-  // push new value (or 0 for sources not in this tick) for every dataset
-  chart.data.datasets.forEach(ds => {
-    const name = ds.label;
-    const val = sources[name] !== undefined ? sources[name] : 0;
-    ds.data.push(val);
-    if (ds.data.length > WINDOW) ds.data.shift();
-  });
-
-  chart.update('none');
-}
+// ── SSE traffic stream ────────────────────────────────────────────────────────
 
 function connectSSE() {
   const es = new EventSource('/traffic/stream');
-  let colorIdx = 0;
 
   es.onmessage = e => {
     const d = JSON.parse(e.data);
-    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const sources = {};
+    const store = Alpine.store('hop');
 
-    // tunnels
     for (const [name, t] of Object.entries(d.tunnels || {})) {
-      const color = PALETTE[colorIdx % PALETTE.length];
-      ensureDataset(name, color);
-      colorIdx = dsIndex[name] < PALETTE.length ? colorIdx : colorIdx + 1;
-      sources[name] = t.bps_in + t.bps_out;
+      if (store.tunnels[name]) {
+        store.tunnels[name].bps_in       = t.bps_in;
+        store.tunnels[name].bps_out      = t.bps_out;
+        store.tunnels[name].active       = t.active;
+        store.tunnels[name].reconnect_in = t.reconnect_in ?? null;
+      }
+      pushChart(name, t.bps_in + t.bps_out);
     }
 
-    // direct
-    ensureDataset('direct', DIRECT_COLOR);
-    sources['direct'] = (d.direct?.bps_in || 0) + (d.direct?.bps_out || 0);
-
-    pushTick(ts, sources);
+    store.direct = {
+      bps_in:  d.direct?.bps_in  ?? 0,
+      bps_out: d.direct?.bps_out ?? 0,
+      active:  d.direct?.active  ?? 0,
+    };
+    pushChart('direct', (d.direct?.bps_in ?? 0) + (d.direct?.bps_out ?? 0));
   };
 
-  es.onerror = () => {
-    // SSE auto-reconnects; reset colorIdx so colors stay stable on reconnect
-    setTimeout(connectSSE, 3000);
-    es.close();
-  };
+  es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
 }
 
-connectSSE();
+// Start polling/SSE only after Alpine has fully initialized the store.
+document.addEventListener('alpine:initialized', () => {
+  refreshStatus();
+  setInterval(refreshStatus, 5000);
+  connectSSE();
 
-// ── Logo animation ───────────────────────────────────────────────────────────
+  // Footer clock
+  const tsEl = document.getElementById('footer-ts');
+  if (tsEl) {
+    const tick = () => { tsEl.textContent = new Date().toLocaleTimeString(); };
+    tick();
+    setInterval(tick, 1000);
+  }
+});
 
-(function () {
+// ── Logo animation ────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
   const dot = document.getElementById('hop-dot');
   if (!dot) return;
   let t = 0, dir = 1;
@@ -205,4 +194,4 @@ connectSSE();
     dot.setAttribute('cx', x.toFixed(2));
     dot.setAttribute('cy', y.toFixed(2));
   }, 30);
-})();
+});

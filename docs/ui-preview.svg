@@ -1,0 +1,196 @@
+<svg width="1000" height="600" viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logo-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+    <!-- chart clip regions (inside each card, below the header row) -->
+    <clipPath id="c1"><rect x="52" y="120" width="896" height="72"/></clipPath>
+    <clipPath id="c2"><rect x="52" y="242" width="896" height="72"/></clipPath>
+    <clipPath id="c3"><rect x="52" y="364" width="896" height="72"/></clipPath>
+  </defs>
+
+  <!-- ── background ── -->
+  <rect width="1000" height="600" fill="#080c14"/>
+
+  <!-- ══════════════════════════════════════════════════════════
+       HEADER
+  ══════════════════════════════════════════════════════════ -->
+  <line x1="0" y1="52" x2="1000" y2="52" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- logo icon -->
+  <circle cx="32" cy="38" r="4.2" fill="#38bdf8" opacity=".9"/>
+  <circle cx="52" cy="38" r="4.2" fill="#818cf8" opacity=".9"/>
+  <path d="M36 38 Q42 26 48 38" stroke="url(#logo-grad)" stroke-width="2.1" stroke-linecap="round" fill="none"/>
+  <circle cx="42" cy="29" r="2.4" fill="#38bdf8" opacity=".85"/>
+
+  <!-- wordmark -->
+  <text x="62" y="34" font-family="system-ui,-apple-system,BlinkMacSystemFont,sans-serif"
+        font-size="17" font-weight="600" fill="#e2e8f0" letter-spacing="-0.5">hopscotch</text>
+
+  <!-- healthy badge -->
+  <rect x="178" y="18" width="66" height="19" rx="9.5"
+        fill="rgba(52,211,153,0.12)" stroke="rgba(52,211,153,0.25)" stroke-width="1"/>
+  <text x="211" y="31.5" font-family="'Courier New',Courier,monospace"
+        font-size="9.5" fill="#34d399" text-anchor="middle" font-weight="500" letter-spacing="0.8">HEALTHY</text>
+
+  <!-- meta -->
+  <text x="254" y="31" font-family="'Courier New',Courier,monospace"
+        font-size="11" fill="#475569">v0.1.0 · PID 82341 · up 5m 23s</text>
+
+  <!-- nav: Status (active) -->
+  <rect x="842" y="15" width="60" height="24" rx="6"
+        fill="rgba(255,255,255,0.08)" stroke="#1a2535" stroke-width="1"/>
+  <text x="872" y="31" font-family="system-ui,-apple-system,sans-serif"
+        font-size="13" font-weight="500" fill="#e2e8f0" text-anchor="middle">Status</text>
+  <!-- nav: Docs -->
+  <text x="940" y="31" font-family="system-ui,-apple-system,sans-serif"
+        font-size="13" font-weight="500" fill="#475569" text-anchor="middle">Docs</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SECTION LABEL
+  ══════════════════════════════════════════════════════════ -->
+  <text x="48" y="75" font-family="'Courier New',Courier,monospace"
+        font-size="10" font-weight="600" fill="#475569" letter-spacing="2">TUNNELS</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       CARD 1 — go-a-preprod-jump  (connected, blue)
+  ══════════════════════════════════════════════════════════ -->
+  <rect x="48" y="82" width="904" height="112" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="48" y="82" width="3"   height="112" rx="2" fill="#38bdf8"/>
+
+  <!-- header row -->
+  <text x="72" y="108" font-family="system-ui,-apple-system,sans-serif"
+        font-size="13.5" font-weight="600" fill="#e2e8f0">go-a-preprod-jump</text>
+  <text x="224" y="108" font-family="'Courier New',Courier,monospace"
+        font-size="11" fill="#475569">10.215.11.2:22</text>
+
+  <!-- pulsing green dot -->
+  <circle cx="326" cy="104" r="3.5" fill="#34d399"/>
+  <circle cx="326" cy="104" r="3.5" fill="#34d399" opacity="0.3">
+    <animate attributeName="r"       values="3.5;6.5;3.5" dur="2.4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0;0.3"   dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+  <text x="335" y="108" font-family="'Courier New',Courier,monospace"
+        font-size="11" fill="#34d399" font-weight="500">connected</text>
+
+  <text x="420" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">:1082</text>
+  <text x="468" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">5m 23s</text>
+
+  <!-- bps — right side -->
+  <text x="700" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#38bdf8">↓ 4.8 KB/s</text>
+  <text x="800" y="108" font-family="'Courier New',Courier,monospace" font-size="11" fill="#818cf8">↑ 1.2 KB/s</text>
+  <text x="900" y="108" font-family="'Courier New',Courier,monospace" font-size="10" fill="#475569">2 conn</text>
+
+  <!-- sparkline chart 1 (blue) -->
+  <g clip-path="url(#c1)">
+    <line x1="52" y1="153" x2="948" y2="153" stroke="#1a2535" stroke-width="0.5"/>
+    <path d="M52,192 C90,192 110,190 140,186 S185,179 215,173
+             S265,163 295,168 S345,173 375,162 S425,148 455,140
+             S505,133 535,127 S575,133 605,140 S655,136 685,128
+             S725,122 755,129 S795,135 825,127 S865,120 895,128
+             S925,133 948,130 L948,192 Z"
+          fill="rgba(56,189,248,0.09)"/>
+    <path d="M52,192 C90,192 110,190 140,186 S185,179 215,173
+             S265,163 295,168 S345,173 375,162 S425,148 455,140
+             S505,133 535,127 S575,133 605,140 S655,136 685,128
+             S725,122 755,129 S795,135 825,127 S865,120 895,128
+             S925,133 948,130"
+          fill="none" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="56" y="152" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">5 KB/s</text>
+    <text x="56" y="171" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">2 KB/s</text>
+    <text x="56" y="191" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">0 B/s</text>
+  </g>
+
+  <!-- ══════════════════════════════════════════════════════════
+       CARD 2 — go-b-preprod-jump  (connecting, purple — shows countdown)
+  ══════════════════════════════════════════════════════════ -->
+  <rect x="48" y="204" width="904" height="112" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="48" y="204" width="3"   height="112" rx="2" fill="#fbbf24"/>
+
+  <text x="72" y="230" font-family="system-ui,-apple-system,sans-serif"
+        font-size="13.5" font-weight="600" fill="#e2e8f0">go-b-preprod-jump</text>
+  <text x="224" y="230" font-family="'Courier New',Courier,monospace"
+        font-size="11" fill="#475569">10.215.27.2:22</text>
+
+  <!-- blinking amber dot -->
+  <circle cx="326" cy="226" r="3.5" fill="#fbbf24">
+    <animate attributeName="opacity" values="1;0.25;1" dur="1s" repeatCount="indefinite"/>
+  </circle>
+  <text x="335" y="230" font-family="'Courier New',Courier,monospace"
+        font-size="11" fill="#fbbf24" font-weight="500">connecting</text>
+
+  <text x="420" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">:1083</text>
+  <!-- reconnect countdown -->
+  <text x="468" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#fbbf24">next in 14s</text>
+  <!-- recon count -->
+  <text x="572" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">recon 2</text>
+
+  <text x="700" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#38bdf8">↓ 0 B/s</text>
+  <text x="800" y="230" font-family="'Courier New',Courier,monospace" font-size="11" fill="#818cf8">↑ 0 B/s</text>
+  <text x="900" y="230" font-family="'Courier New',Courier,monospace" font-size="10" fill="#475569">0 conn</text>
+
+  <!-- sparkline chart 2 (purple, mostly flat — was active, now dropped) -->
+  <g clip-path="url(#c2)">
+    <line x1="52" y1="275" x2="948" y2="275" stroke="#1a2535" stroke-width="0.5"/>
+    <path d="M52,314 C90,314 120,313 150,311 S195,307 225,302
+             S265,296 295,291 S345,286 375,280 S425,274 455,268
+             S490,263 510,267 S540,275 570,282 S610,289 640,295
+             S680,306 720,310 S770,314 820,314 S880,314 948,314 L948,314 Z"
+          fill="rgba(129,140,248,0.09)"/>
+    <path d="M52,314 C90,314 120,313 150,311 S195,307 225,302
+             S265,296 295,291 S345,286 375,280 S425,274 455,268
+             S490,263 510,267 S540,275 570,282 S610,289 640,295
+             S680,306 720,310 S770,314 820,314 S880,314 948,314"
+          fill="none" stroke="#818cf8" stroke-width="1.5" opacity="0.6"/>
+    <text x="56" y="274" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">2 KB/s</text>
+    <text x="56" y="293" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">1 KB/s</text>
+    <text x="56" y="313" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">0 B/s</text>
+  </g>
+
+  <!-- ══════════════════════════════════════════════════════════
+       CARD 3 — direct  (gray)
+  ══════════════════════════════════════════════════════════ -->
+  <rect x="48" y="326" width="904" height="112" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="48" y="326" width="3"   height="112" rx="2" fill="#475569"/>
+
+  <text x="72" y="352" font-family="system-ui,-apple-system,sans-serif"
+        font-size="13.5" font-weight="600" fill="#e2e8f0">direct</text>
+
+  <text x="700" y="352" font-family="'Courier New',Courier,monospace" font-size="11" fill="#38bdf8">↓ 12.4 KB/s</text>
+  <text x="800" y="352" font-family="'Courier New',Courier,monospace" font-size="11" fill="#818cf8">↑ 8.1 KB/s</text>
+  <text x="900" y="352" font-family="'Courier New',Courier,monospace" font-size="10" fill="#475569">5 conn</text>
+
+  <!-- sparkline chart 3 (gray, heavier direct traffic) -->
+  <g clip-path="url(#c3)">
+    <line x1="52" y1="400" x2="948" y2="400" stroke="#1a2535" stroke-width="0.5"/>
+    <path d="M52,436 C80,434 100,426 130,414 S170,400 200,390
+             S240,380 270,387 S310,396 340,388 S380,378 410,368
+             S450,358 480,352 S510,358 540,365 S570,358 600,350
+             S640,344 670,350 S710,357 740,351 S780,345 810,351
+             S850,358 880,353 S925,350 948,348 L948,436 Z"
+          fill="rgba(100,116,139,0.12)"/>
+    <path d="M52,436 C80,434 100,426 130,414 S170,400 200,390
+             S240,380 270,387 S310,396 340,388 S380,378 410,368
+             S450,358 480,352 S510,358 540,365 S570,358 600,350
+             S640,344 670,350 S710,357 740,351 S780,345 810,351
+             S850,358 880,353 S925,350 948,348"
+          fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="56" y="399" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">15 KB/s</text>
+    <text x="56" y="418" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">8 KB/s</text>
+    <text x="56" y="435" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">0 B/s</text>
+  </g>
+
+  <!-- ══════════════════════════════════════════════════════════
+       FOOTER
+  ══════════════════════════════════════════════════════════ -->
+  <line x1="0" y1="558" x2="1000" y2="558" stroke="#1a2535" stroke-width="1"/>
+  <text x="28" y="582" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">
+    <tspan opacity="0.5">SOCKS5</tspan> :8888
+  </text>
+  <text x="124" y="582" font-family="'Courier New',Courier,monospace" font-size="11" fill="#475569">
+    <tspan opacity="0.5">ADMIN</tspan> :8889
+  </text>
+  <text x="972" y="582" font-family="'Courier New',Courier,monospace"
+        font-size="11" fill="#475569" text-anchor="end">10:01:26</text>
+</svg>

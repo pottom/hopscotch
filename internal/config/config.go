@@ -29,9 +29,10 @@ type TunnelConfig struct {
 	User               string `yaml:"user"`
 	IdentityFile       string `yaml:"identity_file"`
 	LocalPort          int    `yaml:"local_port"`
-	KeepaliveInterval  int    `yaml:"keepalive_interval"`
-	KeepaliveMaxFails  int    `yaml:"keepalive_max_fails"`
-	ReconnectDelay     int    `yaml:"reconnect_delay"`
+	DialTimeout        int    `yaml:"dial_timeout"`        // seconds; SSH TCP + handshake
+	KeepaliveInterval  int    `yaml:"keepalive_interval"`  // seconds between keepalive probes
+	KeepaliveMaxFails  int    `yaml:"keepalive_max_fails"` // consecutive failures before reconnect
+	ReconnectDelay     int    `yaml:"reconnect_delay"`     // initial backoff seconds (doubles up to 2m)
 }
 
 // Rule maps a host pattern to a tunnel name or "direct".
@@ -122,6 +123,9 @@ func applyDefaults(cfg *Config) {
 		t := &cfg.Tunnels[i]
 		if t.Port == 0 {
 			t.Port = DefaultSSHPort
+		}
+		if t.DialTimeout == 0 {
+			t.DialTimeout = DefaultDialTimeout
 		}
 		if t.KeepaliveInterval == 0 {
 			t.KeepaliveInterval = DefaultKeepaliveInterval

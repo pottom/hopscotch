@@ -18,6 +18,10 @@ tunnels:
     user: fouriguser
     identity_file: ~/.ssh/id_rsa
     local_port: 1082
+    dial_timeout: 15        # seconds; TCP connect + SSH handshake
+    keepalive_interval: 30  # seconds between SSH keepalive probes
+    keepalive_max_fails: 3  # consecutive failures → reconnect (= 90s dead window)
+    reconnect_delay: 5      # initial backoff; doubles each attempt up to 2m
 
   - name: go-b-preprod-jump
     host: 10.215.27.2
@@ -25,6 +29,10 @@ tunnels:
     user: fouriguser
     identity_file: ~/.ssh/id_rsa
     local_port: 1083
+    dial_timeout: 15
+    keepalive_interval: 30
+    keepalive_max_fails: 3
+    reconnect_delay: 5
 
 proxy:
   port: 8888
