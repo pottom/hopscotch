@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,8 +35,12 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 type Tunnel struct {
 	cfg    config.TunnelConfig
 	clock  Clock
-	stats  atomic.Value // holds Stats
+	stats  atomic.Value // holds Stats (without traffic counters)
 	client *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
+	// Traffic counters — always-incrementing, read by Stats().
+	bytesIn     atomic.Uint64
+	bytesOut    atomic.Uint64
+	activeConns atomic.Int64
 }
 
 // New creates a Tunnel with a real system clock.
@@ -45,8 +50,14 @@ func New(cfg config.TunnelConfig) *Tunnel {
 	return t
 }
 
-// Stats returns a snapshot of the tunnel's current metrics.
-func (t *Tunnel) Stats() Stats { return t.stats.Load().(Stats) }
+// Stats returns a snapshot of the tunnel's current metrics including traffic.
+func (t *Tunnel) Stats() Stats {
+	s := t.stats.Load().(Stats)
+	s.BytesIn = t.bytesIn.Load()
+	s.BytesOut = t.bytesOut.Load()
+	s.ActiveConns = t.activeConns.Load()
+	return s
+}
 
 // Name returns the tunnel's configured name.
 func (t *Tunnel) Name() string { return t.cfg.Name }
@@ -69,7 +80,36 @@ func (t *Tunnel) DialContext(_ context.Context, network, addr string) (net.Conn,
 		}
 		return nil, err
 	}
-	return conn, nil
+	t.activeConns.Add(1)
+	return &countingConn{Conn: conn, tunnel: t}, nil
+}
+
+// countingConn wraps net.Conn to track bytes transferred and active connection count.
+type countingConn struct {
+	net.Conn
+	tunnel *Tunnel
+	once   sync.Once
+}
+
+func (c *countingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if n > 0 {
+		c.tunnel.bytesIn.Add(uint64(n))
+	}
+	return n, err
+}
+
+func (c *countingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if n > 0 {
+		c.tunnel.bytesOut.Add(uint64(n))
+	}
+	return n, err
+}
+
+func (c *countingConn) Close() error {
+	c.once.Do(func() { c.tunnel.activeConns.Add(-1) })
+	return c.Conn.Close()
 }
 
 // isTCPForwardingDenied reports whether err indicates the SSH server refused

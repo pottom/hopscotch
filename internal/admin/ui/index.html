@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -43,6 +44,14 @@
     <div class="empty">loading…</div>
   </div>
 </main>
+
+<section class="traffic-section">
+  <div class="section-label">Traffic</div>
+  <div class="chart-wrap">
+    <canvas id="traffic-chart"></canvas>
+  </div>
+  <div class="chart-legend" id="chart-legend"></div>
+</section>
 
 <footer class="footer">
   <div class="footer-ports" id="footer-ports"></div>

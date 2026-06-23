@@ -22,6 +22,7 @@ type TunnelLookup interface {
 type Router struct {
 	rules   []config.Rule
 	tunnels TunnelLookup
+	direct  DirectCounter
 
 	// connCounts tracks connections per route label for /metrics.
 	connCounts map[string]*int64
@@ -34,6 +35,11 @@ func NewRouter(rules []config.Rule, tunnels TunnelLookup) *Router {
 		tunnels:    tunnels,
 		connCounts: make(map[string]*int64),
 	}
+}
+
+// DirectSnapshot returns a point-in-time view of direct connection traffic.
+func (r *Router) DirectSnapshot() tunnel.TrafficSnapshot {
+	return r.direct.Snapshot()
 }
 
 // UpdateRules replaces the routing rules (called on SIGHUP).
@@ -86,7 +92,7 @@ func (r *Router) resolve(ctx context.Context, host string) (string, interface {
 		}
 
 		if rule.Via == "direct" {
-			return "direct", &net.Dialer{}, nil
+			return "direct", &r.direct, nil
 		}
 
 		t := r.tunnels.Get(rule.Tunnel)
@@ -103,7 +109,7 @@ func (r *Router) resolve(ctx context.Context, host string) (string, interface {
 
 	// No matching rule — use direct as fallback.
 	log.Warn("no routing rule matched, using direct", "host", host)
-	return "direct", &net.Dialer{}, nil
+	return "direct", &r.direct, nil
 }
 
 // waitForTunnel blocks until the tunnel is connected or the wait window expires.

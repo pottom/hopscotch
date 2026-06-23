@@ -31,4 +31,17 @@ type Stats struct {
 	ReconnectCount int
 	LocalPort      int
 	Host           string // SSH server address (host:port)
+	// Traffic counters — cumulative since process start.
+	BytesIn     uint64
+	BytesOut    uint64
+	ActiveConns int64
+}
+
+// TrafficSnapshot is a lightweight traffic-only view used by the direct counter
+// and the SSE endpoint. Defined here so proxy and admin can share the type
+// without introducing a circular import.
+type TrafficSnapshot struct {
+	BytesIn     uint64
+	BytesOut    uint64
+	ActiveConns int64
 }
