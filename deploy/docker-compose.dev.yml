@@ -1,19 +1,40 @@
-# Development environment – builds from source, no restart policy
-# Usage: docker compose -f deploy/docker-compose.dev.yml up
+# hopscotch – development compose file (builds from source)
+#
+# Usage (run from repo root):
+#   docker compose -f deploy/docker-compose.dev.yml up
+#
+# Unlike docker-compose.yml this file builds the image locally instead of
+# pulling from the registry. Useful for testing changes before pushing a tag.
+
 services:
   hopscotch:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+    image: hopscotch:dev
     container_name: hopscotch-dev
-    restart: "no"
+    restart: "no"   # don't loop on startup failures during development
+
     ports:
-      - "8080:8080"
-      - "9090:9090"
+      - "8080:8080"   # SOCKS5 proxy
+      - "9090:9090"   # Admin UI
+
     volumes:
+      # Must contain: admin.bind: "0.0.0.0"
       - ./config.yaml:/etc/hopscotch/config.yaml:ro
+
+      # SSH key files (Option A) – see docker-compose.yml for details
       - ./keys:/etc/hopscotch/keys:ro
+
+      # SSH agent (Option B, macOS):
+      # Enable Docker Desktop → Settings → Resources → SSH agent forwarding, then:
+      # - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock:ro
+      #
+      # SSH agent (Option B, Linux):
+      # - ${SSH_AUTH_SOCK}:/tmp/ssh-agent.sock:ro
+
     environment:
       - TZ=Europe/Budapest
-      - HOPSCOTCH_INSECURE_SKIP_KNOWN_HOSTS=true
-    command: ["start", "--foreground", "--verbose"]
+      # - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock   # macOS agent
+      # - SSH_AUTH_SOCK=/tmp/ssh-agent.sock                # Linux agent
+      - HOPSCOTCH_INSECURE_SKIP_KEY_CHECK=true   # convenient for dev

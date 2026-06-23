@@ -1,19 +1,73 @@
+# hopscotch – production compose file
+#
+# Quick start:
+#   1. Copy config.example.yaml → config.yaml and fill in your tunnels
+#   2. Choose an SSH auth method below (key file or agent)
+#   3. docker compose up -d
+#
+# Image: ghcr.io/pottom/hopscotch:latest  (or pin a version: :v0.1.0)
+# Registry is public; no login required to pull.
+
 services:
   hopscotch:
-    image: ghcr.io/USER/hopscotch:latest
+    image: ghcr.io/pottom/hopscotch:latest
     container_name: hopscotch
     restart: unless-stopped
+
     ports:
-      - "8080:8080"       # SOCKS5 proxy
-      - "9090:9090"       # Admin HTTP (health + metrics)
+      - "8080:8080"   # SOCKS5 proxy  → point your browser / ALL_PROXY here
+      - "9090:9090"   # Admin UI + /health + /metrics
+      # Individual tunnel SOCKS5 ports are only needed if you bypass the
+      # proxy router and connect to a specific tunnel directly.
+      # - "1080:1080"
+      # - "1081:1081"
+
     volumes:
+      # ── Config ────────────────────────────────────────────────────────────
+      # Must contain: admin.bind: "0.0.0.0"  (127.0.0.1 won't work in Docker)
       - ./config.yaml:/etc/hopscotch/config.yaml:ro
+
+      # ── SSH authentication: pick ONE of the two options below ─────────────
+
+      # Option A – Key files (works on macOS and Linux)
+      # ------------------------------------------------
+      # 1. mkdir keys && cp ~/.ssh/id_ed25519 keys/
+      # 2. chmod 600 keys/*      ← required; Docker Desktop preserves this
+      # 3. Reference in config:  identity_file: /etc/hopscotch/keys/id_ed25519
+      # 4. On macOS: also set HOPSCOTCH_INSECURE_SKIP_KEY_CHECK=true below
+      #    because Docker Desktop maps files as a different UID inside the container.
       - ./keys:/etc/hopscotch/keys:ro
+
+      # Option B – SSH agent (recommended for YubiKey / gpg-agent)
+      # -----------------------------------------------------------
+      # macOS (Docker Desktop):
+      #   Enable: Docker Desktop → Settings → Resources → SSH agent forwarding
+      #   Then uncomment:
+      # - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock:ro
+      #
+      # Linux:
+      #   The socket path is in $SSH_AUTH_SOCK (e.g. /run/user/1000/gnupg/S.gpg-agent.ssh)
+      #   Uncomment and replace with your actual socket path, or use:
+      # - ${SSH_AUTH_SOCK}:/tmp/ssh-agent.sock:ro
+
     environment:
       - TZ=Europe/Budapest
+
+      # Required with Option B (macOS):
+      # - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock
+      #
+      # Required with Option B (Linux) if you used /tmp/ssh-agent.sock above:
+      # - SSH_AUTH_SOCK=/tmp/ssh-agent.sock
+
+      # Disable the SSH key file permission check.
+      # Needed on macOS (Docker Desktop maps files as a different UID inside
+      # the container, so the 0600 ownership check always fails).
+      # Safe to set; hopscotch still reads the keys, just skips the chmod check.
+      # - HOPSCOTCH_INSECURE_SKIP_KEY_CHECK=true
+
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
