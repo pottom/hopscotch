@@ -68,11 +68,39 @@ body {
 .badge.offline   { background: rgba(248,113,113,.12); color: #f87171; border: 1px solid rgba(248,113,113,.25); }
 
 .header-meta {
-  margin-left: auto;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.header-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.header-nav a {
+  text-decoration: none;
+  padding: 0.25em 0.8em;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font-weight: 500;
+  transition: color .15s, background .15s, border-color .15s;
+}
+
+.header-nav a:hover {
+  color: #e2e8f0;
+  background: rgba(255,255,255,.05);
+  border-color: var(--border);
+}
+
+.header-nav a.active {
+  color: #e2e8f0;
+  background: rgba(255,255,255,.08);
+  border-color: var(--border);
 }
 
 /* ── MAIN ───────────────────────────────── */
