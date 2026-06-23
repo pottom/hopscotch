@@ -36,4 +36,5 @@ proxy:
 
 admin:
   port: 9090
-  bind: "127.0.0.1"   # use "0.0.0.0" in containers
+  # bind: "127.0.0.1"   # default: localhost only (safe for bare-metal / VM)
+  bind: "0.0.0.0"       # required in Docker: 127.0.0.1 is unreachable from outside the container
