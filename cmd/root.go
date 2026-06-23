@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	configPath string
-	verbose    bool
-	logFile    string
+	configPath    string
+	verbose       bool
+	logFile       string
+	ReadmeContent []byte // set by main via docs.go embed
 )
 
 var rootCmd = &cobra.Command{

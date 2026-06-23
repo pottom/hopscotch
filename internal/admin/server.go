@@ -26,18 +26,20 @@ type Server struct {
 	port      int
 	proxyPort int
 	pid       int
+	readme    []byte
 	tunnels   TunnelStatter
 	startedAt time.Time
 }
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter) *Server {
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, readme []byte) *Server {
 	return &Server{
 		bind:      bind,
 		port:      port,
 		proxyPort: proxyPort,
 		pid:       os.Getpid(),
+		readme:    readme,
 		tunnels:   tunnels,
 		startedAt: time.Now(),
 	}
@@ -49,6 +51,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /readme", s.handleReadme)
 	sub, _ := fs.Sub(uiFiles, "ui")
 	mux.Handle("GET /", http.FileServerFS(sub))
 
