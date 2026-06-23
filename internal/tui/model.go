@@ -60,6 +60,7 @@ var (
 	styleBadgeOffline  = lipgloss.NewStyle().Foreground(colorDisconnected).Bold(true)
 
 	styleColName   = lipgloss.NewStyle().Foreground(colorBright).Width(26)
+	styleColHost   = lipgloss.NewStyle().Foreground(colorMuted).Width(22)
 	styleColPort   = lipgloss.NewStyle().Foreground(colorText).Width(7)
 	styleColStatus = lipgloss.NewStyle().Width(16)
 	styleColUptime = lipgloss.NewStyle().Foreground(colorText).Width(10)
@@ -577,8 +578,9 @@ func (m Model) renderHeader() string {
 		if rW >= 8 {
 			reasonHdr = styleMuted.Render("REASON")
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s\n",
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
 			hdr(styleColName, "TUNNEL"),
+			hdr(styleColHost, "HOST"),
 			hdr(styleColPort, "PORT"),
 			hdr(styleColStatus, "STATUS"),
 			hdr(styleColUptime, "UPTIME"),
@@ -634,7 +636,7 @@ func (m Model) renderFooter() string {
 
 // buildStatusContent renders the scrollable tunnel list for the status viewport.
 // fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
-const fixedColsWidth = 2 + 26 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 104
+const fixedColsWidth = 2 + 26 + 22 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 126
 
 func (m Model) buildStatusContent() string {
 	sparkW := m.width - 4
@@ -688,8 +690,9 @@ func (m Model) buildStatusContent() string {
 			// fixedColsWidth+4 = 2 (row indent) + columns + 2 (separator before reason)
 			reasonStr = renderReason(reason, reasonStyle, reasonW, fixedColsWidth+2)
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s\n",
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
 			styleColName.Render(name),
+			styleColHost.Render(t.Host),
 			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
 			styleColStatus.Render(renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)),
 			styleColUptime.Render(uptime),
