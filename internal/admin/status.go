@@ -17,6 +17,7 @@ type TunnelStatusJSON struct {
 	ReconnectCount    int     `json:"reconnect_count"`
 	UptimeSeconds     float64 `json:"uptime_seconds"`
 	KeepaliveFailures int     `json:"keepalive_failures,omitempty"`
+	LastError         string  `json:"last_error,omitempty"`
 }
 
 // StatusResponse is the full /status JSON response.
@@ -50,6 +51,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			ReconnectCount:    st.ReconnectCount,
 			UptimeSeconds:     uptime,
 			KeepaliveFailures: st.KeepaliveFailures,
+			LastError:         st.LastError,
 		}
 	}
 

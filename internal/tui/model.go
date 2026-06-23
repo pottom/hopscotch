@@ -91,10 +91,18 @@ const footerHeight = 2 // separator newline + hints+ports line
 const windowSize = 300
 const maxLogLines = 300
 
-var blocks = []rune("⣀⣄⣤⣦⣶⣷⣿")
+// brailleBit returns the bit value for a dot at (dotCol 0-1, dotRow 0-3).
+// Braille layout: col0={1,2,4,64}, col1={8,16,32,128}
+var brailleBit = [2][4]uint8{
+	{1, 2, 4, 64},
+	{8, 16, 32, 128},
+}
+
+const graphRows = 4 // terminal rows per tunnel graph
 
 type trafficWindow struct {
-	data        []float64
+	dataIn      []float64
+	dataOut     []float64
 	bpsIn       uint64
 	bpsOut      uint64
 	active      int64
@@ -104,10 +112,145 @@ type trafficWindow struct {
 func (w *trafficWindow) push(bpsIn, bpsOut uint64) {
 	w.bpsIn = bpsIn
 	w.bpsOut = bpsOut
-	w.data = append(w.data, float64(bpsIn+bpsOut))
-	if len(w.data) > windowSize {
-		w.data = w.data[1:]
+	w.dataIn = append(w.dataIn, float64(bpsIn))
+	w.dataOut = append(w.dataOut, float64(bpsOut))
+	if len(w.dataIn) > windowSize {
+		w.dataIn = w.dataIn[1:]
+		w.dataOut = w.dataOut[1:]
 	}
+}
+
+func padData(data []float64, width int) []float64 {
+	out := make([]float64, width)
+	if n := len(data); n >= width {
+		copy(out, data[n-width:])
+	} else if n > 0 {
+		copy(out[width-n:], data)
+	}
+	return out
+}
+
+func onesCount8(b uint8) int {
+	count := 0
+	for b != 0 {
+		count += int(b & 1)
+		b >>= 1
+	}
+	return count
+}
+
+// renderGraph draws a braille line graph for one tunnel.
+// When mirror=true: download fills upward from the centre, upload downward.
+// When mirror=false: only download, filling upward from the bottom.
+// Returns `rows` strings (top to bottom).
+func renderGraph(inData, outData []float64, colorIn, colorOut lipgloss.Color, rows, width int, mirror bool) []string {
+	totalBrailleRows := rows * 4
+	dataWidth := width * 2 // 2 data points per terminal char
+
+	padIn := padData(inData, dataWidth)
+	padOut := padData(outData, dataWidth)
+
+	maxVal := 0.0
+	for _, v := range padIn {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	for _, v := range padOut {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+
+	type cell struct {
+		bits    uint8
+		inBits  uint8
+		outBits uint8
+	}
+	grid := make([][]cell, rows)
+	for r := range grid {
+		grid[r] = make([]cell, width)
+	}
+
+	center := totalBrailleRows / 2
+
+	setDot := func(bRow, dotCol, charCol int, isIn bool) {
+		if bRow < 0 || bRow >= totalBrailleRows {
+			return
+		}
+		charRow := bRow / 4
+		dotRow := bRow % 4
+		bit := brailleBit[dotCol][dotRow]
+		grid[charRow][charCol].bits |= bit
+		if isIn {
+			grid[charRow][charCol].inBits |= bit
+		} else {
+			grid[charRow][charCol].outBits |= bit
+		}
+	}
+
+	for dc := 0; dc < dataWidth; dc++ {
+		charCol := dc / 2
+		dotCol := dc % 2
+
+		inNorm := 0.0
+		if maxVal > 0 {
+			inNorm = padIn[dc] / maxVal
+		}
+		outNorm := 0.0
+		if maxVal > 0 {
+			outNorm = padOut[dc] / maxVal
+		}
+
+		if mirror {
+			// Download: fill upward from centre to peak
+			inPeak := center - 1 - int(math.Round(inNorm*float64(center-1)))
+			for bRow := inPeak; bRow < center; bRow++ {
+				setDot(bRow, dotCol, charCol, true)
+			}
+
+			// Upload: fill downward from centre to peak
+			outPeak := center + int(math.Round(outNorm*float64(center-1)))
+			for bRow := center; bRow <= outPeak; bRow++ {
+				setDot(bRow, dotCol, charCol, false)
+			}
+		} else {
+			// Single channel: fill upward from bottom to peak
+			inPeak := totalBrailleRows - 1 - int(math.Round(inNorm*float64(totalBrailleRows-1)))
+			for bRow := inPeak; bRow < totalBrailleRows; bRow++ {
+				setDot(bRow, dotCol, charCol, true)
+			}
+		}
+	}
+
+	result := make([]string, rows)
+	for r := range result {
+		var sb strings.Builder
+		for c := 0; c < width; c++ {
+			cl := grid[r][c]
+			timeT := float64(c) / float64(max(width-1, 1))
+
+			var col lipgloss.Color
+			switch {
+			case cl.bits == 0:
+				col = colorMuted
+			case cl.outBits == 0:
+				col = blendColor(colorMuted, colorIn, timeT)
+			case cl.inBits == 0:
+				col = blendColor(colorMuted, colorOut, timeT)
+			default:
+				// Boundary char: blend by bit count ratio
+				t := float64(onesCount8(cl.inBits)) / float64(onesCount8(cl.inBits)+onesCount8(cl.outBits))
+				mid := blendColor(colorOut, colorIn, t)
+				col = blendColor(colorMuted, mid, timeT)
+			}
+
+			char := rune(0x2800 + int(cl.bits))
+			sb.WriteString(lipgloss.NewStyle().Foreground(col).Render(string(char)))
+		}
+		result[r] = sb.String()
+	}
+	return result
 }
 
 // blendColor interpolates between two hex lipgloss colors in Lab space.
@@ -120,47 +263,6 @@ func blendColor(from, to lipgloss.Color, t float64) lipgloss.Color {
 	return lipgloss.Color(c1.BlendLab(c2, t).Hex())
 }
 
-func sparkline(w *trafficWindow, color lipgloss.Color, width int) string {
-	if width <= 0 {
-		return ""
-	}
-
-	padded := make([]float64, width)
-	if len(w.data) < width {
-		copy(padded[width-len(w.data):], w.data)
-	} else {
-		copy(padded, w.data[len(w.data)-width:])
-	}
-
-	dim := lipgloss.NewStyle().Foreground(colorMuted)
-	if len(w.data) == 0 {
-		var sb strings.Builder
-		for range padded {
-			sb.WriteString(dim.Render(string(blocks[0])))
-		}
-		return sb.String()
-	}
-
-	maxVal := 0.0
-	for _, v := range padded {
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-
-	n := len(padded)
-	var sb strings.Builder
-	for i, v := range padded {
-		idx := 0
-		if maxVal > 0 {
-			idx = int(math.Round(v / maxVal * float64(len(blocks)-1)))
-		}
-		t := float64(i) / float64(max(n-1, 1))
-		c := blendColor(colorMuted, color, t)
-		sb.WriteString(lipgloss.NewStyle().Foreground(c).Render(string(blocks[idx])))
-	}
-	return sb.String()
-}
 
 // ── SSE types ─────────────────────────────────────────────────────────────────
 
@@ -208,8 +310,9 @@ type Model struct {
 	height  int
 	vp      viewport.Model
 	vpReady bool
-	compact bool
-	ready   bool
+	compact     bool
+	mirrorGraph bool
+	ready       bool
 }
 
 func New(adminURL string) Model {
@@ -224,9 +327,10 @@ func New(adminURL string) Model {
 		sseCh:    sseCh,
 		logCh:    logCh,
 		done:     done,
-		traffic:  make(map[string]*trafficWindow),
-		width:    80,
-		height:   24,
+		traffic:     make(map[string]*trafficWindow),
+		mirrorGraph: true,
+		width:       80,
+		height:      24,
 	}
 }
 
@@ -265,6 +369,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c", "C":
 			if m.activeTab == tabStatus {
 				m.compact = !m.compact
+				if m.vpReady {
+					m.vp.SetContent(m.buildStatusContent())
+				}
+			}
+			return m, nil
+
+		case "g", "G":
+			if m.activeTab == tabStatus {
+				m.mirrorGraph = !m.mirrorGraph
 				if m.vpReady {
 					m.vp.SetContent(m.buildStatusContent())
 				}
@@ -459,7 +572,12 @@ func (m Model) renderHeader() string {
 		hdr := func(s lipgloss.Style, label string) string {
 			return s.Foreground(colorMuted).Render(label)
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
+		rW := m.width - fixedColsWidth - 2
+		reasonHdr := ""
+		if rW >= 8 {
+			reasonHdr = styleMuted.Render("REASON")
+		}
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s\n",
 			hdr(styleColName, "TUNNEL"),
 			hdr(styleColPort, "PORT"),
 			hdr(styleColStatus, "STATUS"),
@@ -468,6 +586,7 @@ func (m Model) renderHeader() string {
 			hdr(styleColBpsIn, "↓"),
 			hdr(styleColBpsOut, "↑"),
 			hdr(styleColConn, "CONN"),
+			reasonHdr,
 		)
 	} else {
 		b.WriteString("\n")
@@ -485,6 +604,11 @@ func (m Model) renderFooter() string {
 			hints += "  c expand"
 		} else {
 			hints += "  c compact"
+		}
+		if m.mirrorGraph {
+			hints += "  g single"
+		} else {
+			hints += "  g mirror"
 		}
 	}
 
@@ -509,10 +633,19 @@ func (m Model) renderFooter() string {
 }
 
 // buildStatusContent renders the scrollable tunnel list for the status viewport.
+// fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
+const fixedColsWidth = 2 + 26 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 104
+
 func (m Model) buildStatusContent() string {
 	sparkW := m.width - 4
 	if sparkW < 10 {
 		sparkW = 10
+	}
+
+	// Remaining space after fixed columns for the reason field.
+	reasonW := m.width - fixedColsWidth - 2
+	if reasonW < 8 {
+		reasonW = 0
 	}
 
 	var b strings.Builder
@@ -523,9 +656,8 @@ func (m Model) buildStatusContent() string {
 	}
 	sort.Strings(names)
 
-	for i, name := range names {
+	for _, name := range names {
 		t := m.status.Tunnels[name]
-		color := palette[i%len(palette)]
 		w := m.traffic[name]
 
 		uptime := "—"
@@ -543,7 +675,20 @@ func (m Model) buildStatusContent() string {
 			active = w.active
 		}
 
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
+		reasonStr := ""
+		if reasonW > 0 {
+			reason := "—"
+			var reasonStyle lipgloss.Style
+			if t.LastError != "" && t.Status != "connected" {
+				reason = t.LastError
+				reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
+			} else {
+				reasonStyle = styleMuted
+			}
+			// fixedColsWidth+4 = 2 (row indent) + columns + 2 (separator before reason)
+			reasonStr = renderReason(reason, reasonStyle, reasonW, fixedColsWidth+2)
+		}
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s\n",
 			styleColName.Render(name),
 			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
 			styleColStatus.Render(renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)),
@@ -552,10 +697,13 @@ func (m Model) buildStatusContent() string {
 			styleColBpsIn.Render("↓ "+fmtBytes(bpsIn)),
 			styleColBpsOut.Render("↑ "+fmtBytes(bpsOut)),
 			styleColConn.Render(fmtActive(active)),
+			reasonStr,
 		)
 
 		if !m.compact && w != nil {
-			fmt.Fprintf(&b, "  %s\n", sparkline(w, color, sparkW))
+			for _, line := range renderGraph(w.dataIn, w.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
 		}
 	}
 
@@ -579,7 +727,9 @@ func (m Model) buildStatusContent() string {
 		styleColConn.Render(fmtActive(dActive)),
 	)
 	if !m.compact && dw != nil {
-		fmt.Fprintf(&b, "  %s\n", sparkline(dw, directColor, sparkW))
+		for _, line := range renderGraph(dw.dataIn, dw.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
 	}
 
 	return b.String()
@@ -602,6 +752,45 @@ func (m Model) totalStats() (bpsIn, bpsOut uint64, active int64) {
 
 func fmtActive(n int64) string {
 	return fmt.Sprintf("%d conn", n)
+}
+
+// wrapAt breaks s into lines of at most width runes, splitting at spaces where possible.
+func wrapAt(s string, width int) []string {
+	if width <= 0 || len(s) <= width {
+		return []string{s}
+	}
+	var lines []string
+	for len(s) > width {
+		cut := width
+		if i := strings.LastIndex(s[:cut], " "); i > 0 {
+			cut = i
+		}
+		lines = append(lines, s[:cut])
+		s = strings.TrimLeft(s[cut:], " ")
+	}
+	if s != "" {
+		lines = append(lines, s)
+	}
+	return lines
+}
+
+// renderReason returns the inline reason string (with possible embedded newlines for wrapping).
+// indent is the number of spaces to prepend on continuation lines.
+func renderReason(reason string, style lipgloss.Style, reasonW, indent int) string {
+	if reasonW <= 0 {
+		return ""
+	}
+	lines := wrapAt(reason, reasonW)
+	indentStr := strings.Repeat(" ", indent)
+	var parts []string
+	for i, l := range lines {
+		if i == 0 {
+			parts = append(parts, "  "+style.Render(l))
+		} else {
+			parts = append(parts, indentStr+style.Render(l))
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func renderBadge(status string) string {

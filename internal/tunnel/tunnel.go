@@ -33,10 +33,11 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 
 // Tunnel manages a single SSH connection that exposes a local SOCKS5 port.
 type Tunnel struct {
-	cfg    config.TunnelConfig
-	clock  Clock
-	stats  atomic.Value // holds Stats (without traffic counters)
-	client *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
+	cfg        config.TunnelConfig
+	clock      Clock
+	stats      atomic.Value // holds Stats (without traffic counters)
+	client     *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
+	ptySession *ssh.Session // held open when force_pty is set; closed after keepalive exits
 	// Traffic counters — always-incrementing, read by Stats().
 	bytesIn     atomic.Uint64
 	bytesOut    atomic.Uint64
@@ -145,9 +146,16 @@ func (t *Tunnel) Run(ctx context.Context) error {
 				"tunnel", t.cfg.Name,
 				"err", err,
 			)
+			s := t.Stats()
+			s.LastError = err.Error()
+			t.stats.Store(s)
 		} else {
 			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
 			t.keepalive(ctx)
+			if t.ptySession != nil {
+				t.ptySession.Close()
+				t.ptySession = nil
+			}
 		}
 
 		s := t.Stats()
@@ -205,6 +213,14 @@ func (t *Tunnel) dial(ctx context.Context) error {
 
 	t.client = ssh.NewClient(sshConn, chans, reqs)
 
+	if t.cfg.ForcePTY {
+		if err := t.openPTYSession(); err != nil {
+			t.client.Close()
+			t.client = nil
+			return fmt.Errorf("PTY session: %w", err)
+		}
+	}
+
 	now := t.clock.Now()
 	t.stats.Store(Stats{
 		Status:         StatusConnected,
@@ -215,6 +231,42 @@ func (t *Tunnel) dial(ctx context.Context) error {
 	})
 
 	log.Info("tunnel connected", "tunnel", t.cfg.Name, "addr", addr)
+	return nil
+}
+
+func (t *Tunnel) openPTYSession() error {
+	// Forward the local SSH agent to the server (-A equivalent).
+	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+		if agentConn, err := net.Dial("unix", sock); err == nil {
+			if err := agent.ForwardToAgent(t.client, agent.NewClient(agentConn)); err != nil {
+				agentConn.Close()
+				log.Debug("agent forwarding setup failed", "tunnel", t.cfg.Name, "err", err)
+			}
+		}
+	}
+
+	sess, err := t.client.NewSession()
+	if err != nil {
+		return fmt.Errorf("new session: %w", err)
+	}
+
+	// Request agent forwarding on this session before PTY.
+	_ = agent.RequestAgentForwarding(sess)
+
+	modes := ssh.TerminalModes{ssh.ECHO: 0}
+	if err := sess.RequestPty("xterm", 24, 80, modes); err != nil {
+		sess.Close()
+		return fmt.Errorf("request pty: %w", err)
+	}
+	// Drain stdout/stderr before Shell() so the SCB shell doesn't block on a full buffer.
+	sess.Stdout = io.Discard
+	sess.Stderr = io.Discard
+	if err := sess.Shell(); err != nil {
+		sess.Close()
+		return fmt.Errorf("start shell: %w", err)
+	}
+	t.ptySession = sess
+	log.Debug("PTY session opened with agent forwarding", "tunnel", t.cfg.Name)
 	return nil
 }
 
@@ -295,6 +347,7 @@ func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, error) {
 		Auth:            auths,
 		HostKeyCallback: hostKey,
 		Timeout:         time.Duration(t.cfg.DialTimeout) * time.Second,
+		ClientVersion:   "SSH-2.0-OpenSSH_9.6",
 	}, nil
 }
 
