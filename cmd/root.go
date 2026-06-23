@@ -16,8 +16,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "hopscotch",
-	Short: "SSH tunnel manager with built-in SOCKS5 proxy router",
+	Use:          "hopscotch",
+	Short:        "SSH tunnel manager with built-in SOCKS5 proxy router",
+	SilenceUsage: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// version and validate don't need a logger init.
 		if cmd.Name() == "version" {

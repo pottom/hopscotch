@@ -7,11 +7,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/log"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"hopscotch/internal/config"
@@ -39,14 +41,14 @@ type Tunnel struct {
 // New creates a Tunnel with a real system clock.
 func New(cfg config.TunnelConfig) *Tunnel {
 	t := &Tunnel{cfg: cfg, clock: realClock{}}
-	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort})
+	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
 	return t
 }
 
 // newWithClock is used in tests to inject a fake clock.
 func newWithClock(cfg config.TunnelConfig, clk Clock) *Tunnel {
 	t := &Tunnel{cfg: cfg, clock: clk}
-	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort})
+	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
 	return t
 }
 
@@ -63,7 +65,30 @@ func (t *Tunnel) DialContext(_ context.Context, network, addr string) (net.Conn,
 	if c == nil {
 		return nil, fmt.Errorf("tunnel %q is not connected", t.cfg.Name)
 	}
-	return c.Dial(network, addr)
+	conn, err := c.Dial(network, addr)
+	if err != nil {
+		if isTCPForwardingDenied(err) {
+			log.Error("TCP forwarding denied by SSH server",
+				"tunnel", t.cfg.Name,
+				"addr", addr,
+				"hint", "ask your admin to set AllowTcpForwarding yes in sshd_config",
+			)
+		}
+		return nil, err
+	}
+	return conn, nil
+}
+
+// isTCPForwardingDenied reports whether err indicates the SSH server refused
+// to open a direct-tcpip channel (AllowTcpForwarding no).
+func isTCPForwardingDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "unexpected packet in response to channel open") ||
+		strings.Contains(s, "administratively prohibited") ||
+		strings.Contains(s, "open failed")
 }
 
 // Run establishes the SSH tunnel, keeps it alive, and reconnects on failure.
@@ -117,7 +142,11 @@ func (t *Tunnel) dial(ctx context.Context) error {
 	log.Info("connecting tunnel", "tunnel", t.cfg.Name, "addr", addr)
 
 	// Respect ctx during the dial itself.
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	// KeepAlive sends TCP-level probes so NAT/firewall entries don't expire.
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 15 * time.Second,
+	}
 	tcpConn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("TCP dial %s: %w", addr, err)
@@ -133,9 +162,10 @@ func (t *Tunnel) dial(ctx context.Context) error {
 
 	now := t.clock.Now()
 	t.stats.Store(Stats{
-		Status:      StatusConnected,
-		ConnectedAt: now,
-		LocalPort:   t.cfg.LocalPort,
+		Status:         StatusConnected,
+		ConnectedAt:    now,
+		LocalPort:      t.cfg.LocalPort,
+		Host:           addr,
 		ReconnectCount: t.Stats().ReconnectCount,
 	})
 
@@ -156,6 +186,7 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 
 		_, _, err := t.client.SendRequest("keepalive@openssh.com", true, nil)
 		if err != nil {
+			// err != nil means the connection is broken, not just unsupported.
 			fails++
 			log.Warn("keepalive failed",
 				"tunnel", t.cfg.Name,
@@ -169,6 +200,8 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 			}
 			continue
 		}
+		// ok=false but err=nil means the server doesn't support the request type —
+		// the connection is still alive, so reset the failure counter.
 		fails = 0
 	}
 }
@@ -195,6 +228,7 @@ func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, error) {
 func (t *Tunnel) authMethods() ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 
+	// Explicit identity file takes highest priority.
 	if t.cfg.IdentityFile != "" {
 		signer, err := loadSigner(t.cfg.IdentityFile)
 		if err != nil {
@@ -203,7 +237,12 @@ func (t *Tunnel) authMethods() ([]ssh.AuthMethod, error) {
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
 
-	// Fall back to default key locations if no identity_file configured.
+	// SSH agent (YubiKey, gpg-agent, ssh-agent) — preferred over file keys.
+	if m := agentAuthMethod(); m != nil {
+		methods = append(methods, m)
+	}
+
+	// Last resort: well-known default key file locations.
 	if len(methods) == 0 {
 		home, _ := os.UserHomeDir()
 		for _, name := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {
@@ -216,10 +255,28 @@ func (t *Tunnel) authMethods() ([]ssh.AuthMethod, error) {
 	}
 
 	if len(methods) == 0 {
-		return nil, fmt.Errorf("no SSH authentication method available for tunnel %q", t.cfg.Name)
+		return nil, fmt.Errorf("no SSH authentication method available for tunnel %q; is ssh-agent running?", t.cfg.Name)
 	}
 
 	return methods, nil
+}
+
+// agentAuthMethod returns an ssh.AuthMethod backed by the running SSH agent,
+// or nil if SSH_AUTH_SOCK is not set or the socket cannot be opened.
+func agentAuthMethod() ssh.AuthMethod {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return nil
+	}
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		log.Debug("ssh-agent not available", "socket", sock, "err", err)
+		return nil
+	}
+
+	log.Debug("using ssh-agent", "socket", sock)
+	return ssh.PublicKeysCallback(agent.NewClient(conn).Signers)
 }
 
 func (t *Tunnel) hostKeyCallback() (ssh.HostKeyCallback, error) {
@@ -256,6 +313,7 @@ func loadSigner(path string) (ssh.Signer, error) {
 	}
 	return ssh.ParsePrivateKey(data)
 }
+
 
 // backoff implements capped exponential backoff.
 type backoff struct {

@@ -43,9 +43,10 @@ func (r *Router) UpdateRules(rules []config.Rule) {
 
 // DialContext selects the tunnel matching addr and dials through it.
 func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
+		port = ""
 	}
 
 	label, dialer, err := r.resolve(ctx, host)
@@ -53,8 +54,26 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 		return nil, err
 	}
 
-	log.Debug("routing connection", "host", host, "via", label)
+	log.Info("proxy",
+		"proto", inferProto(port),
+		"host", host,
+		"via", label,
+	)
 	return dialer.DialContext(ctx, network, addr)
+}
+
+// inferProto guesses the application protocol from the port number.
+func inferProto(port string) string {
+	switch port {
+	case "443", "8443":
+		return "https"
+	case "80", "8080":
+		return "http"
+	case "":
+		return "tcp"
+	default:
+		return "tcp/" + port
+	}
 }
 
 // resolve finds the matching rule and returns the label and dialer to use.

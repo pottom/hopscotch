@@ -1,0 +1,52 @@
+tunnels:
+  # go-a-scb and go-b-scb disabled: AllowTcpForwarding is off on these servers
+  # - name: go-a-scb
+  #   host: 10.215.0.90
+  #   port: 22
+  #   user: ibasa
+  #   local_port: 1080
+
+  # - name: go-b-scb
+  #   host: 10.215.16.90
+  #   port: 22
+  #   user: ibasa
+  #   local_port: 1081
+
+  - name: go-a-preprod-jump
+    host: 10.215.11.2
+    port: 22
+    user: fouriguser
+    identity_file: ~/.ssh/id_rsa
+    local_port: 1082
+
+  - name: go-b-preprod-jump
+    host: 10.215.27.2
+    port: 22
+    user: fouriguser
+    identity_file: ~/.ssh/id_rsa
+    local_port: 1083
+
+proxy:
+  port: 8888
+  rules:
+    # prod rules disabled until AllowTcpForwarding is enabled on SCB servers
+    # - pattern: "*.gslb.djdsz.hu"
+    #   tunnel: go-a-scb
+    # - pattern: "*.ocp4-prod-a.pdjsz.local"
+    #   tunnel: go-a-scb
+    # - pattern: "*.ocp4-prod-b.pdjsz.local"
+    #   tunnel: go-b-scb
+    - pattern: "*.tgslb.djdsz.hu"
+      tunnel: go-a-preprod-jump
+    - pattern: "*.tmlb.djdsz.hu"
+      tunnel: go-a-preprod-jump
+    - pattern: "*.ocp4-test-a.tdjsz.local"
+      tunnel: go-a-preprod-jump
+    - pattern: "*.ocp4-test-b.tdjsz.local"
+      tunnel: go-b-preprod-jump
+    - pattern: "*"
+      via: direct
+
+admin:
+  port: 8889
+  bind: "127.0.0.1"
