@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -115,6 +116,8 @@ func resolvePath(explicit string) (string, error) {
 }
 
 func applyDefaults(cfg *Config) {
+	home, _ := os.UserHomeDir()
+
 	for i := range cfg.Tunnels {
 		t := &cfg.Tunnels[i]
 		if t.Port == 0 {
@@ -128,6 +131,9 @@ func applyDefaults(cfg *Config) {
 		}
 		if t.ReconnectDelay == 0 {
 			t.ReconnectDelay = DefaultReconnectDelay
+		}
+		if home != "" && strings.HasPrefix(t.IdentityFile, "~/") {
+			t.IdentityFile = filepath.Join(home, t.IdentityFile[2:])
 		}
 	}
 

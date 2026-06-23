@@ -11,91 +11,154 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"hopscotch/internal/config"
 )
 
 var (
 	trustPort       int
 	trustKnownHosts string
+	trustYes        bool
 )
 
 var trustCmd = &cobra.Command{
-	Use:   "trust <host>",
-	Short: "Fetch and add a host's SSH fingerprint to known_hosts",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runTrust,
+	Use:   "trust <tunnel-name|host|all>",
+	Short: "Fetch and add SSH host fingerprints to known_hosts",
+	Long: `Connects to the host, captures its public key, and adds it to known_hosts.
+
+The argument can be:
+  - A tunnel name from the config (host and port are read automatically)
+  - A raw hostname or IP address
+  - "all" to trust every tunnel defined in the config at once`,
+	Args: cobra.ExactArgs(1),
+	RunE: runTrust,
 }
 
 func init() {
-	trustCmd.Flags().IntVar(&trustPort, "port", 22, "SSH port")
+	trustCmd.Flags().IntVar(&trustPort, "port", 0, "SSH port (default: from config or 22)")
 	trustCmd.Flags().StringVar(&trustKnownHosts, "known-hosts", "", "path to known_hosts file (default: ~/.ssh/known_hosts)")
+	trustCmd.Flags().BoolVarP(&trustYes, "yes", "y", false, "auto-confirm all fingerprints without prompting")
 	rootCmd.AddCommand(trustCmd)
 }
 
 func runTrust(cmd *cobra.Command, args []string) error {
-	host := args[0]
-	addr := fmt.Sprintf("%s:%d", host, trustPort)
-
 	knownHostsPath, err := resolveKnownHosts(trustKnownHosts)
 	if err != nil {
 		return err
 	}
 
-	// Check if already trusted.
-	if alreadyTrusted(host, trustPort, knownHostsPath) {
-		fmt.Printf("%s is already in %s\n", host, knownHostsPath)
+	if args[0] == "all" {
+		return trustAll(knownHostsPath)
+	}
+
+	host, port, label := resolveTrustTarget(args[0])
+	return trustOne(host, port, label, knownHostsPath)
+}
+
+func trustAll(knownHostsPath string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	var errs []string
+	for _, t := range cfg.Tunnels {
+		fmt.Printf("── %s ──\n", t.Name)
+		if err := trustOne(t.Host, t.Port, t.Name, knownHostsPath); err != nil {
+			log.Error("failed to trust host", "tunnel", t.Name, "err", err)
+			errs = append(errs, fmt.Sprintf("%s: %v", t.Name, err))
+		}
+		fmt.Println()
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%d tunnel(s) failed:\n  %s", len(errs), strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
+func trustOne(host string, port int, label, knownHostsPath string) error {
+	if alreadyTrusted(host, port, knownHostsPath) {
+		fmt.Printf("%s (%s:%d) is already trusted\n", label, host, port)
 		return nil
 	}
 
-	// Dial and capture the host key without verifying.
+	addr := fmt.Sprintf("%s:%d", host, port)
+
 	var capturedKey ssh.PublicKey
-	cfg := &ssh.ClientConfig{
+	sshCfg := &ssh.ClientConfig{
 		User: "hopscotch-trust",
 		Auth: []ssh.AuthMethod{ssh.Password("")},
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			capturedKey = key
-			return nil // accept any key during discovery
+			return nil
 		},
 		Timeout: 10 * time.Second,
 	}
 
-	conn, err := ssh.Dial("tcp", addr, cfg)
+	conn, err := ssh.Dial("tcp", addr, sshCfg)
 	if err != nil && capturedKey == nil {
 		return fmt.Errorf("connecting to %s: %w", addr, err)
 	}
 	if conn != nil {
 		conn.Close()
 	}
-
 	if capturedKey == nil {
 		return fmt.Errorf("failed to retrieve host key from %s", addr)
 	}
 
-	fingerprint := fingerprintSHA256(capturedKey)
-
-	fmt.Printf("Host:        %s:%d\n", host, trustPort)
-	fmt.Printf("Fingerprint: %s\n", fingerprint)
+	fmt.Printf("Tunnel:      %s\n", label)
+	fmt.Printf("Host:        %s:%d\n", host, port)
+	fmt.Printf("Fingerprint: %s\n", fingerprintSHA256(capturedKey))
 	fmt.Printf("Type:        %s\n", capturedKey.Type())
 	fmt.Println()
-	fmt.Print("Add to known_hosts? [y/N]: ")
 
-	reader := bufio.NewReader(os.Stdin)
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
-
-	if answer != "y" && answer != "yes" {
-		fmt.Println("Aborted.")
-		return nil
+	if !trustYes {
+		fmt.Print("Add to known_hosts? [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Skipped.")
+			return nil
+		}
 	}
 
-	if err := appendKnownHost(host, trustPort, capturedKey, knownHostsPath); err != nil {
+	if err := appendKnownHost(host, port, capturedKey, knownHostsPath); err != nil {
 		return fmt.Errorf("writing known_hosts: %w", err)
 	}
 
-	fmt.Printf("✓ Added %s to %s\n", host, knownHostsPath)
+	fmt.Printf("✓ Added %s (%s) to %s\n", label, host, knownHostsPath)
 	return nil
+}
+
+// resolveTrustTarget looks up arg as a tunnel name in the config.
+// If found, returns the tunnel's host and port. Otherwise treats arg as a raw host.
+func resolveTrustTarget(arg string) (host string, port int, label string) {
+	flagPort := trustPort
+
+	cfg, err := config.Load(configPath)
+	if err == nil {
+		for _, t := range cfg.Tunnels {
+			if t.Name == arg {
+				p := t.Port
+				if flagPort != 0 {
+					p = flagPort
+				}
+				return t.Host, p, t.Name
+			}
+		}
+	}
+
+	p := flagPort
+	if p == 0 {
+		p = 22
+	}
+	return arg, p, arg
 }
 
 func resolveKnownHosts(override string) (string, error) {
@@ -110,12 +173,6 @@ func resolveKnownHosts(override string) (string, error) {
 }
 
 func alreadyTrusted(host string, port int, knownHostsPath string) bool {
-	_, err := knownhosts.New(knownHostsPath)
-	if err != nil {
-		return false
-	}
-	// A quick check: try parsing — if the file has an entry for this host,
-	// the callback would not error on a matching key. We just check file existence.
 	data, err := os.ReadFile(knownHostsPath)
 	if err != nil {
 		return false

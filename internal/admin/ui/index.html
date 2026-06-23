@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hopscotch</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'><circle cx='6' cy='26' r='5' fill='%2338bdf8'/><circle cx='30' cy='26' r='5' fill='%23818cf8'/><path d='M11 26 Q18 7 25 26' stroke='%2338bdf8' stroke-width='2.5' stroke-linecap='round' fill='none'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="header">
+  <div class="logo">
+    <svg width="32" height="32" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="6"  cy="26" r="5" fill="#38bdf8" opacity=".9"/>
+      <circle cx="30" cy="26" r="5" fill="#818cf8" opacity=".9"/>
+      <path d="M11 26 Q18 7 25 26" stroke="url(#g)" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+      <circle id="hop-dot" cx="18" cy="14.5" r="2.6" fill="#38bdf8" opacity=".85"/>
+      <defs>
+        <linearGradient id="g" x1="11" y1="26" x2="25" y2="26" gradientUnits="userSpaceOnUse">
+          <stop offset="0%"   stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#818cf8"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    <span class="logo-wordmark">hopscotch</span>
+  </div>
+
+  <span id="overall-badge" class="badge">…</span>
+  <div class="header-meta" id="header-meta">—</div>
+</header>
+
+<main class="main">
+  <div class="section-label">Tunnels</div>
+  <div class="tunnel-grid" id="grid">
+    <div class="empty">loading…</div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="footer-ports" id="footer-ports"></div>
+  <div id="footer-ts"></div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

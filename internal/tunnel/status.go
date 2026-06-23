@@ -30,4 +30,5 @@ type Stats struct {
 	ConnectedAt    time.Time
 	ReconnectCount int
 	LocalPort      int
+	Host           string // SSH server address (host:port)
 }
