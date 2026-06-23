@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -23,7 +24,7 @@ import (
 )
 
 var (
-	foreground    bool
+	foreground       bool
 	restartIfRunning bool
 )
 
@@ -34,7 +35,7 @@ var startCmd = &cobra.Command{
 }
 
 func init() {
-	startCmd.Flags().BoolVar(&foreground, "foreground", false, "run in the foreground (default in containers)")
+	startCmd.Flags().BoolVar(&foreground, "foreground", false, "run in the foreground instead of daemonizing")
 	startCmd.Flags().BoolVar(&restartIfRunning, "restart", false, "kill the running instance and restart without prompting")
 	rootCmd.AddCommand(startCmd)
 }
@@ -58,6 +59,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if err := handleAlreadyRunning(pid, stateMgr); err != nil {
 			return err
 		}
+	}
+
+	if !foreground {
+		return daemonize()
 	}
 
 	if err := stateMgr.WritePID(); err != nil {
@@ -92,6 +97,52 @@ func runStart(cmd *cobra.Command, args []string) error {
 	g.Go(func() error { return adminSrv.ListenAndServe(ctx) })
 
 	return g.Wait()
+}
+
+// daemonize re-execs the current binary with --foreground, detached from the
+// terminal. The parent waits briefly to catch immediate startup failures, then
+// prints the PID and exits.
+func daemonize() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding executable: %w", err)
+	}
+
+	childArgs := []string{"start", "--foreground"}
+	if configPath != "" {
+		childArgs = append(childArgs, "--config", configPath)
+	}
+
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		return fmt.Errorf("opening /dev/null: %w", err)
+	}
+	defer devNull.Close()
+
+	child := exec.Command(exe, childArgs...)
+	child.Stdin = devNull
+	child.Stdout = devNull
+	child.Stderr = devNull
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := child.Start(); err != nil {
+		return fmt.Errorf("starting daemon: %w", err)
+	}
+
+	// Wait briefly: if the process dies within 600ms it failed to start.
+	done := make(chan error, 1)
+	go func() { done <- child.Wait() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("daemon exited immediately: %w", err)
+		}
+		return fmt.Errorf("daemon exited immediately with no error")
+	case <-time.After(600 * time.Millisecond):
+		fmt.Printf("hopscotch started (PID %d)\n", child.Process.Pid)
+		return nil
+	}
 }
 
 // handleAlreadyRunning prompts the user (or uses --restart flag) to decide
