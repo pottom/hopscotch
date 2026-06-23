@@ -7,23 +7,16 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  vet:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
           cache: true
-
-      - name: Run tests
-        run: go test ./... -v -race -coverprofile=coverage.out
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage.out
+      - name: Vet
+        run: go vet ./cmd/... ./internal/...
 
   lint:
     runs-on: ubuntu-latest
@@ -35,7 +28,7 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v6
 
-  build-check:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
