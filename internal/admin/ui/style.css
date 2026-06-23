@@ -108,6 +108,23 @@ body {
   border-color: var(--border);
 }
 
+/* ── STATS BAR ───────────────────────────── */
+.stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1.75rem;
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
+.stats-in   { color: var(--accent); }
+.stats-out  { color: var(--accent2); }
+.stats-conn { color: var(--muted); }
+.stats-sep  { color: var(--border); }
+
 /* ── MAIN ────────────────────────────────── */
 main, main.main {
   display: block;
@@ -147,7 +164,8 @@ main, main.main {
   flex-shrink: 0;
 }
 .dot.connected    { background: var(--connected);    animation: glow-green 2.4s ease-in-out infinite; }
-.dot.connecting   { background: var(--connecting);   animation: blink 1s ease-in-out infinite; }
+.dot.connecting,
+.dot.warning      { background: var(--connecting);   animation: blink 1s ease-in-out infinite; }
 .dot.disconnected { background: var(--disconnected); }
 
 @keyframes glow-green {
@@ -165,7 +183,8 @@ main, main.main {
   font-weight: 500;
 }
 .status-label.connected    { color: var(--connected); }
-.status-label.connecting   { color: var(--connecting); }
+.status-label.connecting,
+.status-label.warning      { color: var(--connecting); }
 .status-label.disconnected { color: var(--disconnected); }
 
 /* ── TRAFFIC CARDS ───────────────────────── */
@@ -187,7 +206,8 @@ main, main.main {
   border-radius: 9px 0 0 9px;
 }
 .tc-card.connected::before    { background: var(--connected); }
-.tc-card.connecting::before   { background: var(--connecting); }
+.tc-card.connecting::before,
+.tc-card.warning::before      { background: var(--connecting); }
 .tc-card.disconnected::before { background: var(--disconnected); }
 .tc-card.tc-direct::before    { background: var(--muted); }
 
@@ -253,6 +273,13 @@ main, main.main {
 .tc-reconnect-cd {
   color: var(--connecting);
   font-variant-numeric: tabular-nums;
+}
+
+.tc-ka-warn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--connecting);
 }
 
 /* bps + active — pushed to the right */

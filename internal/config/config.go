@@ -32,7 +32,8 @@ type TunnelConfig struct {
 	DialTimeout        int    `yaml:"dial_timeout"`        // seconds; SSH TCP + handshake
 	KeepaliveInterval  int    `yaml:"keepalive_interval"`  // seconds between keepalive probes
 	KeepaliveMaxFails  int    `yaml:"keepalive_max_fails"` // consecutive failures before reconnect
-	ReconnectDelay     int    `yaml:"reconnect_delay"`     // initial backoff seconds (doubles up to 2m)
+	ReconnectDelay    int `yaml:"reconnect_delay"`     // initial backoff seconds
+	ReconnectMaxDelay int `yaml:"reconnect_max_delay"` // backoff cap seconds
 }
 
 // Rule maps a host pattern to a tunnel name or "direct".
@@ -135,6 +136,9 @@ func applyDefaults(cfg *Config) {
 		}
 		if t.ReconnectDelay == 0 {
 			t.ReconnectDelay = DefaultReconnectDelay
+		}
+		if t.ReconnectMaxDelay == 0 {
+			t.ReconnectMaxDelay = DefaultReconnectMaxDelay
 		}
 		if home != "" && strings.HasPrefix(t.IdentityFile, "~/") {
 			t.IdentityFile = filepath.Join(home, t.IdentityFile[2:])

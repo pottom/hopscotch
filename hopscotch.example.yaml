@@ -1,0 +1,38 @@
+tunnels:
+  - name: prod-jump
+    host: 10.0.0.1
+    port: 22
+    user: myuser
+    local_port: 1080
+    # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent)
+    dial_timeout: 15                 # seconds; TCP connect + SSH handshake
+    keepalive_interval: 5            # seconds between keepalive probes
+    keepalive_max_fails: 2           # consecutive failures → reconnect (= 10s dead window)
+    reconnect_delay: 5               # initial backoff seconds (doubles each attempt)
+    reconnect_max_delay: 30          # backoff cap seconds
+
+  - name: staging-jump
+    host: 10.0.1.1
+    port: 22
+    user: myuser
+    identity_file: ~/.ssh/id_rsa
+    local_port: 1081
+    dial_timeout: 15
+    keepalive_interval: 5
+    keepalive_max_fails: 2
+    reconnect_delay: 5
+    reconnect_max_delay: 30
+
+proxy:
+  port: 8080
+  rules:
+    - pattern: "*.prod.internal"
+      tunnel: prod-jump
+    - pattern: "*.staging.internal"
+      tunnel: staging-jump
+    - pattern: "*"
+      via: direct          # everything else goes direct
+
+admin:
+  port: 9090
+  bind: "127.0.0.1"       # change to 0.0.0.0 to expose in containers

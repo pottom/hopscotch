@@ -32,6 +32,7 @@ type Stats struct {
 	ReconnectCount  int
 	LocalPort       int
 	Host            string // SSH server address (host:port)
+	KeepaliveFailures int // consecutive failures; resets to 0 on success or reconnect
 	// Traffic counters — cumulative since process start.
 	BytesIn     uint64
 	BytesOut    uint64

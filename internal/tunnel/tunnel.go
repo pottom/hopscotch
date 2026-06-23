@@ -84,6 +84,7 @@ func (t *Tunnel) DialContext(_ context.Context, network, addr string) (net.Conn,
 	return &countingConn{Conn: conn, tunnel: t}, nil
 }
 
+
 // countingConn wraps net.Conn to track bytes transferred and active connection count.
 type countingConn struct {
 	net.Conn
@@ -129,16 +130,23 @@ func isTCPForwardingDenied(err error) bool {
 func (t *Tunnel) Run(ctx context.Context) error {
 	backoff := newBackoff(
 		time.Duration(t.cfg.ReconnectDelay)*time.Second,
-		2*time.Minute,
+		time.Duration(t.cfg.ReconnectMaxDelay)*time.Second,
 	)
 
 	for {
+		// Clear reconnect timer so the UI shows "connecting" during the dial,
+		// not a stale countdown frozen at 0s.
+		s0 := t.Stats()
+		s0.NextReconnectAt = time.Time{}
+		t.stats.Store(s0)
+
 		if err := t.dial(ctx); err != nil {
 			log.Warn("tunnel dial failed",
 				"tunnel", t.cfg.Name,
 				"err", err,
 			)
 		} else {
+			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
 			t.keepalive(ctx)
 		}
 
@@ -212,6 +220,7 @@ func (t *Tunnel) dial(ctx context.Context) error {
 
 func (t *Tunnel) keepalive(ctx context.Context) {
 	interval := time.Duration(t.cfg.KeepaliveInterval) * time.Second
+	probeTimeout := time.Duration(t.cfg.DialTimeout) * time.Second
 	fails := 0
 
 	for {
@@ -221,10 +230,12 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 		case <-t.clock.After(interval):
 		}
 
-		_, _, err := t.client.SendRequest("keepalive@openssh.com", true, nil)
+		err := t.sendKeepalive(ctx, probeTimeout)
 		if err != nil {
-			// err != nil means the connection is broken, not just unsupported.
 			fails++
+			s := t.stats.Load().(Stats)
+			s.KeepaliveFailures = fails
+			t.stats.Store(s)
 			log.Warn("keepalive failed",
 				"tunnel", t.cfg.Name,
 				"fails", fails,
@@ -237,9 +248,34 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 			}
 			continue
 		}
-		// ok=false but err=nil means the server doesn't support the request type —
-		// the connection is still alive, so reset the failure counter.
+		// Reset on success.
+		if fails > 0 {
+			s := t.stats.Load().(Stats)
+			s.KeepaliveFailures = 0
+			t.stats.Store(s)
+		}
 		fails = 0
+	}
+}
+
+// sendKeepalive sends a single keepalive probe with a timeout equal to the
+// keepalive interval. Without this timeout, SendRequest blocks for the full OS
+// TCP retransmit window (~75s on macOS) when the remote becomes unreachable
+// (e.g. VPN drops without sending RST), masking the failure.
+func (t *Tunnel) sendKeepalive(ctx context.Context, timeout time.Duration) error {
+	type result struct{ err error }
+	ch := make(chan result, 1)
+	go func() {
+		_, _, err := t.client.SendRequest("keepalive@openssh.com", true, nil)
+		ch <- result{err}
+	}()
+	select {
+	case res := <-ch:
+		return res.err
+	case <-t.clock.After(timeout):
+		return fmt.Errorf("keepalive timeout after %s", timeout)
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

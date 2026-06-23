@@ -91,6 +91,27 @@ document.addEventListener('alpine:init', () => {
     tunnelList() {
       return Object.keys(this.tunnels).sort();
     },
+
+    // Returns the effective visual state for a tunnel — mirrors TUI renderStatus logic.
+    // connected + keepalive_failures > 0 → 'warning' (amber, same as connecting visuals)
+    visualStatus(name) {
+      const t = this.tunnels[name];
+      if (!t) return '';
+      if (t.status === 'connected' && t.keepalive_failures > 0) return 'warning';
+      return t.status;
+    },
+
+    totalStats() {
+      let bpsIn = this.direct.bps_in || 0;
+      let bpsOut = this.direct.bps_out || 0;
+      let active = this.direct.active || 0;
+      for (const t of Object.values(this.tunnels)) {
+        bpsIn  += t.bps_in  || 0;
+        bpsOut += t.bps_out || 0;
+        active += t.active  || 0;
+      }
+      return { bpsIn, bpsOut, active };
+    },
   });
 });
 
@@ -115,15 +136,16 @@ async function refreshStatus() {
     for (const [name, t] of Object.entries(st.tunnels || {})) {
       const prev = store.tunnels[name] || {};
       next[name] = {
-        status:          t.status,
-        host:            t.host,
-        local_port:      t.local_port,
-        uptime_seconds:  t.uptime_seconds,
-        reconnect_count: t.reconnect_count,
-        bps_in:          prev.bps_in       ?? 0,
-        bps_out:         prev.bps_out      ?? 0,
-        active:          prev.active       ?? 0,
-        reconnect_in:    prev.reconnect_in ?? null,
+        status:             t.status,
+        host:               t.host,
+        local_port:         t.local_port,
+        uptime_seconds:     t.uptime_seconds,
+        reconnect_count:    t.reconnect_count,
+        keepalive_failures: t.keepalive_failures || 0,
+        bps_in:             prev.bps_in       ?? 0,
+        bps_out:            prev.bps_out      ?? 0,
+        active:             prev.active       ?? 0,
+        reconnect_in:       prev.reconnect_in ?? null,
       };
     }
     store.tunnels = next;

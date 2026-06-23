@@ -35,7 +35,7 @@
 
   <span class="badge" :class="$store.hop.meta.status" x-text="$store.hop.meta.status"></span>
   <div class="header-meta">
-    <span x-text="'v' + $store.hop.meta.version"></span>
+    <span x-text="$store.hop.meta.version"></span>
     <span class="header-sep">·</span>
     <span x-text="'PID ' + $store.hop.meta.pid"></span>
     <span class="header-sep">·</span>
@@ -47,13 +47,21 @@
   </nav>
 </header>
 
+<div class="stats-bar">
+  <span class="stats-in"   x-text="'↓ ' + fmtBytes($store.hop.totalStats().bpsIn)  + '/s'"></span>
+  <span class="stats-sep">·</span>
+  <span class="stats-out"  x-text="'↑ ' + fmtBytes($store.hop.totalStats().bpsOut) + '/s'"></span>
+  <span class="stats-sep">·</span>
+  <span class="stats-conn" x-text="$store.hop.totalStats().active + ' conn total'"></span>
+</div>
+
 <main class="main">
   <div class="section-label">Tunnels</div>
 
   <!-- one card per tunnel -->
   <template x-for="name in $store.hop.tunnelList()" :key="name">
     <div class="tc-card"
-         :class="$store.hop.tunnels[name]?.status"
+         :class="$store.hop.visualStatus(name)"
          x-init="$nextTick(() => initChart(name, $el))">
 
       <div class="tc-header">
@@ -63,10 +71,13 @@
         </div>
 
         <div class="tc-status-group">
-          <span class="dot" :class="$store.hop.tunnels[name]?.status"></span>
+          <span class="dot" :class="$store.hop.visualStatus(name)"></span>
           <span class="status-label"
-                :class="$store.hop.tunnels[name]?.status"
+                :class="$store.hop.visualStatus(name)"
                 x-text="$store.hop.tunnels[name]?.status || '…'"></span>
+          <span class="tc-ka-warn"
+                x-show="$store.hop.tunnels[name]?.keepalive_failures > 0"
+                x-text="'⚠ ' + $store.hop.tunnels[name]?.keepalive_failures"></span>
         </div>
 
         <div class="tc-info">
@@ -78,7 +89,7 @@
                 x-show="$store.hop.tunnels[name]?.reconnect_count > 0"
                 x-text="'recon ' + $store.hop.tunnels[name]?.reconnect_count"></span>
           <span class="tc-info-item tc-reconnect-cd"
-                x-show="$store.hop.tunnels[name]?.status === 'connecting' && $store.hop.tunnels[name]?.reconnect_in != null"
+                x-show="$store.hop.tunnels[name]?.status === 'connecting' && $store.hop.tunnels[name]?.reconnect_in != null && $store.hop.tunnels[name]?.reconnect_in >= 0"
                 x-text="'next in ' + $store.hop.tunnels[name]?.reconnect_in + 's'"></span>
         </div>
 

@@ -7,22 +7,27 @@ $ hopscotch start
 hopscotch started (PID 12345)
 
 $ hopscotch status
-hopscotch dev  ✓ healthy  PID 12345  up 3m
-
-TUNNEL                   PORT   STATUS         UPTIME   RECONNECTS
-─────────────────────────────────────────────────────────────────
-go-a-preprod-jump        1082   ✓ connected    3m12s    0
-go-b-preprod-jump        1083   ✓ connected    3m11s    0
+╭─ hopscotch v0.3.0  ✓ healthy  PID 12345  up 3m ────────────────────╮
+│ ↓ 1.2 KB/s  ↑ 842 B/s  3 conn total                                │
+├─────────────────────────────────────────────────────────────────────┤
+│ prod-jump          :1080  ● connected   3m12s   0 reconnects        │
+│ ⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦                                              │
+├─────────────────────────────────────────────────────────────────────┤
+│ staging-jump       :1081  ● connected   3m11s   0 reconnects        │
+│ ⣀⣀⣄⣄⣤⣤⣦⣦⣶⣶⣷⣷⣿⣷⣦⣤⣄⣀⣀⣄                                              │
+╰─────────────────────────────────────────────────────────────────────╯
 ```
 
 ## Features
 
+- **Interactive TUI** — `hopscotch status` opens a live dashboard with sparkline traffic graphs, reconnect countdowns, and keepalive indicators
 - **Automatic reconnect** with exponential backoff — tunnels come back on their own after network interruptions
+- **Fast VPN drop detection** — keepalive timeout matches `dial_timeout`; dead connections detected in seconds, not minutes
 - **SOCKS5 proxy router** on a single port that routes each connection through the right tunnel based on hostname pattern
 - **Pattern matching** — `*.example.com`, `10.0.1.*`, exact hosts, and `*` catch-all; first match wins
 - **SSH agent support** — works with YubiKey, gpg-agent, and ssh-agent out of the box
-- **Hot reload** — send `SIGHUP` to apply config changes without restart
-- **Admin UI** — built-in web dashboard with live traffic graphs per tunnel
+- **Hot reload** — config reloads automatically on file change or `SIGHUP`; no restart needed
+- **Admin UI** — built-in web dashboard with live traffic graphs, keepalive status, and global stats
 - **Prometheus metrics** — `/metrics` endpoint with bytes, active connections, and reconnect counters
 - **Health endpoint** — `GET /health` for load balancers and container probes
 - **Multiarch Docker image** — `linux/amd64` and `linux/arm64`
@@ -46,7 +51,10 @@ docker pull ghcr.io/pottom/hopscotch:latest
 
 ## Quick start
 
-1. Create `hopscotch.yaml` (see [Configuration](#configuration) below)
+1. Copy the example config and edit it:
+   ```bash
+   cp hopscotch.example.yaml hopscotch.yaml
+   ```
 2. Trust your SSH hosts:
    ```bash
    hopscotch trust all
@@ -63,6 +71,8 @@ docker pull ghcr.io/pottom/hopscotch:latest
 
 ## Configuration
 
+See [`hopscotch.example.yaml`](hopscotch.example.yaml) for a full example. Minimal config:
+
 ```yaml
 tunnels:
   - name: prod-jump
@@ -72,9 +82,10 @@ tunnels:
     local_port: 1080
     # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent)
     dial_timeout: 15                 # seconds; TCP connect + SSH handshake
-    keepalive_interval: 30           # seconds between keepalive probes
-    keepalive_max_fails: 3           # consecutive failures → reconnect
-    reconnect_delay: 5               # initial backoff (doubles each attempt, max 2m)
+    keepalive_interval: 5            # seconds between keepalive probes
+    keepalive_max_fails: 2           # consecutive failures → reconnect
+    reconnect_delay: 5               # initial backoff seconds (doubles each attempt)
+    reconnect_max_delay: 30          # backoff cap seconds
 
   - name: staging-jump
     host: 10.0.1.1
@@ -109,9 +120,10 @@ admin:
 | `identity_file` | | — | Path to private key; omit to use SSH agent |
 | `local_port` | ✓ | — | Local SOCKS5 port for this tunnel |
 | `dial_timeout` | | `30` | SSH TCP connect + handshake timeout in seconds |
-| `keepalive_interval` | | `30` | Keepalive probe interval in seconds |
-| `keepalive_max_fails` | | `3` | Consecutive failures before reconnect |
-| `reconnect_delay` | | `5` | Initial reconnect delay in seconds (doubles each attempt, max 2 min) |
+| `keepalive_interval` | | `5` | Keepalive probe interval in seconds |
+| `keepalive_max_fails` | | `2` | Consecutive failures before reconnect |
+| `reconnect_delay` | | `5` | Initial reconnect delay in seconds (doubles each attempt) |
+| `reconnect_max_delay` | | `30` | Reconnect backoff cap in seconds |
 
 ### Proxy rules
 
@@ -133,7 +145,7 @@ hopscotch start              # start daemon (detaches from terminal)
 hopscotch start --foreground # stay in foreground (for Docker, systemd)
 hopscotch start --restart    # replace a running instance without prompting
 hopscotch stop               # stop the daemon
-hopscotch status             # show live tunnel and proxy status
+hopscotch status             # interactive TUI (plain text when piped)
 hopscotch trust <name|host|all>  # add SSH host key to known_hosts
 hopscotch validate           # validate the config file
 hopscotch version            # print version information
@@ -142,7 +154,7 @@ hopscotch version            # print version information
 Global flags:
 ```
 --config <path>    path to config file (default: hopscotch.yaml)
---log-level        debug | info | warn | error (default: info)
+--verbose          enable debug logging
 ```
 
 ## Using the proxy
@@ -169,19 +181,22 @@ The web dashboard is available at `http://localhost:9090` (or whichever port `ad
 
 Each tunnel gets its own full-width card showing:
 
-- **Status** — animated dot: green (connected), amber blinking (connecting), red (disconnected)
+- **Status** — animated dot: green (connected), amber blinking (connecting/keepalive warning), red (disconnected)
 - **Host** — the SSH server address
 - **SOCKS5 port** — the local port for this tunnel
 - **Uptime** — how long the tunnel has been connected in the current session
 - **Reconnect countdown** — when connecting, shows _next in Ns_ so you know when the next attempt fires
 - **Reconnect count** — total reconnects since start
+- **Keepalive failures** — ⚠N badge when consecutive keepalive probes fail
 - **Live throughput** — ↓ bytes/s in and ↑ bytes/s out, updated every second via SSE
 - **Active connections** — current number of open connections through this tunnel
-- **Sparkline chart** — 60-second rolling traffic graph (Chart.js, no page reloads)
+- **Sparkline chart** — rolling traffic graph
+
+A **global stats bar** at the top shows combined throughput and active connections across all tunnels.
 
 A **direct** card at the bottom tracks connections that bypassed the tunnels (matched a `via: direct` rule or the catch-all fallback).
 
-The UI is powered by [Alpine.js](https://alpinejs.dev/) and updates in-place via Server-Sent Events — no polling, no full-page refreshes, no choppy redraws.
+The UI updates in-place via Server-Sent Events — no polling, no full-page refreshes.
 
 ### API endpoints
 

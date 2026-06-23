@@ -1,43 +1,112 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/charmbracelet/log"
 )
 
-// ReloadFunc is called with the new config after a successful SIGHUP reload.
+// ReloadFunc is called with the new config after a successful reload.
 type ReloadFunc func(old, new *Config)
 
-// WatchSIGHUP listens for SIGHUP and reloads the config at cfg.Path.
-// On success it calls fn; on error it logs a warning and keeps the old config.
+// WatchSIGHUP listens for SIGHUP and watches the config file for changes.
+// On either trigger it reloads the config and calls fn.
 // Blocks until ctx is cancelled — call in a goroutine.
-func WatchSIGHUP(current *Config, fn ReloadFunc) {
+func WatchSIGHUP(ctx context.Context, current *Config, fn ReloadFunc) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGHUP)
 	defer signal.Stop(ch)
 
-	for range ch {
-		next, err := Load(current.Path)
-		if err != nil {
-			log.Warn("config reload failed, keeping current config", "err", err)
-			continue
+	var mtime time.Time
+	if fi, err := os.Stat(current.Path); err == nil {
+		mtime = fi.ModTime()
+	}
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ch:
+			if next := applyReload(current, fn, "SIGHUP"); next != nil {
+				current = next
+				mtime = currentMtime(current.Path)
+			}
+		case <-ticker.C:
+			fi, err := os.Stat(current.Path)
+			if err != nil || !fi.ModTime().After(mtime) {
+				continue
+			}
+			mtime = fi.ModTime()
+			if next := applyReload(current, fn, "file change"); next != nil {
+				current = next
+			}
 		}
+	}
+}
 
-		warnIfRestartRequired(current, next)
-		fn(current, next)
+func applyReload(current *Config, fn ReloadFunc, via string) *Config {
+	next, err := Load(current.Path)
+	if err != nil {
+		log.Warn("config reload failed, keeping current config", "err", err)
+		return nil
+	}
 
-		added, removed := tunnelDiff(current.Tunnels, next.Tunnels)
-		log.Info("config reloaded",
-			"tunnels_added", added,
-			"tunnels_removed", removed,
-			"rules_updated", fmt.Sprintf("%v", len(next.Proxy.Rules) != len(current.Proxy.Rules)),
+	warnIfRestartRequired(current, next)
+	fn(current, next)
+
+	added, removed := tunnelDiff(current.Tunnels, next.Tunnels)
+	log.Info("config reloaded",
+		"via", via,
+		"tunnels_added", added,
+		"tunnels_removed", removed,
+	)
+	LogConfig(next)
+	return next
+}
+
+func currentMtime(path string) time.Time {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
+}
+
+// LogConfig logs the tunnel and route config in the same format as startup.
+func LogConfig(cfg *Config) {
+	home, _ := os.UserHomeDir()
+	for _, t := range cfg.Tunnels {
+		keyField := "agent"
+		if t.IdentityFile != "" {
+			key := t.IdentityFile
+			if home != "" && strings.HasPrefix(key, home) {
+				key = "~" + key[len(home):]
+			}
+			keyField = key
+		}
+		log.Info("tunnel",
+			"name", t.Name,
+			"host", fmt.Sprintf("%s:%d", t.Host, t.Port),
+			"user", t.User,
+			"socks5", fmt.Sprintf(":%d", t.LocalPort),
+			"key", keyField,
 		)
-
-		current = next
+	}
+	for _, r := range cfg.Proxy.Rules {
+		via := r.Tunnel
+		if r.Via != "" {
+			via = r.Via
+		}
+		log.Info("route", "pattern", r.Pattern, "via", via)
 	}
 }
 
