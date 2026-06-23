@@ -11,9 +11,9 @@ import (
 
 	"github.com/charmbracelet/log"
 
+	"hopscotch/internal/logger"
 	"hopscotch/internal/tunnel"
 )
-
 
 // TunnelStatter exposes tunnel statistics to the admin server.
 type TunnelStatter interface {
@@ -34,6 +34,7 @@ type Server struct {
 	readme    []byte
 	tunnels   TunnelStatter
 	direct    DirectStatter
+	logs      *logger.Broadcaster
 	startedAt time.Time
 }
 
@@ -48,6 +49,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, direct D
 		readme:    readme,
 		tunnels:   tunnels,
 		direct:    direct,
+		logs:      logger.GetBroadcaster(),
 		startedAt: time.Now(),
 	}
 }
@@ -60,6 +62,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /readme", s.handleReadme)
 	mux.HandleFunc("GET /traffic/stream", s.handleTrafficStream)
+	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
 	sub, _ := fs.Sub(uiFiles, "ui")
 	mux.Handle("GET /", http.FileServerFS(sub))
 

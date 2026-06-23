@@ -150,7 +150,7 @@ async function refreshStatus() {
     }
     store.tunnels = next;
 
-    document.title = `hopscotch v${st.version}`;
+    document.title = `hopscotch ${st.version}`;
   } catch {
     Alpine.store('hop').meta.status = 'offline';
   }
@@ -200,6 +200,84 @@ document.addEventListener('alpine:initialized', () => {
     setInterval(tick, 1000);
   }
 });
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+const TAB_INIT = {};
+
+window.switchTab = function(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#tab-bar a').forEach(a => {
+    a.classList.toggle('active', a.dataset.tab === name);
+  });
+  document.getElementById('panel-' + name).classList.add('active');
+
+  if (!TAB_INIT[name]) {
+    TAB_INIT[name] = true;
+    if (name === 'logs')  initLogStream();
+    if (name === 'docs')  initDocs();
+  }
+};
+
+// ── Log SSE stream ────────────────────────────────────────────────────────────
+
+const MAX_LOG_LINES = 500;
+let logLineCount = 0;
+let ansiUp = null;
+
+function getAnsiUp() {
+  if (!ansiUp && window.AnsiUp) {
+    ansiUp = new AnsiUp();
+    ansiUp.use_classes = false;
+  }
+  return ansiUp;
+}
+
+function appendLogLine(scroll, raw) {
+  const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+  const au = getAnsiUp();
+  const html = au ? au.ansi_to_html(raw) : raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  div.innerHTML = html;
+  scroll.appendChild(div);
+  logLineCount++;
+  if (logLineCount > MAX_LOG_LINES) {
+    scroll.firstElementChild?.remove();
+    logLineCount--;
+  }
+  if (atBottom) scroll.scrollTop = scroll.scrollHeight;
+}
+
+function initLogStream() {
+  const scroll = document.getElementById('log-scroll');
+  if (!scroll) return;
+
+  const cursor = document.createElement('div');
+  cursor.innerHTML = '<span class="log-cursor">▌</span>';
+
+  const es = new EventSource('/logs/stream');
+  es.onmessage = e => {
+    cursor.remove();
+    appendLogLine(scroll, e.data);
+    scroll.appendChild(cursor);
+    scroll.scrollTop = scroll.scrollHeight;
+  };
+  es.onerror = () => { es.close(); setTimeout(initLogStream, 3000); };
+
+  scroll.appendChild(cursor);
+}
+
+// ── Docs tab ──────────────────────────────────────────────────────────────────
+
+function initDocs() {
+  const el = document.getElementById('docs-content');
+  if (!el) return;
+  fetch('/readme')
+    .then(r => r.text())
+    .then(md => { el.innerHTML = marked.parse(md); })
+    .catch(() => { el.innerHTML = '<p style="color:var(--muted)">Could not load documentation.</p>'; });
+}
 
 // ── Logo animation ────────────────────────────────────────────────────────────
 
