@@ -45,13 +45,6 @@ func New(cfg config.TunnelConfig) *Tunnel {
 	return t
 }
 
-// newWithClock is used in tests to inject a fake clock.
-func newWithClock(cfg config.TunnelConfig, clk Clock) *Tunnel {
-	t := &Tunnel{cfg: cfg, clock: clk}
-	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
-	return t
-}
-
 // Stats returns a snapshot of the tunnel's current metrics.
 func (t *Tunnel) Stats() Stats { return t.stats.Load().(Stats) }
 
