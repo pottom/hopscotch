@@ -11,11 +11,12 @@ import (
 
 // TunnelStatusJSON is the per-tunnel block in the /status response.
 type TunnelStatusJSON struct {
-	Status         string  `json:"status"`
-	Host           string  `json:"host"`
-	LocalPort      int     `json:"local_port"`
-	ReconnectCount int     `json:"reconnect_count"`
-	UptimeSeconds  float64 `json:"uptime_seconds"`
+	Status            string  `json:"status"`
+	Host              string  `json:"host"`
+	LocalPort         int     `json:"local_port"`
+	ReconnectCount    int     `json:"reconnect_count"`
+	UptimeSeconds     float64 `json:"uptime_seconds"`
+	KeepaliveFailures int     `json:"keepalive_failures,omitempty"`
 }
 
 // StatusResponse is the full /status JSON response.
@@ -43,11 +44,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			allConnected = false
 		}
 		tunnels[name] = TunnelStatusJSON{
-			Status:         st.Status.String(),
-			Host:           st.Host,
-			LocalPort:      st.LocalPort,
-			ReconnectCount: st.ReconnectCount,
-			UptimeSeconds:  uptime,
+			Status:            st.Status.String(),
+			Host:              st.Host,
+			LocalPort:         st.LocalPort,
+			ReconnectCount:    st.ReconnectCount,
+			UptimeSeconds:     uptime,
+			KeepaliveFailures: st.KeepaliveFailures,
 		}
 	}
 

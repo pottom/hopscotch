@@ -77,7 +77,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	proxySrv := proxy.NewServer(cfg.Proxy.Port, router)
 	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, router, ReadmeContent)
 
-	go config.WatchSIGHUP(cfg, func(old, next *config.Config) {
+	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)
 		router.UpdateRules(next.Proxy.Rules)
 	})
@@ -87,7 +87,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		"admin", fmt.Sprintf("%s:%d", cfg.Admin.Bind, cfg.Admin.Port),
 		"tunnels", len(cfg.Tunnels),
 	)
-	logConfig(cfg)
+	config.LogConfig(cfg)
 
 	g, ctx := errgroup.WithContext(ctx)
 
@@ -166,32 +166,3 @@ func isRunning(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-func logConfig(cfg *config.Config) {
-	home, _ := os.UserHomeDir()
-
-	for _, t := range cfg.Tunnels {
-		keyField := "agent"
-		if t.IdentityFile != "" {
-			key := t.IdentityFile
-			if home != "" && strings.HasPrefix(key, home) {
-				key = "~" + key[len(home):]
-			}
-			keyField = key
-		}
-		log.Info("tunnel",
-			"name", t.Name,
-			"host", fmt.Sprintf("%s:%d", t.Host, t.Port),
-			"user", t.User,
-			"socks5", fmt.Sprintf(":%d", t.LocalPort),
-			"key", keyField,
-		)
-	}
-
-	for _, r := range cfg.Proxy.Rules {
-		via := r.Tunnel
-		if r.Via != "" {
-			via = r.Via
-		}
-		log.Info("route", "pattern", r.Pattern, "via", via)
-	}
-}

@@ -111,7 +111,8 @@ admin:
 | `dial_timeout` | | `30` | SSH TCP connect + handshake timeout in seconds |
 | `keepalive_interval` | | `30` | Keepalive probe interval in seconds |
 | `keepalive_max_fails` | | `3` | Consecutive failures before reconnect |
-| `reconnect_delay` | | `5` | Initial reconnect delay in seconds (doubles each attempt, max 2 min) |
+| `reconnect_delay` | | `5` | Initial reconnect delay in seconds (doubles each attempt) |
+| `reconnect_max_delay` | | `30` | Reconnect backoff cap in seconds |
 
 ### Proxy rules
 
