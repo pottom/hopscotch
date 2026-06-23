@@ -32,8 +32,9 @@ type TunnelConfig struct {
 	DialTimeout        int    `yaml:"dial_timeout"`        // seconds; SSH TCP + handshake
 	KeepaliveInterval  int    `yaml:"keepalive_interval"`  // seconds between keepalive probes
 	KeepaliveMaxFails  int    `yaml:"keepalive_max_fails"` // consecutive failures before reconnect
-	ReconnectDelay    int `yaml:"reconnect_delay"`     // initial backoff seconds
-	ReconnectMaxDelay int `yaml:"reconnect_max_delay"` // backoff cap seconds
+	ReconnectDelay    int  `yaml:"reconnect_delay"`     // initial backoff seconds
+	ReconnectMaxDelay int  `yaml:"reconnect_max_delay"` // backoff cap seconds
+	ForcePTY          bool `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
 }
 
 // Rule maps a host pattern to a tunnel name or "direct".

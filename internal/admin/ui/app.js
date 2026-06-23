@@ -17,8 +17,6 @@ window.fmtUptime = function(sec) {
 
 // ── Chart management ─────────────────────────────────────────────────────────
 
-const PALETTE = ['#38bdf8', '#818cf8', '#34d399', '#f59e0b', '#f87171'];
-const DIRECT_COLOR = '#64748b';
 const WINDOW_SIZE = 60;
 const charts = {};
 
@@ -27,22 +25,32 @@ window.initChart = function(name, el) {
   const canvas = el.querySelector('.tc-canvas');
   if (!canvas) return;
 
-  const names = Object.keys(Alpine.store('hop').tunnels).sort();
-  const color = name === 'direct' ? DIRECT_COLOR : PALETTE[names.indexOf(name) % PALETTE.length];
-
   charts[name] = new Chart(canvas, {
     type: 'line',
     data: {
       labels:   Array(WINDOW_SIZE).fill(''),
-      datasets: [{
-        data:            Array(WINDOW_SIZE).fill(null),
-        borderColor:     color,
-        backgroundColor: color + '18',
-        borderWidth:     1.5,
-        pointRadius:     0,
-        tension:         0.4,
-        fill:            true,
-      }],
+      datasets: [
+        {
+          // Download (↓) — positive, fills upward
+          data:            Array(WINDOW_SIZE).fill(null),
+          borderColor:     '#38bdf8',
+          backgroundColor: '#38bdf814',
+          borderWidth:     1.5,
+          pointRadius:     0,
+          tension:         0.3,
+          fill:            'origin',
+        },
+        {
+          // Upload (↑) — stored as negative, fills downward
+          data:            Array(WINDOW_SIZE).fill(null),
+          borderColor:     '#818cf8',
+          backgroundColor: '#818cf814',
+          borderWidth:     1.5,
+          pointRadius:     0,
+          tension:         0.3,
+          fill:            'origin',
+        },
+      ],
     },
     options: {
       animation:           false,
@@ -51,14 +59,13 @@ window.initChart = function(name, el) {
       scales: {
         x: { display: false },
         y: {
-          display:     true,
-          beginAtZero: true,
-          grid:        { color: 'rgba(26,37,53,0.8)' },
+          display: true,
+          grid:    { color: 'rgba(26,37,53,0.8)' },
           ticks: {
             color:         '#475569',
             maxTicksLimit: 3,
             font:          { size: 9, family: "'JetBrains Mono', monospace" },
-            callback:      v => fmtBytes(v) + '/s',
+            callback:      v => v === 0 ? '' : fmtBytes(Math.abs(v)) + '/s',
           },
         },
       },
@@ -70,13 +77,15 @@ window.initChart = function(name, el) {
   });
 };
 
-function pushChart(name, value) {
+function pushChart(name, bpsIn, bpsOut) {
   const c = charts[name];
   if (!c) return;
   c.data.labels.push('');
   c.data.labels.shift();
-  c.data.datasets[0].data.push(value);
+  c.data.datasets[0].data.push(bpsIn  ?? null);
   c.data.datasets[0].data.shift();
+  c.data.datasets[1].data.push(bpsOut != null ? -bpsOut : null);
+  c.data.datasets[1].data.shift();
   c.update('none');
 }
 
@@ -142,6 +151,7 @@ async function refreshStatus() {
         uptime_seconds:     t.uptime_seconds,
         reconnect_count:    t.reconnect_count,
         keepalive_failures: t.keepalive_failures || 0,
+        last_error:         t.last_error || '',
         bps_in:             prev.bps_in       ?? 0,
         bps_out:            prev.bps_out      ?? 0,
         active:             prev.active       ?? 0,
@@ -150,7 +160,7 @@ async function refreshStatus() {
     }
     store.tunnels = next;
 
-    document.title = `hopscotch v${st.version}`;
+    document.title = `hopscotch ${st.version}`;
   } catch {
     Alpine.store('hop').meta.status = 'offline';
   }
@@ -172,7 +182,7 @@ function connectSSE() {
         store.tunnels[name].active       = t.active;
         store.tunnels[name].reconnect_in = t.reconnect_in ?? null;
       }
-      pushChart(name, t.bps_in + t.bps_out);
+      pushChart(name, t.bps_in, t.bps_out);
     }
 
     store.direct = {
@@ -180,7 +190,7 @@ function connectSSE() {
       bps_out: d.direct?.bps_out ?? 0,
       active:  d.direct?.active  ?? 0,
     };
-    pushChart('direct', (d.direct?.bps_in ?? 0) + (d.direct?.bps_out ?? 0));
+    pushChart('direct', d.direct?.bps_in ?? 0, d.direct?.bps_out ?? 0);
   };
 
   es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
@@ -200,6 +210,84 @@ document.addEventListener('alpine:initialized', () => {
     setInterval(tick, 1000);
   }
 });
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+const TAB_INIT = {};
+
+window.switchTab = function(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#tab-bar a').forEach(a => {
+    a.classList.toggle('active', a.dataset.tab === name);
+  });
+  document.getElementById('panel-' + name).classList.add('active');
+
+  if (!TAB_INIT[name]) {
+    TAB_INIT[name] = true;
+    if (name === 'logs')  initLogStream();
+    if (name === 'docs')  initDocs();
+  }
+};
+
+// ── Log SSE stream ────────────────────────────────────────────────────────────
+
+const MAX_LOG_LINES = 500;
+let logLineCount = 0;
+let ansiUp = null;
+
+function getAnsiUp() {
+  if (!ansiUp && window.AnsiUp) {
+    ansiUp = new AnsiUp();
+    ansiUp.use_classes = false;
+  }
+  return ansiUp;
+}
+
+function appendLogLine(scroll, raw) {
+  const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+  const au = getAnsiUp();
+  const html = au ? au.ansi_to_html(raw) : raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  div.innerHTML = html;
+  scroll.appendChild(div);
+  logLineCount++;
+  if (logLineCount > MAX_LOG_LINES) {
+    scroll.firstElementChild?.remove();
+    logLineCount--;
+  }
+  if (atBottom) scroll.scrollTop = scroll.scrollHeight;
+}
+
+function initLogStream() {
+  const scroll = document.getElementById('log-scroll');
+  if (!scroll) return;
+
+  const cursor = document.createElement('div');
+  cursor.innerHTML = '<span class="log-cursor">▌</span>';
+
+  const es = new EventSource('/logs/stream');
+  es.onmessage = e => {
+    cursor.remove();
+    appendLogLine(scroll, e.data);
+    scroll.appendChild(cursor);
+    scroll.scrollTop = scroll.scrollHeight;
+  };
+  es.onerror = () => { es.close(); setTimeout(initLogStream, 3000); };
+
+  scroll.appendChild(cursor);
+}
+
+// ── Docs tab ──────────────────────────────────────────────────────────────────
+
+function initDocs() {
+  const el = document.getElementById('docs-content');
+  if (!el) return;
+  fetch('/readme')
+    .then(r => r.text())
+    .then(md => { el.innerHTML = marked.parse(md); })
+    .catch(() => { el.innerHTML = '<p style="color:var(--muted)">Could not load documentation.</p>'; });
+}
 
 // ── Logo animation ────────────────────────────────────────────────────────────
 

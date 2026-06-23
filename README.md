@@ -3,31 +3,33 @@
 SSH tunnel manager with automatic reconnect and a built-in SOCKS5 proxy router that routes connections by URL pattern.
 
 ```
-$ hopscotch start
-hopscotch started (PID 12345)
+  hopscotch v0.4.0  ✓ healthy  PID 12345  up 5m                     Status · Logs
 
-$ hopscotch status
-╭─ hopscotch v0.3.0  ✓ healthy  PID 12345  up 3m ────────────────────╮
-│ ↓ 1.2 KB/s  ↑ 842 B/s  3 conn total                                │
-├─────────────────────────────────────────────────────────────────────┤
-│ prod-jump          :1080  ● connected   3m12s   0 reconnects        │
-│ ⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦                                              │
-├─────────────────────────────────────────────────────────────────────┤
-│ staging-jump       :1081  ● connected   3m11s   0 reconnects        │
-│ ⣀⣀⣄⣄⣤⣤⣦⣦⣶⣶⣷⣷⣿⣷⣦⣤⣄⣀⣀⣄                                              │
-╰─────────────────────────────────────────────────────────────────────╯
+  ↓ 1.2 KB/s      ↑ 842 B/s     3 conn total
+
+  TUNNEL                    HOST                   PORT   STATUS           UPTIME     RC   ↓              ↑              CONN    REASON
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  prod-jump                 10.0.0.1:22            1080   ● connected      5m12s      0    ↓ 1.1 KB/s     ↑ 800 B/s      2       —
+  ⣤⣦⣶⣷⣿⣷⣶⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤
+  staging-jump              10.0.1.1:22            1081   ◌ connecting     —          1    ↓ 0 B/s        ↑ 0 B/s        0       SSH handshake: unable to authenticate
+  direct                                                                              0    ↓ 0 B/s        ↑ 0 B/s        0       —
+
+  q quit  tab/s/l switch  ↑↓/jk scroll  c compact  g mirror                         PROXY :8080  ADMIN :9090
 ```
 
 ## Features
 
-- **Interactive TUI** — `hopscotch status` opens a live dashboard with sparkline traffic graphs, reconnect countdowns, and keepalive indicators
+- **Interactive TUI** — `hopscotch status` opens a live dashboard with tabbed Status/Logs views, dual-channel braille traffic graphs, reconnect countdowns, keepalive indicators, and per-tunnel error reasons
+- **Dual-channel traffic graph** — filled braille area chart: ↓ download fills upward (cyan), ↑ upload fills downward (purple); toggle mirror/single mode with `g`
+- **Compact mode** — press `c` to collapse graphs for a denser tunnel list
 - **Automatic reconnect** with exponential backoff — tunnels come back on their own after network interruptions
 - **Fast VPN drop detection** — keepalive timeout matches `dial_timeout`; dead connections detected in seconds, not minutes
 - **SOCKS5 proxy router** on a single port that routes each connection through the right tunnel based on hostname pattern
 - **Pattern matching** — `*.example.com`, `10.0.1.*`, exact hosts, and `*` catch-all; first match wins
 - **SSH agent support** — works with YubiKey, gpg-agent, and ssh-agent out of the box
+- **Force PTY** — `force_pty: true` opens a PTY shell session to satisfy jump host channel policies (SPS/SCB)
 - **Hot reload** — config reloads automatically on file change or `SIGHUP`; no restart needed
-- **Admin UI** — built-in web dashboard with live traffic graphs, keepalive status, and global stats
+- **Admin UI** — built-in web dashboard with dual-channel live traffic graphs, error reasons, keepalive status, live log stream, and global stats
 - **Prometheus metrics** — `/metrics` endpoint with bytes, active connections, and reconnect counters
 - **Health endpoint** — `GET /health` for load balancers and container probes
 - **Multiarch Docker image** — `linux/amd64` and `linux/arm64`
@@ -124,6 +126,7 @@ admin:
 | `keepalive_max_fails` | | `2` | Consecutive failures before reconnect |
 | `reconnect_delay` | | `5` | Initial reconnect delay in seconds (doubles each attempt) |
 | `reconnect_max_delay` | | `30` | Reconnect backoff cap in seconds |
+| `force_pty` | | `false` | Open a PTY shell session — required for jump hosts that enforce channel policies (SPS/SCB) |
 
 ### Proxy rules
 
@@ -157,6 +160,16 @@ Global flags:
 --verbose          enable debug logging
 ```
 
+### TUI key bindings
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `s` / `l` | Switch between Status and Logs tabs |
+| `↑` / `↓` / `j` / `k` | Scroll |
+| `c` | Toggle compact mode (hides graphs) |
+| `g` | Toggle mirror graph (dual-channel ↔ download only) |
+| `q` / `Esc` / `Ctrl+C` | Quit |
+
 ## Using the proxy
 
 Set the `ALL_PROXY` environment variable so all tools use hopscotch automatically:
@@ -182,7 +195,7 @@ The web dashboard is available at `http://localhost:9090` (or whichever port `ad
 Each tunnel gets its own full-width card showing:
 
 - **Status** — animated dot: green (connected), amber blinking (connecting/keepalive warning), red (disconnected)
-- **Host** — the SSH server address
+- **Host** — the SSH server address (host:port)
 - **SOCKS5 port** — the local port for this tunnel
 - **Uptime** — how long the tunnel has been connected in the current session
 - **Reconnect countdown** — when connecting, shows _next in Ns_ so you know when the next attempt fires
@@ -190,11 +203,14 @@ Each tunnel gets its own full-width card showing:
 - **Keepalive failures** — ⚠N badge when consecutive keepalive probes fail
 - **Live throughput** — ↓ bytes/s in and ↑ bytes/s out, updated every second via SSE
 - **Active connections** — current number of open connections through this tunnel
-- **Sparkline chart** — rolling traffic graph
+- **Error reason** — last connection error in red; `—` when the tunnel is healthy
+- **Dual-channel chart** — rolling traffic graph: ↓ download fills upward (cyan), ↑ upload fills downward (purple)
 
 A **global stats bar** at the top shows combined throughput and active connections across all tunnels.
 
 A **direct** card at the bottom tracks connections that bypassed the tunnels (matched a `via: direct` rule or the catch-all fallback).
+
+The **Logs tab** streams live structured log output from the daemon directly in the browser.
 
 The UI updates in-place via Server-Sent Events — no polling, no full-page refreshes.
 
@@ -206,6 +222,7 @@ The UI updates in-place via Server-Sent Events — no polling, no full-page refr
 | `GET /status` | Full JSON status of all tunnels and the proxy |
 | `GET /metrics` | Prometheus-compatible metrics (see below) |
 | `GET /traffic/stream` | SSE stream of per-second traffic deltas |
+| `GET /logs/stream` | SSE stream of live structured log lines |
 
 ## Prometheus metrics
 

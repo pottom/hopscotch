@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="/style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ansi_up@4/ansi_up.js"></script>
   <!-- app.js must load before Alpine so alpine:init listener is registered first -->
   <script src="/app.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
@@ -41,98 +43,124 @@
     <span class="header-sep">·</span>
     <span x-text="'up ' + $store.hop.meta.uptime"></span>
   </div>
-  <nav class="header-nav">
-    <a href="/" class="active">Status</a>
-    <a href="/docs.html">Docs</a>
-  </nav>
 </header>
 
-<div class="stats-bar">
-  <span class="stats-in"   x-text="'↓ ' + fmtBytes($store.hop.totalStats().bpsIn)  + '/s'"></span>
-  <span class="stats-sep">·</span>
-  <span class="stats-out"  x-text="'↑ ' + fmtBytes($store.hop.totalStats().bpsOut) + '/s'"></span>
-  <span class="stats-sep">·</span>
-  <span class="stats-conn" x-text="$store.hop.totalStats().active + ' conn total'"></span>
-</div>
+<nav class="tab-bar" id="tab-bar">
+  <a class="active" data-tab="status" href="#" onclick="switchTab('status');return false">Status</a>
+  <a data-tab="logs"   href="#" onclick="switchTab('logs');return false">Logs</a>
+  <a data-tab="docs"   href="#" onclick="switchTab('docs');return false">Docs</a>
+</nav>
 
-<main class="main">
-  <div class="section-label">Tunnels</div>
+<!-- ── STATUS TAB ─────────────────────────────────────────────────────────── -->
+<div id="panel-status" class="tab-panel active" style="flex-direction:column;">
 
-  <!-- one card per tunnel -->
-  <template x-for="name in $store.hop.tunnelList()" :key="name">
-    <div class="tc-card"
-         :class="$store.hop.visualStatus(name)"
-         x-init="$nextTick(() => initChart(name, $el))">
+  <div class="stats-bar">
+    <span class="stats-in"   x-text="'↓ ' + fmtBytes($store.hop.totalStats().bpsIn)  + '/s'"></span>
+    <span class="stats-sep">·</span>
+    <span class="stats-out"  x-text="'↑ ' + fmtBytes($store.hop.totalStats().bpsOut) + '/s'"></span>
+    <span class="stats-sep">·</span>
+    <span class="stats-conn" x-text="$store.hop.totalStats().active + ' conn total'"></span>
+  </div>
 
-      <div class="tc-header">
-        <div class="tc-id">
-          <span class="tc-name" x-text="name"></span>
-          <span class="tc-host" x-text="$store.hop.tunnels[name]?.host"></span>
+  <main class="main">
+    <div class="section-label">Tunnels</div>
+
+    <template x-for="name in $store.hop.tunnelList()" :key="name">
+      <div class="tc-card"
+           :class="$store.hop.visualStatus(name)"
+           x-init="$nextTick(() => initChart(name, $el))">
+
+        <div class="tc-header">
+          <div class="tc-id">
+            <span class="tc-name" x-text="name"></span>
+            <span class="tc-host" x-text="$store.hop.tunnels[name]?.host"></span>
+          </div>
+
+          <div class="tc-status-group">
+            <span class="dot" :class="$store.hop.visualStatus(name)"></span>
+            <span class="status-label"
+                  :class="$store.hop.visualStatus(name)"
+                  x-text="$store.hop.tunnels[name]?.status || '…'"></span>
+            <span class="tc-ka-warn"
+                  x-show="$store.hop.tunnels[name]?.keepalive_failures > 0"
+                  x-text="'⚠ ' + $store.hop.tunnels[name]?.keepalive_failures"></span>
+          </div>
+
+          <div class="tc-info">
+            <span class="tc-info-item"
+                  x-text="':' + ($store.hop.tunnels[name]?.local_port || '…')"></span>
+            <span class="tc-info-item"
+                  x-text="fmtUptime($store.hop.tunnels[name]?.uptime_seconds)"></span>
+            <span class="tc-info-item tc-recon"
+                  x-show="$store.hop.tunnels[name]?.reconnect_count > 0"
+                  x-text="'recon ' + $store.hop.tunnels[name]?.reconnect_count"></span>
+            <span class="tc-info-item tc-reconnect-cd"
+                  x-show="$store.hop.tunnels[name]?.status === 'connecting' && $store.hop.tunnels[name]?.reconnect_in != null && $store.hop.tunnels[name]?.reconnect_in >= 0"
+                  x-text="'next in ' + $store.hop.tunnels[name]?.reconnect_in + 's'"></span>
+          </div>
+
+          <div class="tc-bps">
+            <span class="tc-bps-in"
+                  x-text="'↓ ' + fmtBytes($store.hop.tunnels[name]?.bps_in) + '/s'"></span>
+            <span class="tc-bps-out"
+                  x-text="'↑ ' + fmtBytes($store.hop.tunnels[name]?.bps_out) + '/s'"></span>
+            <span class="tc-active"
+                  x-text="($store.hop.tunnels[name]?.active || 0) + ' conn'"></span>
+          </div>
         </div>
 
-        <div class="tc-status-group">
-          <span class="dot" :class="$store.hop.visualStatus(name)"></span>
-          <span class="status-label"
-                :class="$store.hop.visualStatus(name)"
-                x-text="$store.hop.tunnels[name]?.status || '…'"></span>
-          <span class="tc-ka-warn"
-                x-show="$store.hop.tunnels[name]?.keepalive_failures > 0"
-                x-text="'⚠ ' + $store.hop.tunnels[name]?.keepalive_failures"></span>
-        </div>
+        <div class="tc-reason"
+             :class="$store.hop.tunnels[name]?.last_error ? 'has-error' : 'no-error'"
+             x-text="$store.hop.tunnels[name]?.last_error || '—'"></div>
 
-        <div class="tc-info">
-          <span class="tc-info-item"
-                x-text="':' + ($store.hop.tunnels[name]?.local_port || '…')"></span>
-          <span class="tc-info-item"
-                x-text="fmtUptime($store.hop.tunnels[name]?.uptime_seconds)"></span>
-          <span class="tc-info-item tc-recon"
-                x-show="$store.hop.tunnels[name]?.reconnect_count > 0"
-                x-text="'recon ' + $store.hop.tunnels[name]?.reconnect_count"></span>
-          <span class="tc-info-item tc-reconnect-cd"
-                x-show="$store.hop.tunnels[name]?.status === 'connecting' && $store.hop.tunnels[name]?.reconnect_in != null && $store.hop.tunnels[name]?.reconnect_in >= 0"
-                x-text="'next in ' + $store.hop.tunnels[name]?.reconnect_in + 's'"></span>
-        </div>
-
-        <div class="tc-bps">
-          <span class="tc-bps-in"
-                x-text="'↓ ' + fmtBytes($store.hop.tunnels[name]?.bps_in) + '/s'"></span>
-          <span class="tc-bps-out"
-                x-text="'↑ ' + fmtBytes($store.hop.tunnels[name]?.bps_out) + '/s'"></span>
-          <span class="tc-active"
-                x-text="($store.hop.tunnels[name]?.active || 0) + ' conn'"></span>
+        <div class="tc-chart-wrap">
+          <canvas class="tc-canvas"></canvas>
         </div>
       </div>
+    </template>
 
+    <div class="empty" x-show="$store.hop.tunnelList().length === 0">loading…</div>
+
+    <div class="tc-card tc-direct"
+         x-init="$nextTick(() => initChart('direct', $el))">
+      <div class="tc-header">
+        <div class="tc-id">
+          <span class="tc-name">direct</span>
+        </div>
+        <div class="tc-bps">
+          <span class="tc-bps-in"
+                x-text="'↓ ' + fmtBytes($store.hop.direct.bps_in) + '/s'"></span>
+          <span class="tc-bps-out"
+                x-text="'↑ ' + fmtBytes($store.hop.direct.bps_out) + '/s'"></span>
+          <span class="tc-active"
+                x-text="$store.hop.direct.active + ' conn'"></span>
+        </div>
+      </div>
+      <div class="tc-reason no-error">—</div>
       <div class="tc-chart-wrap">
         <canvas class="tc-canvas"></canvas>
       </div>
     </div>
-  </template>
+  </main>
 
-  <!-- loading placeholder -->
-  <div class="empty" x-show="$store.hop.tunnelList().length === 0">loading…</div>
+</div>
 
-  <!-- direct card — always visible -->
-  <div class="tc-card tc-direct"
-       x-init="$nextTick(() => initChart('direct', $el))">
-    <div class="tc-header">
-      <div class="tc-id">
-        <span class="tc-name">direct</span>
-      </div>
-      <div class="tc-bps">
-        <span class="tc-bps-in"
-              x-text="'↓ ' + fmtBytes($store.hop.direct.bps_in) + '/s'"></span>
-        <span class="tc-bps-out"
-              x-text="'↑ ' + fmtBytes($store.hop.direct.bps_out) + '/s'"></span>
-        <span class="tc-active"
-              x-text="$store.hop.direct.active + ' conn'"></span>
-      </div>
-    </div>
-    <div class="tc-chart-wrap">
-      <canvas class="tc-canvas"></canvas>
+<!-- ── LOGS TAB ───────────────────────────────────────────────────────────── -->
+<div id="panel-logs" class="tab-panel">
+  <div class="log-wrap">
+    <div class="log-label">Live log stream</div>
+    <div class="log-scroll" id="log-scroll"></div>
+  </div>
+</div>
+
+<!-- ── DOCS TAB ───────────────────────────────────────────────────────────── -->
+<div id="panel-docs" class="tab-panel">
+  <div class="docs-wrap">
+    <div class="docs-body" id="docs-content">
+      <p style="color:var(--muted)">Loading…</p>
     </div>
   </div>
-</main>
+</div>
 
 <footer class="footer">
   <div class="footer-ports">
