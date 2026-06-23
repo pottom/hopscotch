@@ -26,11 +26,12 @@ func (s Status) String() string {
 
 // Stats holds live metrics for a single tunnel.
 type Stats struct {
-	Status         Status
-	ConnectedAt    time.Time
-	ReconnectCount int
-	LocalPort      int
-	Host           string // SSH server address (host:port)
+	Status          Status
+	ConnectedAt     time.Time
+	NextReconnectAt time.Time // non-zero only while waiting to reconnect
+	ReconnectCount  int
+	LocalPort       int
+	Host            string // SSH server address (host:port)
 	// Traffic counters — cumulative since process start.
 	BytesIn     uint64
 	BytesOut    uint64

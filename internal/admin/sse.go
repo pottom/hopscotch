@@ -11,9 +11,10 @@ import (
 
 // trafficEntry is the per-source payload sent over SSE each second.
 type trafficEntry struct {
-	BpsIn   uint64 `json:"bps_in"`  // bytes/s received
-	BpsOut  uint64 `json:"bps_out"` // bytes/s sent
-	Active  int64  `json:"active"`  // current open connections
+	BpsIn       uint64 `json:"bps_in"`              // bytes/s received
+	BpsOut      uint64 `json:"bps_out"`             // bytes/s sent
+	Active      int64  `json:"active"`              // current open connections
+	ReconnectIn *int   `json:"reconnect_in,omitempty"` // seconds until next attempt (connecting only)
 }
 
 // trafficPayload is the full SSE message body.
@@ -42,11 +43,19 @@ func buildPayload(prev, curr trafficState) trafficPayload {
 
 	for name, cs := range curr.tunnels {
 		ps := prev.tunnels[name]
-		p.Tunnels[name] = trafficEntry{
+		e := trafficEntry{
 			BpsIn:  delta(ps.BytesIn, cs.BytesIn),
 			BpsOut: delta(ps.BytesOut, cs.BytesOut),
 			Active: cs.ActiveConns,
 		}
+		if cs.Status == tunnel.StatusConnecting && !cs.NextReconnectAt.IsZero() {
+			secs := int(time.Until(cs.NextReconnectAt).Seconds())
+			if secs < 0 {
+				secs = 0
+			}
+			e.ReconnectIn = &secs
+		}
+		p.Tunnels[name] = e
 	}
 
 	p.Direct = trafficEntry{

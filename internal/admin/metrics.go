@@ -44,6 +44,37 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		writeLine(`hopscotch_tunnel_uptime_seconds{tunnel=%q} %.0f`, name, uptime)
 	}
 
+	writeLine("# HELP hopscotch_tunnel_bytes_in_total Cumulative bytes received through tunnel")
+	writeLine("# TYPE hopscotch_tunnel_bytes_in_total counter")
+	for name, st := range allStats {
+		writeLine(`hopscotch_tunnel_bytes_in_total{tunnel=%q} %d`, name, st.BytesIn)
+	}
+
+	writeLine("# HELP hopscotch_tunnel_bytes_out_total Cumulative bytes sent through tunnel")
+	writeLine("# TYPE hopscotch_tunnel_bytes_out_total counter")
+	for name, st := range allStats {
+		writeLine(`hopscotch_tunnel_bytes_out_total{tunnel=%q} %d`, name, st.BytesOut)
+	}
+
+	writeLine("# HELP hopscotch_tunnel_active_connections Active connections through tunnel")
+	writeLine("# TYPE hopscotch_tunnel_active_connections gauge")
+	for name, st := range allStats {
+		writeLine(`hopscotch_tunnel_active_connections{tunnel=%q} %d`, name, st.ActiveConns)
+	}
+
+	directSnap := s.direct.DirectSnapshot()
+	writeLine("# HELP hopscotch_direct_bytes_in_total Cumulative bytes received via direct connections")
+	writeLine("# TYPE hopscotch_direct_bytes_in_total counter")
+	writeLine(`hopscotch_direct_bytes_in_total %d`, directSnap.BytesIn)
+
+	writeLine("# HELP hopscotch_direct_bytes_out_total Cumulative bytes sent via direct connections")
+	writeLine("# TYPE hopscotch_direct_bytes_out_total counter")
+	writeLine(`hopscotch_direct_bytes_out_total %d`, directSnap.BytesOut)
+
+	writeLine("# HELP hopscotch_direct_active_connections Active direct connections")
+	writeLine("# TYPE hopscotch_direct_active_connections gauge")
+	writeLine(`hopscotch_direct_active_connections %d`, directSnap.ActiveConns)
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprint(w, b.String())
 }

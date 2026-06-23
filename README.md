@@ -22,7 +22,8 @@ go-b-preprod-jump        1083   ✓ connected    3m11s    0
 - **Pattern matching** — `*.example.com`, `10.0.1.*`, exact hosts, and `*` catch-all; first match wins
 - **SSH agent support** — works with YubiKey, gpg-agent, and ssh-agent out of the box
 - **Hot reload** — send `SIGHUP` to apply config changes without restart
-- **Admin UI** — built-in web dashboard at the admin port showing live tunnel status
+- **Admin UI** — built-in web dashboard with live traffic graphs per tunnel
+- **Prometheus metrics** — `/metrics` endpoint with bytes, active connections, and reconnect counters
 - **Health endpoint** — `GET /health` for load balancers and container probes
 - **Multiarch Docker image** — `linux/amd64` and `linux/arm64`
 
@@ -70,6 +71,10 @@ tunnels:
     user: myuser
     local_port: 1080
     # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent)
+    dial_timeout: 15                 # seconds; TCP connect + SSH handshake
+    keepalive_interval: 30           # seconds between keepalive probes
+    keepalive_max_fails: 3           # consecutive failures → reconnect
+    reconnect_delay: 5               # initial backoff (doubles each attempt, max 2m)
 
   - name: staging-jump
     host: 10.0.1.1
@@ -103,6 +108,7 @@ admin:
 | `user` | ✓ | — | SSH username |
 | `identity_file` | | — | Path to private key; omit to use SSH agent |
 | `local_port` | ✓ | — | Local SOCKS5 port for this tunnel |
+| `dial_timeout` | | `30` | SSH TCP connect + handshake timeout in seconds |
 | `keepalive_interval` | | `30` | Keepalive probe interval in seconds |
 | `keepalive_max_fails` | | `3` | Consecutive failures before reconnect |
 | `reconnect_delay` | | `5` | Initial reconnect delay in seconds (doubles each attempt, max 2 min) |
@@ -157,15 +163,56 @@ curl -x socks5h://localhost:8080 https://internal.service.example.com
 
 ## Admin UI
 
-The web dashboard is available at `http://localhost:9090` (or whichever port `admin.port` is set to). It shows live tunnel status, uptime, reconnect counts, and proxy configuration. The page refreshes automatically every 5 seconds.
+The web dashboard is available at `http://localhost:9090` (or whichever port `admin.port` is set to).
 
-API endpoints:
+![hopscotch admin UI](docs/ui-preview.svg)
+
+Each tunnel gets its own full-width card showing:
+
+- **Status** — animated dot: green (connected), amber blinking (connecting), red (disconnected)
+- **Host** — the SSH server address
+- **SOCKS5 port** — the local port for this tunnel
+- **Uptime** — how long the tunnel has been connected in the current session
+- **Reconnect countdown** — when connecting, shows _next in Ns_ so you know when the next attempt fires
+- **Reconnect count** — total reconnects since start
+- **Live throughput** — ↓ bytes/s in and ↑ bytes/s out, updated every second via SSE
+- **Active connections** — current number of open connections through this tunnel
+- **Sparkline chart** — 60-second rolling traffic graph (Chart.js, no page reloads)
+
+A **direct** card at the bottom tracks connections that bypassed the tunnels (matched a `via: direct` rule or the catch-all fallback).
+
+The UI is powered by [Alpine.js](https://alpinejs.dev/) and updates in-place via Server-Sent Events — no polling, no full-page refreshes, no choppy redraws.
+
+### API endpoints
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Returns `{"status":"ok"}` — suitable for health checks |
 | `GET /status` | Full JSON status of all tunnels and the proxy |
-| `GET /metrics` | Prometheus-compatible metrics |
+| `GET /metrics` | Prometheus-compatible metrics (see below) |
+| `GET /traffic/stream` | SSE stream of per-second traffic deltas |
+
+## Prometheus metrics
+
+The `/metrics` endpoint exposes metrics in the Prometheus text format:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `hopscotch_tunnel_status` | gauge | `1` = connected, `0` = other; label `tunnel` |
+| `hopscotch_tunnel_uptime_seconds` | gauge | Seconds since last connect |
+| `hopscotch_tunnel_reconnects_total` | counter | Total reconnect attempts |
+| `hopscotch_tunnel_bytes_in_total` | counter | Cumulative bytes received through tunnel |
+| `hopscotch_tunnel_bytes_out_total` | counter | Cumulative bytes sent through tunnel |
+| `hopscotch_tunnel_active_connections` | gauge | Current open connections |
+| `hopscotch_direct_bytes_in_total` | counter | Cumulative bytes received via direct |
+| `hopscotch_direct_bytes_out_total` | counter | Cumulative bytes sent via direct |
+| `hopscotch_direct_active_connections` | gauge | Current direct open connections |
+
+Example PromQL for live throughput:
+
+```promql
+rate(hopscotch_tunnel_bytes_in_total{tunnel="prod-jump"}[1m])
+```
 
 ## Docker
 
@@ -179,9 +226,9 @@ docker run -d \
   ghcr.io/pottom/hopscotch:latest
 ```
 
-Or with docker compose — see [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml).
+Or with docker compose — see [`deploy/docker-compose.yml`](deploy/docker-compose.yml).
 
-In containers, the process runs in foreground mode automatically (`--foreground` is set in the image entrypoint).
+In containers, the process runs in foreground mode automatically (`--foreground` is set in the image entrypoint). Set `admin.bind: "0.0.0.0"` so the mapped port is reachable from the host.
 
 ## Building
 

@@ -150,6 +150,9 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		t.client = nil
 
 		delay := backoff.next()
+		s.NextReconnectAt = t.clock.Now().Add(delay)
+		t.stats.Store(s)
+
 		log.Warn("tunnel disconnected, reconnecting",
 			"tunnel", t.cfg.Name,
 			"delay", delay,
@@ -176,8 +179,9 @@ func (t *Tunnel) dial(ctx context.Context) error {
 
 	// Respect ctx during the dial itself.
 	// KeepAlive sends TCP-level probes so NAT/firewall entries don't expire.
+	timeout := time.Duration(t.cfg.DialTimeout) * time.Second
 	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
+		Timeout:   timeout,
 		KeepAlive: 15 * time.Second,
 	}
 	tcpConn, err := dialer.DialContext(ctx, "tcp", addr)
@@ -254,7 +258,7 @@ func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, error) {
 		User:            t.cfg.User,
 		Auth:            auths,
 		HostKeyCallback: hostKey,
-		Timeout:         30 * time.Second,
+		Timeout:         time.Duration(t.cfg.DialTimeout) * time.Second,
 	}, nil
 }
 

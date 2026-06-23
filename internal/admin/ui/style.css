@@ -28,7 +28,7 @@ body {
   min-height: 100vh;
 }
 
-/* ── HEADER ─────────────────────────────── */
+/* ── HEADER ───────────────────────────────── */
 .header {
   display: flex;
   align-items: center;
@@ -68,11 +68,16 @@ body {
 .badge.offline   { background: rgba(248,113,113,.12); color: #f87171; border: 1px solid rgba(248,113,113,.25); }
 
 .header-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
   color: var(--muted);
   white-space: nowrap;
 }
+
+.header-sep { opacity: 0.4; }
 
 .header-nav {
   margin-left: auto;
@@ -103,8 +108,7 @@ body {
   border-color: var(--border);
 }
 
-/* ── MAIN ───────────────────────────────── */
-/* override Pico's default <main> container constraints */
+/* ── MAIN ────────────────────────────────── */
 main, main.main {
   display: block;
   max-width: none;
@@ -128,59 +132,14 @@ main, main.main {
   padding: 0 3rem;
 }
 
-.tunnel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-  gap: 0.75rem;
-  padding: 0 3rem;
-}
-
-/* ── CARDS ──────────────────────────────── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 0.9rem 1rem;
-  transition: border-color .2s;
-  position: relative;
-  overflow: hidden;
-}
-.card::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  border-radius: 9px 0 0 9px;
-}
-.card.connected::before    { background: var(--connected); }
-.card.connecting::before   { background: var(--connecting); }
-.card.disconnected::before { background: var(--disconnected); }
-.card:hover { border-color: #253549; }
-
-.card-name {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #e2e8f0;
-  margin-bottom: 0.15rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.card-host {
+.empty {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--muted);
-  margin-bottom: 0.75rem;
+  padding: 1rem 3rem;
 }
 
-.card-status {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-bottom: 0.75rem;
-}
-
+/* ── STATUS DOT & LABEL ──────────────────── */
 .dot {
   width: 6px;
   height: 6px;
@@ -209,84 +168,126 @@ main, main.main {
 .status-label.connecting   { color: var(--connecting); }
 .status-label.disconnected { color: var(--disconnected); }
 
-.card-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.4rem;
-}
-
-.stat {
-  background: rgba(255,255,255,.03);
-  border-radius: 5px;
-  padding: 0.35rem 0.4rem;
-}
-.stat-label {
-  font-size: 0.57rem;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 0.15rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.stat-value {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: #dde6f0;
-}
-
-.empty {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
-  color: var(--muted);
-  padding: 1rem 0;
-}
-
-/* ── TRAFFIC CHART ──────────────────────── */
-.traffic-section {
-  margin-top: 2rem;
-  padding: 0 3rem;
-}
-
-.chart-wrap {
+/* ── TRAFFIC CARDS ───────────────────────── */
+.tc-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 9px;
-  padding: 1rem 1.25rem 0.75rem;
+  margin: 0 3rem 0.75rem;
+  overflow: hidden;
   position: relative;
-  height: 200px;
+  transition: border-color .2s;
 }
 
-.chart-legend {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-top: 0.6rem;
+.tc-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 9px 0 0 9px;
 }
+.tc-card.connected::before    { background: var(--connected); }
+.tc-card.connecting::before   { background: var(--connecting); }
+.tc-card.disconnected::before { background: var(--disconnected); }
+.tc-card.tc-direct::before    { background: var(--muted); }
 
-.legend-item {
+.tc-card:hover { border-color: #253549; }
+
+.tc-header {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  color: var(--muted);
+  gap: 1rem;
+  padding: 0.75rem 1rem 0.75rem 1.25rem;
+  flex-wrap: wrap;
 }
 
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+/* name + host */
+.tc-id {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.tc-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+
+.tc-host {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* status dot + label */
+.tc-status-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   flex-shrink: 0;
 }
 
-@media (max-width: 580px) {
-  .traffic-section { padding-left: 1.25rem; padding-right: 1.25rem; }
+/* port / uptime / recon */
+.tc-info {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
 }
 
-/* ── FOOTER ─────────────────────────────── */
+.tc-info-item {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tc-recon {
+  color: var(--connecting);
+}
+
+.tc-reconnect-cd {
+  color: var(--connecting);
+  font-variant-numeric: tabular-nums;
+}
+
+/* bps + active — pushed to the right */
+.tc-bps {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.tc-bps-in, .tc-bps-out, .tc-active {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.tc-bps-in  { color: var(--accent); }
+.tc-bps-out { color: var(--accent2); }
+.tc-active  { color: var(--muted); font-size: 0.68rem; }
+
+/* chart area */
+.tc-chart-wrap {
+  height: 72px;
+  position: relative;
+  padding: 0 0.5rem 0.3rem 0.5rem;
+}
+
+.tc-canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ── FOOTER ──────────────────────────────── */
 .footer {
   display: flex;
   align-items: center;
@@ -304,13 +305,17 @@ main, main.main {
 .footer-ports { display: flex; gap: 1.25rem; }
 .port-item span:first-child { opacity: .55; margin-right: .35em; }
 
+/* ── RESPONSIVE ──────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .dot { animation: none !important; }
   #hop-dot { display: none; }
 }
 
-@media (max-width: 580px) {
-  .header, .footer { padding: 0.9rem 1.25rem; }
-  .section-label, .tunnel-grid { padding-left: 1.25rem; padding-right: 1.25rem; }
-  .header-meta { display: none; }
+@media (max-width: 700px) {
+  .header, .footer     { padding: 0.9rem 1.25rem; }
+  .section-label,
+  .empty               { padding-left: 1.25rem; padding-right: 1.25rem; }
+  .tc-card             { margin-left: 1.25rem; margin-right: 1.25rem; }
+  .header-meta         { display: none; }
+  .tc-info             { display: none; }
 }
