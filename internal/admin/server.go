@@ -20,6 +20,11 @@ type TunnelStatter interface {
 	AllStats() map[string]tunnel.Stats
 }
 
+// DirectStatter exposes direct-connection traffic metrics to the admin server.
+type DirectStatter interface {
+	DirectSnapshot() tunnel.TrafficSnapshot
+}
+
 // Server is the HTTP admin server.
 type Server struct {
 	bind      string
@@ -28,12 +33,13 @@ type Server struct {
 	pid       int
 	readme    []byte
 	tunnels   TunnelStatter
+	direct    DirectStatter
 	startedAt time.Time
 }
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, readme []byte) *Server {
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, direct DirectStatter, readme []byte) *Server {
 	return &Server{
 		bind:      bind,
 		port:      port,
@@ -41,6 +47,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, readme [
 		pid:       os.Getpid(),
 		readme:    readme,
 		tunnels:   tunnels,
+		direct:    direct,
 		startedAt: time.Now(),
 	}
 }
@@ -52,6 +59,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /readme", s.handleReadme)
+	mux.HandleFunc("GET /traffic/stream", s.handleTrafficStream)
 	sub, _ := fs.Sub(uiFiles, "ui")
 	mux.Handle("GET /", http.FileServerFS(sub))
 

@@ -75,7 +75,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	mgr := tunnel.NewManager(cfg.Tunnels)
 	router := proxy.NewRouter(cfg.Proxy.Rules, mgr)
 	proxySrv := proxy.NewServer(cfg.Proxy.Port, router)
-	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, ReadmeContent)
+	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, router, ReadmeContent)
 
 	go config.WatchSIGHUP(cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)
