@@ -299,9 +299,64 @@ hopscotch update --check     # check only, do not download
 hopscotch trust <name|host|all>  # add SSH host key to known_hosts
 hopscotch validate           # validate the config file
 hopscotch version            # print version info
+hopscotch ssh-config         # print SSH config block for ProxyCommand integration
+hopscotch ssh-config --write # write to ~/.config/hopscotch/ssh_config
+hopscotch proxy-connect <host> <port>  # SOCKS5 stdio bridge (used as SSH ProxyCommand)
 ```
 
 Global flags: `--config <path>` · `--verbose` · `--log-file <path>`
+
+### SSH ProxyCommand integration
+
+hopscotch can act as an SSH `ProxyCommand`, routing any SSH-based tool through your tunnels transparently — without extra flags or per-command proxy configuration.
+
+**What this means in practice:** once set up, tools like `ssh`, `scp`, `rsync`, VSCode Remote SSH, and Ansible work against internal hosts automatically, as long as hopscotch is running.
+
+#### Setup (one time)
+
+```bash
+hopscotch ssh-config --write
+```
+
+This does two things:
+
+1. Writes `~/.config/hopscotch/ssh_config` — an SSH config snippet generated from your proxy rules, for example:
+   ```
+   Host *.prod.internal 10.0.1.*
+       ProxyCommand hopscotch proxy-connect %h %p
+
+   Host *.staging.internal
+       ProxyCommand hopscotch proxy-connect %h %p
+   ```
+
+2. Asks whether to add the `Include` line to `~/.ssh/config` automatically. Answer `y` and it's done — or add it manually:
+   ```bash
+   echo 'Include ~/.config/hopscotch/ssh_config' >> ~/.ssh/config
+   ```
+
+#### Usage
+
+Start hopscotch as usual, then use SSH tools normally — no proxy flags needed:
+
+```bash
+ssh user@10.0.1.50
+scp report.csv user@10.0.1.50:/data/
+rsync -av ./app/ user@10.0.1.50:/srv/app/
+```
+
+**VSCode Remote SSH:** open the Command Palette → *Connect to Host* → type `user@10.0.1.50`. VSCode will tunnel through hopscotch automatically.
+
+**Ansible:** works out of the box if your inventory hosts match a proxy rule pattern. No `ansible.cfg` changes needed.
+
+#### Keeping it up to date
+
+The generated file reflects your proxy rules at the time of writing. Re-run after any rule change:
+
+```bash
+hopscotch ssh-config --write
+```
+
+hopscotch also refreshes the file automatically on config reload (SIGHUP or file change), as long as `--write` has been run at least once.
 
 ### TUI key bindings
 

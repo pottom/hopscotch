@@ -103,6 +103,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)
 		router.UpdateRules(next.Proxy.Rules)
+		refreshSSHConfig(next)
 	})
 
 	log.Info("hopscotch starting",
