@@ -23,7 +23,7 @@ func init() {
 }
 
 func runDisable(_ *cobra.Command, _ []string) error {
-	warnIfNoShellInit()
+	warnIfNoShellInit("disable")
 	for _, v := range shellVars {
 		prev, ok := os.LookupEnv("_HOPSCOTCH_PREV_" + v)
 		if !ok || prev == unsetSentinel {

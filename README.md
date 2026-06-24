@@ -67,6 +67,8 @@ hopscotch enable    # sets HTTP_PROXY, HTTPS_PROXY, NO_PROXY in current shell
 hopscotch disable   # restores the previous environment exactly
 ```
 
+Without `shell-init`, `enable`/`disable` print the export statements but can't apply them — hopscotch will warn you with the fix. For a quick one-off: `eval "$(hopscotch enable)"`.
+
 When the proxy is active, `HOPSCOTCH_ACTIVE` is exported so your prompt or scripts can react to it.
 
 ## Web admin UI
@@ -126,7 +128,7 @@ docker pull ghcr.io/pottom/hopscotch:latest
    ```bash
    eval "$(hopscotch shell-init)"
    ```
-   > **Required** for `hopscotch enable` / `disable` to work. Without this, the commands only print the export statements — they don't apply them to your shell.
+   > **Required** for `hopscotch enable` / `disable` to work. Without this, the commands only print the export statements — they don't apply them to your shell. For a one-time workaround: `eval "$(hopscotch enable)"`.
 
 4. Start:
    ```bash
