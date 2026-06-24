@@ -22,6 +22,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 	for _, cfg := range vpnCfgs {
 		m.connections[cfg.Name] = newConnection(connConfig{
 			Name:              cfg.Name,
+			Binary:            cfg.Binary,
 			Server:            cfg.Server,
 			User:              cfg.User,
 			AuthGroup:         cfg.AuthGroup,

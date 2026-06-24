@@ -5,6 +5,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	"github.com/charmbracelet/log"
 )
 
 // State represents the lifecycle state of a VPN connection.
@@ -30,6 +32,7 @@ func (s State) String() string {
 // connConfig holds all parameters for one VPN connection.
 type connConfig struct {
 	Name              string
+	Binary            string // path to openconnect binary; default: "openconnect"
 	Server            string
 	User              string
 	AuthGroup         string
@@ -82,6 +85,7 @@ func (c *Connection) Run(ctx context.Context) error {
 		c.setState(StateDisconnected)
 
 		delay := b.next()
+		log.Warn("vpn disconnected, reconnecting", "vpn", c.cfg.Name, "delay", delay)
 		select {
 		case <-ctx.Done():
 			return nil

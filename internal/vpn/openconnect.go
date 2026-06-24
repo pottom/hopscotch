@@ -20,11 +20,16 @@ import (
 func (c *Connection) runOnce(ctx context.Context) error {
 	args := c.buildArgs()
 
+	binary := c.cfg.Binary
+	if binary == "" {
+		binary = "openconnect"
+	}
+
 	var cmd *exec.Cmd
 	if c.cfg.Sudo {
-		cmd = exec.CommandContext(ctx, "sudo", append([]string{"openconnect"}, args...)...)
+		cmd = exec.CommandContext(ctx, "sudo", append([]string{binary}, args...)...)
 	} else {
-		cmd = exec.CommandContext(ctx, "openconnect", args...)
+		cmd = exec.CommandContext(ctx, binary, args...)
 	}
 
 	if pw := c.password(); pw != "" {
