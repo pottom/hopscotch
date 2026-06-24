@@ -24,6 +24,7 @@ SSH tunnel manager with automatic reconnect and a built-in SOCKS5 proxy router t
 - **Dual-channel traffic graph** — filled braille area chart: ↓ download fills upward (cyan), ↑ upload fills downward (purple); toggle mirror/single mode with `g`
 - **Compact mode** — press `c` to collapse graphs for a denser tunnel list
 - **Shell proxy activation** — `hopscotch enable` / `disable` sets and restores `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` in the current shell, like Python venv
+- **Self-update** — `hopscotch update` fetches the latest release from GitHub and atomically replaces the running binary; container-aware (skips and tells you why)
 - **Automatic reconnect** with exponential backoff — tunnels come back on their own after network interruptions
 - **Fast VPN drop detection** — keepalive timeout matches `dial_timeout`; dead connections detected in seconds, not minutes
 - **SOCKS5 proxy router** on a single port that routes each connection through the right tunnel based on hostname pattern
@@ -167,6 +168,8 @@ hopscotch shell-init         # output shell integration code (source once in .zs
 hopscotch trust <name|host|all>  # add SSH host key to known_hosts
 hopscotch validate           # validate the config file
 hopscotch version            # print version information
+hopscotch update             # check for a newer release and update the binary
+hopscotch update --check     # check only, do not download
 ```
 
 Global flags:
