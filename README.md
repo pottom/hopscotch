@@ -36,6 +36,14 @@ SSH tunnel manager with automatic reconnect and a built-in SOCKS5 proxy router t
 
 ## Installation
 
+### One-liner
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pottom/hopscotch/main/install.sh | bash
+```
+
+Automatikusan felismeri a platformot (macOS/Linux, amd64/arm64) és a legfrissebb release-t telepíti `/usr/local/bin`-be.
+
 ### From source
 
 ```bash
