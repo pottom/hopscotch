@@ -67,8 +67,8 @@ var (
 
 const (
 	tabStatus = 0
-	tabLogs   = 1
-	tabRoutes = 2
+	tabRoutes = 1
+	tabLogs   = 2
 	numTabs   = 3
 )
 
@@ -558,8 +558,8 @@ func (m Model) renderTabBar() string {
 		idx  int
 	}{
 		{"Status", tabStatus},
-		{"Logs", tabLogs},
 		{"Routes", tabRoutes},
+		{"Logs", tabLogs},
 	}
 	var parts []string
 	for _, t := range tabs {

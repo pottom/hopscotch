@@ -465,13 +465,12 @@ main, main.main {
 
 .routes-tester-input {
   width: 100%;
-  max-width: 520px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 0.55rem 0.85rem;
+  padding: 0.35rem 0.75rem;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text);
   outline: none;
   transition: border-color .15s;
