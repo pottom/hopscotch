@@ -182,15 +182,15 @@ func (c *Connection) watchStderr(r io.Reader) {
 		case strings.Contains(line, "Established DTLS connection"),
 			strings.Contains(line, "Established TLS connection"),
 			strings.Contains(line, "Connected as"):
-			log.Info("vpn: "+line, "vpn", c.cfg.Name)
+			log.Info("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
 			if c.State() != StateConnected {
 				c.setState(StateConnected)
 			}
 		case strings.Contains(line, "error") || strings.Contains(line, "Error") ||
 			strings.Contains(line, "failed") || strings.Contains(line, "Failed"):
-			log.Error("vpn: "+line, "vpn", c.cfg.Name)
+			log.Error("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
 		default:
-			log.Debug("vpn: "+line, "vpn", c.cfg.Name)
+			log.Debug("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
 		}
 	}
 }
