@@ -14,6 +14,9 @@
 #     authgroup: "Engineering"       # --authgroup (Cisco AnyConnect)
 #     sudo: true                     # run openconnect via sudo
 #     # binary: /usr/local/bin/openconnect  # custom path; default: openconnect in PATH
+#     # password_env: CORP_VPN_PASS  # read password from env var instead of OS keychain
+#     # certificate: ~/.certs/client.pem   # client certificate for cert-based auth
+#     # key: ~/.certs/client.key           # private key for cert-based auth
 #     ping_host: "10.0.0.1:22"      # TCP probe to confirm VPN is up
 #     pre_connect:                   # commands before each VPN connection attempt
 #       - "sudo networksetup -setdnsservers Wi-Fi Empty"   # macOS: reset DNS
