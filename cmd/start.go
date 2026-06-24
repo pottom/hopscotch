@@ -93,7 +93,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	mgr := tunnel.NewManager(cfg.Tunnels, vpnGater)
 	router := proxy.NewRouter(cfg.Proxy.Rules, mgr)
-	proxySrv := proxy.NewServer(cfg.Proxy.Port, router)
+	proxySrv := proxy.NewServer(cfg.Proxy.Bind, cfg.Proxy.Port, router)
 	var vpnStatter admin.VPNStatter
 	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
 		vpnStatter = vpnMgr

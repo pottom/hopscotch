@@ -62,6 +62,7 @@ tunnels:
 # ── Proxy ──────────────────────────────────────────────────────────────────────
 proxy:
   port: 8080
+  # bind: "127.0.0.1"   # restrict SOCKS5 to localhost only; default: 0.0.0.0
   no_proxy: "localhost,127.0.0.1,::1"   # set in NO_PROXY on `hopscotch enable`
   shell_icon: "⇢"                        # icon exported as HOPSCOTCH_ACTIVE
   rules:

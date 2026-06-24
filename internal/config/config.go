@@ -69,6 +69,7 @@ type Rule struct {
 // ProxyConfig holds the SOCKS5 router configuration.
 type ProxyConfig struct {
 	Port      int    `yaml:"port"`
+	Bind      string `yaml:"bind"`       // listen address; default 0.0.0.0
 	Rules     []Rule `yaml:"rules"`
 	NoProxy   string `yaml:"no_proxy"`   // passed to NO_PROXY / no_proxy on shell enable
 	ShellIcon string `yaml:"shell_icon"` // icon shown in HOPSCOTCH_ACTIVE; default ⇢
@@ -206,6 +207,9 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Proxy.Port == 0 {
 		cfg.Proxy.Port = DefaultProxyPort
+	}
+	if cfg.Proxy.Bind == "" {
+		cfg.Proxy.Bind = "0.0.0.0"
 	}
 	if cfg.Proxy.ShellIcon == "" {
 		cfg.Proxy.ShellIcon = "⇢"
