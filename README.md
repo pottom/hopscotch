@@ -1,41 +1,76 @@
 # hopscotch
 
-SSH tunnel manager with automatic reconnect and a built-in SOCKS5 proxy router that routes connections by URL pattern.
+> SSH tunnels that reconnect themselves. A smart SOCKS5 router that sends each request through the right tunnel — automatically.
 
+[![Release](https://img.shields.io/github/v/release/pottom/hopscotch?color=38bdf8&label=latest)](https://github.com/pottom/hopscotch/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-818cf8)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.22+-00ADD8)](go.mod)
+
+![hopscotch TUI dashboard](docs/tui-status.svg)
+
+---
+
+**hopscotch** manages your SSH tunnels and routes outgoing connections through them automatically — like a personal VPN router for jump hosts. It watches your tunnels, reconnects them in seconds when they drop, and handles the `HTTP_PROXY` setup so your dev tools just work without per-app configuration.
+
+One binary. Zero services. No VPN client.
+
+## What you get
+
+| | |
+|---|---|
+| **Auto-reconnect** | Exponential backoff, keepalive-based dead-connection detection in seconds, not minutes |
+| **Smart routing** | One SOCKS5 port, pattern rules (`*.prod.internal → prod-jump`), first-match wins |
+| **TUI dashboard** | Live tunnel cards with dual-channel traffic graphs, reconnect countdowns, log streaming |
+| **Shell integration** | `hopscotch enable` / `disable` like Python venv — sets and restores `HTTP_PROXY` in the current shell |
+| **Web UI** | Same data as TUI, in the browser at `localhost:9090`, with live SSE updates |
+| **Self-update** | `hopscotch update` fetches and atomically replaces the binary; container-aware |
+| **Hot reload** | Config reloads on `SIGHUP` or file change, no restart needed |
+| **SSH agent** | Works with YubiKey, gpg-agent, and ssh-agent out of the box |
+
+## TUI dashboard
+
+`hopscotch status` opens a live terminal dashboard with three tabs: Status, Routes, and Logs.
+
+![TUI status tab](docs/tui-status.svg)
+
+Each tunnel card shows: status dot (animated), host, local SOCKS5 port, uptime, reconnect counter, per-second throughput, active connections, last error — and a rolling dual-channel traffic graph (↓ download fills upward in cyan, ↑ upload fills downward in purple).
+
+Press `c` to collapse graphs for a denser view. Press `g` to toggle mirror mode. Press `q` to quit.
+
+## Routing rules
+
+The **Routes tab** shows exactly which hostname patterns route to which tunnel. Press `/` to focus the URL tester — type any hostname and hopscotch highlights the matching rule in real time.
+
+![TUI routes tab with URL tester](docs/tui-routes.svg)
+
+Rules are evaluated top-to-bottom; the first match wins. Patterns support wildcard prefix (`*.example.com`), wildcard suffix (`10.0.1.*`), exact hostnames, and `*` as a catch-all for direct connections.
+
+## Shell integration
+
+Works like Python venv — `enable` captures and exports the proxy env, `disable` restores exactly what was there before.
+
+![Shell integration demo](docs/shell-demo.svg)
+
+Add once to `~/.zshrc` or `~/.bashrc`:
+
+```bash
+eval "$(hopscotch shell-init)"
 ```
-  hopscotch v0.4.5  ✓ healthy  PID 12345  up 5m         Status · Routes · Logs
 
-  ↓ 1.2 KB/s      ↑ 842 B/s     3 conn total
+Then toggle per-shell:
 
-  TUNNEL                    HOST                   PORT   STATUS           UPTIME     RC   ↓              ↑              CONN
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  prod-jump                 10.0.0.1:22            1080   ● connected      5m12s      0    ↓ 1.1 KB/s     ↑ 800 B/s      2
-  ⣤⣦⣶⣷⣿⣷⣶⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤
-  staging-jump              10.0.1.1:22            1081   ○ disconnected   —          1    ↓ 0 B/s        ↑ 0 B/s        0
-  direct                                                                              0    ↓ 0 B/s        ↑ 0 B/s        0
-
-  q quit  tab/s/l/r switch  ↑↓/jk scroll  c compact  g mirror  / test URL     PROXY :8080  ADMIN :9090
+```bash
+hopscotch enable    # sets HTTP_PROXY, HTTPS_PROXY, NO_PROXY in current shell
+hopscotch disable   # restores the previous environment exactly
 ```
 
-## Features
+When the proxy is active, `HOPSCOTCH_ACTIVE` is exported so your prompt or scripts can react to it.
 
-- **Interactive TUI** — `hopscotch status` opens a live dashboard with tabbed Status / Routes / Logs views, dual-channel braille traffic graphs, reconnect countdowns, keepalive indicators, and per-tunnel error reasons
-- **Routes tab** — shows which URL patterns route through which tunnels; press `/` in the TUI to test any hostname or URL interactively
-- **Dual-channel traffic graph** — filled braille area chart: ↓ download fills upward (cyan), ↑ upload fills downward (purple); toggle mirror/single mode with `g`
-- **Compact mode** — press `c` to collapse graphs for a denser tunnel list
-- **Shell proxy activation** — `hopscotch enable` / `disable` sets and restores `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` in the current shell, like Python venv
-- **Self-update** — `hopscotch update` fetches the latest release from GitHub and atomically replaces the running binary; container-aware (skips and tells you why)
-- **Automatic reconnect** with exponential backoff — tunnels come back on their own after network interruptions
-- **Fast VPN drop detection** — keepalive timeout matches `dial_timeout`; dead connections detected in seconds, not minutes
-- **SOCKS5 proxy router** on a single port that routes each connection through the right tunnel based on hostname pattern
-- **Pattern matching** — `*.example.com`, `10.0.1.*`, exact hosts, and `*` catch-all; first match wins
-- **SSH agent support** — works with YubiKey, gpg-agent, and ssh-agent out of the box
-- **Force PTY** — `force_pty: true` opens a PTY shell session to satisfy jump host channel policies (SPS/SCB)
-- **Hot reload** — config reloads automatically on file change or `SIGHUP`; no restart needed
-- **Admin UI** — built-in web dashboard with Status / Routes / Logs tabs, dual-channel live traffic graphs, interactive URL tester, live log stream, and global stats
-- **Prometheus metrics** — `/metrics` endpoint with bytes, active connections, and reconnect counters
-- **Health endpoint** — `GET /health` for load balancers and container probes
-- **Multiarch Docker image** — `linux/amd64` and `linux/arm64`
+## Web admin UI
+
+The web dashboard lives at `http://localhost:9090`. It mirrors the TUI — tunnel cards with live traffic graphs, a Routes tab with interactive URL tester, and a Logs tab streaming structured output in real time. No polling, pure SSE.
+
+![Admin web UI](docs/ui-preview.svg)
 
 ## Installation
 
@@ -45,15 +80,25 @@ SSH tunnel manager with automatic reconnect and a built-in SOCKS5 proxy router t
 curl -fsSL https://raw.githubusercontent.com/pottom/hopscotch/main/install.sh | bash
 ```
 
-Automatikusan felismeri a platformot (macOS/Linux, amd64/arm64) és a legfrissebb release-t telepíti `/usr/local/bin`-be.
+Detects platform (macOS/Linux, amd64/arm64) and installs the latest release to `/usr/local/bin`.
+
+### Self-update
+
+Once installed, keep it current with:
+
+```bash
+hopscotch update          # check and update
+hopscotch update --check  # check only, print version if newer
+```
+
+Atomically replaces the binary. Prints an explicit message instead of silently updating when running inside a container.
 
 ### From source
 
 ```bash
 git clone https://github.com/pottom/hopscotch.git
 cd hopscotch
-./build.sh binary
-# binary is at dist/hopscotch
+./build.sh binary   # → dist/hopscotch
 ```
 
 ### Docker
@@ -64,232 +109,130 @@ docker pull ghcr.io/pottom/hopscotch:latest
 
 ## Quick start
 
-1. Copy the example config and edit it:
+1. Copy and edit the example config:
    ```bash
    cp hopscotch.example.yaml hopscotch.yaml
    ```
-2. Trust your SSH hosts:
+
+2. Trust your SSH hosts (first run):
    ```bash
    hopscotch trust all
    ```
+
 3. Start:
    ```bash
    hopscotch start
    ```
-4. Use the proxy:
+
+4. Route traffic:
    ```bash
-   export ALL_PROXY=socks5h://localhost:8080
-   curl https://internal.service.example.com
+   # per-request
+   curl -x socks5h://localhost:8080 https://internal.service.corp
+
+   # or activate for the whole shell session
+   hopscotch enable
+   curl https://internal.service.corp
    ```
 
 ## Configuration
 
-See [`hopscotch.example.yaml`](hopscotch.example.yaml) for a full example. Minimal config:
+See [`hopscotch.example.yaml`](hopscotch.example.yaml) for a full annotated example. Minimal working config:
 
 ```yaml
 tunnels:
   - name: prod-jump
-    host: 10.0.0.1
+    host: bastion.corp
     port: 22
-    user: myuser
+    user: alice
     local_port: 1080
-    # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent)
-    dial_timeout: 15                 # seconds; TCP connect + SSH handshake
-    keepalive_interval: 5            # seconds between keepalive probes
-    keepalive_max_fails: 2           # consecutive failures → reconnect
-    reconnect_delay: 5               # initial backoff seconds (doubles each attempt)
-    reconnect_max_delay: 30          # backoff cap seconds
+    keepalive_interval: 5      # seconds between keepalive probes
+    keepalive_max_fails: 2     # consecutive failures → reconnect
+    reconnect_delay: 5         # initial backoff (doubles each retry)
+    reconnect_max_delay: 30    # cap
 
   - name: staging-jump
-    host: 10.0.1.1
+    host: dev.corp
     port: 22
-    user: myuser
+    user: alice
     identity_file: ~/.ssh/id_rsa
     local_port: 1081
 
 proxy:
   port: 8080
-  no_proxy: "localhost,127.0.0.1,::1"   # exported by `hopscotch enable`
-  shell_icon: "⇢"                        # exported as HOPSCOTCH_ACTIVE
+  no_proxy: "localhost,127.0.0.1,::1"   # used by `hopscotch enable`
+  shell_icon: "⇢"                         # exported as HOPSCOTCH_ACTIVE
   rules:
     - pattern: "*.prod.internal"
       tunnel: prod-jump
     - pattern: "*.staging.internal"
       tunnel: staging-jump
     - pattern: "*"
-      via: direct          # everything else goes direct
+      via: direct
 
 admin:
   port: 9090
-  bind: "127.0.0.1"       # change to 0.0.0.0 to expose in containers
+  bind: "127.0.0.1"    # set to 0.0.0.0 to expose in containers
 ```
 
 ### Tunnel options
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `name` | ✓ | — | Unique tunnel name, used in proxy rules |
-| `host` | ✓ | — | SSH server hostname or IP |
-| `port` | | `22` | SSH server port |
-| `user` | ✓ | — | SSH username |
-| `identity_file` | | — | Path to private key; omit to use SSH agent |
-| `local_port` | ✓ | — | Local SOCKS5 port for this tunnel |
-| `dial_timeout` | | `30` | SSH TCP connect + handshake timeout in seconds |
-| `keepalive_interval` | | `5` | Keepalive probe interval in seconds |
-| `keepalive_max_fails` | | `2` | Consecutive failures before reconnect |
-| `reconnect_delay` | | `5` | Initial reconnect delay in seconds (doubles each attempt) |
-| `reconnect_max_delay` | | `30` | Reconnect backoff cap in seconds |
-| `force_pty` | | `false` | Open a PTY shell session — required for jump hosts that enforce channel policies (SPS/SCB) |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `name` | — | Unique tunnel name (referenced in proxy rules) |
+| `host` | — | SSH server hostname or IP |
+| `port` | `22` | SSH server port |
+| `user` | — | SSH username |
+| `identity_file` | — | Path to private key; omit to use SSH agent |
+| `local_port` | — | Local SOCKS5 port for this tunnel |
+| `dial_timeout` | `30` | TCP connect + SSH handshake timeout (seconds) |
+| `keepalive_interval` | `5` | Keepalive probe interval (seconds) |
+| `keepalive_max_fails` | `2` | Consecutive failures before reconnect |
+| `reconnect_delay` | `5` | Initial reconnect backoff (doubles each attempt) |
+| `reconnect_max_delay` | `30` | Reconnect backoff cap (seconds) |
+| `force_pty` | `false` | Open a PTY shell session — for jump hosts that enforce channel policies (SPS/SCB) |
 
 ### Proxy rules
-
-Rules are evaluated top-to-bottom; the first match wins.
 
 | Pattern | Example | Matches |
 |---------|---------|---------|
 | Wildcard prefix | `*.example.com` | `foo.example.com`, `bar.example.com` |
-| Wildcard suffix | `10.0.1.*` | `10.0.1.1`, `10.0.1.254` |
+| Wildcard suffix | `10.0.1.*` | `10.0.1.1` … `10.0.1.254` |
 | Exact | `db.internal` | `db.internal` only |
 | Catch-all | `*` | everything |
 
-`via: direct` sends the connection through without tunneling.
+`via: direct` bypasses all tunnels.
 
 ## Commands
 
 ```
 hopscotch start              # start daemon (detaches from terminal)
 hopscotch start --foreground # stay in foreground (for Docker, systemd)
-hopscotch start --restart    # replace a running instance without prompting
+hopscotch start --restart    # replace running instance without prompting
 hopscotch stop               # stop the daemon
-hopscotch status             # interactive TUI (plain text when piped)
-hopscotch enable             # activate proxy in current shell (use with shell-init)
-hopscotch disable            # deactivate proxy and restore previous env
-hopscotch shell-init         # output shell integration code (source once in .zshrc)
+hopscotch status             # open interactive TUI (plain text when piped)
+hopscotch enable             # activate proxy in current shell
+hopscotch disable            # deactivate proxy, restore previous env
+hopscotch shell-init         # print shell integration (source once in .zshrc)
+hopscotch update             # check for newer release and update the binary
+hopscotch update --check     # check only, do not download
 hopscotch trust <name|host|all>  # add SSH host key to known_hosts
 hopscotch validate           # validate the config file
-hopscotch version            # print version information
-hopscotch update             # check for a newer release and update the binary
-hopscotch update --check     # check only, do not download
+hopscotch version            # print version info
 ```
 
-Global flags:
-```
---config <path>    path to config file (default: hopscotch.yaml next to binary, or ~/.config/hopscotch/config.yaml)
---verbose          enable debug logging
-```
+Global flags: `--config <path>` · `--verbose` · `--log-file <path>`
 
 ### TUI key bindings
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `s` / `r` / `l` | Switch between Status, Routes, and Logs tabs |
-| `↑` / `↓` / `j` / `k` | Scroll |
-| `/` | Focus URL tester on the Routes tab |
-| `c` | Toggle compact mode (hides graphs) |
+| `Tab` / `s` / `r` / `l` | Switch tabs (Status → Routes → Logs → Docs) |
+| `↑` `↓` / `j` `k` | Scroll |
+| `/` | Focus URL tester (Routes tab) |
+| `Esc` | Unfocus tester |
+| `c` | Toggle compact mode (hides traffic graphs) |
 | `g` | Toggle mirror graph (dual-channel ↔ download only) |
 | `q` / `Esc` / `Ctrl+C` | Quit |
-
-## Using the proxy
-
-### Shell activation (recommended)
-
-Works like Python venv — activates and deactivates the proxy in the current shell session.
-
-Add shell integration once to your `~/.zshrc` or `~/.bashrc`:
-
-```bash
-eval "$(hopscotch shell-init)"
-```
-
-Then toggle the proxy without restarting the shell:
-
-```bash
-hopscotch enable    # sets HTTP_PROXY, HTTPS_PROXY, NO_PROXY
-hopscotch disable   # restores the previous environment
-```
-
-`enable` saves the current proxy env state before overwriting it; `disable` restores exactly that state.
-
-Configure what goes into `NO_PROXY` and the indicator icon in the config:
-
-```yaml
-proxy:
-  no_proxy: "localhost,127.0.0.1,::1"
-  shell_icon: "⇢"
-```
-
-### Manual
-
-```bash
-export HTTP_PROXY=socks5h://localhost:8080
-export HTTPS_PROXY=socks5h://localhost:8080
-```
-
-Per-request override:
-
-```bash
-curl -x socks5h://localhost:8080 https://internal.service.example.com
-```
-
-## Admin UI
-
-The web dashboard is available at `http://localhost:9090` (or whichever port `admin.port` is set to).
-
-![hopscotch admin UI](docs/ui-preview.svg)
-
-Each tunnel gets its own full-width card showing:
-
-- **Status** — animated dot: green (connected), amber blinking (connecting/keepalive warning), red (disconnected)
-- **Host** — the SSH server address (host:port)
-- **SOCKS5 port** — the local port for this tunnel
-- **Uptime** — how long the tunnel has been connected in the current session
-- **Reconnect countdown** — when connecting, shows _next in Ns_ so you know when the next attempt fires
-- **Reconnect count** — total reconnects since start
-- **Keepalive failures** — ⚠N badge when consecutive keepalive probes fail
-- **Live throughput** — ↓ bytes/s in and ↑ bytes/s out, updated every second via SSE
-- **Active connections** — current number of open connections through this tunnel
-- **Error reason** — last connection error in red; `—` when the tunnel is healthy
-- **Dual-channel chart** — rolling traffic graph: ↓ download fills upward (cyan), ↑ upload fills downward (purple)
-
-A **global stats bar** at the top shows combined throughput and active connections across all tunnels.
-
-A **direct** card at the bottom tracks connections that bypassed the tunnels (matched a `via: direct` rule or the catch-all fallback).
-
-The **Logs tab** streams live structured log output from the daemon directly in the browser.
-
-The UI updates in-place via Server-Sent Events — no polling, no full-page refreshes.
-
-### API endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Returns `{"status":"ok"}` — suitable for health checks |
-| `GET /status` | Full JSON status of all tunnels and the proxy |
-| `GET /metrics` | Prometheus-compatible metrics (see below) |
-| `GET /traffic/stream` | SSE stream of per-second traffic deltas |
-| `GET /logs/stream` | SSE stream of live structured log lines |
-
-## Prometheus metrics
-
-The `/metrics` endpoint exposes metrics in the Prometheus text format:
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `hopscotch_tunnel_status` | gauge | `1` = connected, `0` = other; label `tunnel` |
-| `hopscotch_tunnel_uptime_seconds` | gauge | Seconds since last connect |
-| `hopscotch_tunnel_reconnects_total` | counter | Total reconnect attempts |
-| `hopscotch_tunnel_bytes_in_total` | counter | Cumulative bytes received through tunnel |
-| `hopscotch_tunnel_bytes_out_total` | counter | Cumulative bytes sent through tunnel |
-| `hopscotch_tunnel_active_connections` | gauge | Current open connections |
-| `hopscotch_direct_bytes_in_total` | counter | Cumulative bytes received via direct |
-| `hopscotch_direct_bytes_out_total` | counter | Cumulative bytes sent via direct |
-| `hopscotch_direct_active_connections` | gauge | Current direct open connections |
-
-Example PromQL for live throughput:
-
-```promql
-rate(hopscotch_tunnel_bytes_in_total{tunnel="prod-jump"}[1m])
-```
 
 ## Docker
 
@@ -303,9 +246,29 @@ docker run -d \
   ghcr.io/pottom/hopscotch:latest
 ```
 
-Or with docker compose — see [`deploy/docker-compose.yml`](deploy/docker-compose.yml).
+Or with Compose — see [`deploy/docker-compose.yml`](deploy/docker-compose.yml).
 
-In containers, the process runs in foreground mode automatically (`--foreground` is set in the image entrypoint). Set `admin.bind: "0.0.0.0"` so the mapped port is reachable from the host.
+Set `admin.bind: "0.0.0.0"` when running in a container so the admin port is reachable from the host. `hopscotch update` prints an explicit notice inside containers instead of updating — update the image instead.
+
+## Prometheus metrics
+
+Metrics are exposed at `/metrics` in Prometheus text format:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `hopscotch_tunnel_status` | gauge | `1` = connected; label `tunnel` |
+| `hopscotch_tunnel_uptime_seconds` | gauge | Seconds since last connect |
+| `hopscotch_tunnel_reconnects_total` | counter | Total reconnect attempts |
+| `hopscotch_tunnel_bytes_in_total` | counter | Cumulative bytes received |
+| `hopscotch_tunnel_bytes_out_total` | counter | Cumulative bytes sent |
+| `hopscotch_tunnel_active_connections` | gauge | Current open connections |
+| `hopscotch_direct_bytes_in_total` | counter | Bytes via direct path |
+| `hopscotch_direct_bytes_out_total` | counter | Bytes via direct path |
+| `hopscotch_direct_active_connections` | gauge | Current direct connections |
+
+```promql
+rate(hopscotch_tunnel_bytes_in_total{tunnel="prod-jump"}[1m])
+```
 
 ## Building
 
@@ -316,21 +279,6 @@ In containers, the process runs in foreground mode automatically (`--foreground`
 ./build.sh publish       # build + push to ghcr.io
 ./build.sh release       # binary-all + publish
 ```
-
-For `publish`, set:
-```bash
-export GITHUB_USER=pottom
-export GITHUB_TOKEN=<token with write:packages scope>
-```
-
-## Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `HOPSCOTCH_CONFIG` | Path to config file |
-| `HOPSCOTCH_INSECURE_SKIP_KNOWN_HOSTS` | Set to `true` to disable host key verification (not recommended) |
-| `SSH_AUTH_SOCK` | SSH agent socket — set automatically by ssh-agent, gpg-agent |
-| `ALL_PROXY` | Proxy URL for outgoing connections from other tools |
 
 ## License
 
