@@ -20,8 +20,14 @@ func daemonize() error {
 	if configPath != "" {
 		childArgs = append(childArgs, "--config", configPath)
 	}
+	if verbose {
+		childArgs = append(childArgs, "--verbose")
+	}
+	if logFile != "" {
+		childArgs = append(childArgs, "--log-file", logFile)
+	}
 
-	devNull, err := os.Open(os.DevNull)
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("opening /dev/null: %w", err)
 	}
