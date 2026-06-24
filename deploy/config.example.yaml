@@ -38,3 +38,16 @@ admin:
   port: 9090
   # bind: "127.0.0.1"   # default: localhost only (safe for bare-metal / VM)
   bind: "0.0.0.0"       # required in Docker: 127.0.0.1 is unreachable from outside the container
+
+# ── VPN (optional) ────────────────────────────────────────────────────────────
+# Requires the VPN-enabled image (build with --build-arg WITH_VPN=true).
+# See docker-compose.yml for the required cap_add / devices settings.
+#
+# vpn:
+#   - name: corp-vpn
+#     type: openconnect
+#     server: https://vpn.corp.example.com
+#     user: myuser
+#     sudo: false          # NET_ADMIN capability replaces sudo in containers
+#     password_env: CORP_VPN_PASS  # keychain is not available in containers
+#     ping_host: "10.0.0.1:22"

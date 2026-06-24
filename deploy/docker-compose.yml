@@ -65,6 +65,25 @@ services:
       # Safe to set; hopscotch still reads the keys, just skips the chmod check.
       # - HOPSCOTCH_INSECURE_SKIP_KEY_CHECK=true
 
+    # ── VPN (openconnect) ──────────────────────────────────────────────────────
+    # To use VPN-managed tunnels (requires_vpn), rebuild with WITH_VPN=true:
+    #
+    #   docker build --build-arg WITH_VPN=true -t hopscotch:vpn deploy/
+    #
+    # Then uncomment the block below and set your VPN password via environment:
+    #
+    # cap_add:
+    #   - NET_ADMIN          # required for TUN/TAP device management
+    # devices:
+    #   - /dev/net/tun       # TUN device for openconnect
+    # environment:
+    #   - CORP_VPN_PASS=...  # matches password_env in your VPN config; use a .env file
+    #
+    # Notes:
+    # - Set sudo: false in your VPN config — NET_ADMIN capability replaces sudo.
+    # - The password must be supplied via password_env; the OS keychain is not
+    #   available in containers.
+
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
       interval: 30s
