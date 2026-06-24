@@ -11,6 +11,8 @@
 [![License](https://img.shields.io/badge/license-MIT-818cf8)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.22+-00ADD8)](go.mod)
 
+> The name comes from the children's game: just as a player hops from square to square along a fixed path, hopscotch routes each connection through the right tunnel — automatically, one hop at a time.
+
 ![hopscotch TUI dashboard](docs/tui-status.svg)
 
 ---
