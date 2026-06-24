@@ -19,24 +19,39 @@
 
 ## The problem
 
-You have a bastion host. Maybe two. Your dev tools need `HTTP_PROXY` set. SSH tunnels die silently — TCP can take minutes to notice a dead connection, by which point your request has already hung. You juggle terminal windows, ports, and environment variables all day.
+Your infrastructure is behind a VPN and a jump host. The "official" way to get anything done is either SSH into a Linux bastion and work with whatever tools are installed there, or RDP into a Windows jump server and work in a slow remote desktop with someone else's browser and no access to your own tools.
 
-**hopscotch fixes this.** One binary. One config file. It opens your tunnels, watches them with sub-second keepalives, reconnects automatically, and routes every outgoing request to the right tunnel — no per-tool configuration, no port juggling, no surprises.
-
-**Before:**
+Want to copy a file to a production server?
 ```bash
-# Three terminals. Three manual tunnels. One silent death you won't notice for minutes.
-ssh -D 1080 -N bastion.prod &
-ssh -D 1081 -N bastion.staging &
-export HTTP_PROXY=socks5h://localhost:1080   # ...and hope you typed the right port
+# Step 1 — copy to the jump host
+scp report.csv user@jump.corp:/tmp/
+# Step 2 — from the jump, copy to the destination
+ssh user@jump.corp "scp /tmp/report.csv user@prod-01.internal:/data/"
 ```
 
-**After:**
+Want to open an internal web UI to configure a device? RDP in, wait for the remote desktop to load, use the laggy browser, squint at the small screen.
+
+Want to edit code on a remote server? `vim`. No IntelliSense. No extensions. No your-own-terminal.
+
+**hopscotch fixes this.** You run it on your own machine. Your own tools — browser, VS Code, rsync, Ansible, DBeaver, Postman — connect directly to internal hosts as if you were already there. The jump host becomes invisible.
+
+**Copy a file to production:**
 ```bash
-hopscotch start
+rsync -av report.csv user@prod-01.internal:/data/
+```
+
+**Open an internal web UI in your own browser:**
+```bash
 hopscotch enable
-# Done. Routes automatically. Reconnects when they drop. You stop thinking about it.
+# then just open http://grafana.infra.internal in your browser
 ```
+
+**Edit code on a remote server:**
+```
+VS Code → Remote-SSH: Connect to Host → user@prod-01.internal
+```
+
+One binary. One config file. Start it once and stop thinking about infrastructure plumbing.
 
 ## What you get
 
