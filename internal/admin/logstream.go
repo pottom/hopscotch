@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const logStreamHeartbeat = 15 * time.Second
+
 // handleLogStream serves a Server-Sent Events stream of log lines.
 // New clients receive the recent backlog first, then live lines as they arrive.
 func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,9 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	ch := s.logs.Subscribe()
 	defer s.logs.Unsubscribe(ch)
 
+	heartbeat := time.NewTicker(logStreamHeartbeat)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -40,6 +45,9 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			fmt.Fprintf(w, "data: %s\n\n", line)
+			flusher.Flush()
+		case <-heartbeat.C:
+			fmt.Fprintf(w, ": ping\n\n")
 			flusher.Flush()
 		}
 	}
