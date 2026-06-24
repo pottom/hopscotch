@@ -218,14 +218,14 @@ proxy:
 ### Manual
 
 ```bash
-export HTTP_PROXY=socks5://localhost:8080
-export HTTPS_PROXY=socks5://localhost:8080
+export HTTP_PROXY=socks5h://localhost:8080
+export HTTPS_PROXY=socks5h://localhost:8080
 ```
 
 Per-request override:
 
 ```bash
-curl -x socks5://localhost:8080 https://internal.service.example.com
+curl -x socks5h://localhost:8080 https://internal.service.example.com
 ```
 
 ## Admin UI

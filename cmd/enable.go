@@ -42,7 +42,7 @@ func runEnable(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	proxyURL := fmt.Sprintf("socks5://127.0.0.1:%d", cfg.Proxy.Port)
+	proxyURL := fmt.Sprintf("socks5h://127.0.0.1:%d", cfg.Proxy.Port)
 
 	// Save current values (or sentinel if unset) so disable can restore them.
 	for _, v := range shellVars {
