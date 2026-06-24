@@ -118,7 +118,14 @@ func Load(explicit string) (*Config, error) {
 }
 
 func resolvePath(explicit string) (string, error) {
-	candidates := []string{explicit, os.Getenv("HOPSCOTCH_CONFIG")}
+	if explicit != "" {
+		if _, err := os.Stat(explicit); err != nil {
+			return "", fmt.Errorf("config file not found: %s", explicit)
+		}
+		return explicit, nil
+	}
+
+	candidates := []string{os.Getenv("HOPSCOTCH_CONFIG")}
 
 	// binary directory
 	if exe, err := os.Executable(); err == nil {
@@ -180,6 +187,14 @@ func applyDefaults(cfg *Config) {
 		}
 		if v.ReconnectMaxDelay == 0 {
 			v.ReconnectMaxDelay = DefaultVPNReconnectMaxDelay
+		}
+		if home != "" {
+			if strings.HasPrefix(v.Certificate, "~/") {
+				v.Certificate = filepath.Join(home, v.Certificate[2:])
+			}
+			if strings.HasPrefix(v.Key, "~/") {
+				v.Key = filepath.Join(home, v.Key[2:])
+			}
 		}
 	}
 
