@@ -49,6 +49,7 @@ type VPNConfig struct {
 	Binary            string   `yaml:"binary"`       // path to openconnect binary; default: "openconnect" (PATH)
 	AuthGroup         string   `yaml:"authgroup"`    // --authgroup value (Cisco AnyConnect groups)
 	PasswordEnv       string   `yaml:"password_env"` // env var containing the password
+	PasswordCmd       string   `yaml:"password_cmd"` // shell command whose stdout is the password
 	Certificate       string   `yaml:"certificate"`  // path to client cert (cert auth)
 	Key               string   `yaml:"key"`          // path to private key (cert auth)
 	PingHost          string   `yaml:"ping_host"`      // host[:port] TCP-probed to detect connectivity

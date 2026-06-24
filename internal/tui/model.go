@@ -988,7 +988,7 @@ func (m Model) totalStats() (bpsIn, bpsOut uint64, active int64) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func fmtActive(n int64) string {
-	return fmt.Sprintf("%d conn", n)
+	return fmt.Sprintf("%d", n)
 }
 
 // wrapAt breaks s into lines of at most width runes, splitting at spaces where possible.

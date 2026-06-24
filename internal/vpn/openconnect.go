@@ -115,16 +115,30 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	}
 }
 
-// password returns the VPN password from environment variable or OS keychain.
-// Priority: password_env > keychain. Returns empty string if neither is set.
+// password returns the VPN password. Priority: password_env > password_cmd > keychain.
+// Returns empty string if none is configured or all fail.
 func (c *Connection) password() string {
 	if c.cfg.PasswordEnv != "" {
 		return os.Getenv(c.cfg.PasswordEnv)
 	}
+	if c.cfg.PasswordCmd != "" {
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/C", c.cfg.PasswordCmd)
+		} else {
+			cmd = exec.Command("sh", "-c", c.cfg.PasswordCmd)
+		}
+		out, err := cmd.Output()
+		if err != nil {
+			log.Error("password_cmd failed", "vpn", c.cfg.Name, "cmd", c.cfg.PasswordCmd, "err", err)
+			return ""
+		}
+		return strings.TrimRight(string(out), "\r\n")
+	}
 	pw, err := keychain.GetVPNPassword(c.cfg.Name)
 	if err != nil {
 		if !errors.Is(err, keychain.ErrNotFound) {
-			log.Warn("keychain not available, proceeding without password — set password_env if running in a container",
+			log.Warn("keychain not available, proceeding without password — set password_cmd or password_env if running in a container",
 				"vpn", c.cfg.Name, "err", err)
 		}
 		return ""

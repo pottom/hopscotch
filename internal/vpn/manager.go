@@ -27,6 +27,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			User:              cfg.User,
 			AuthGroup:         cfg.AuthGroup,
 			PasswordEnv:       cfg.PasswordEnv,
+			PasswordCmd:       cfg.PasswordCmd,
 			Certificate:       cfg.Certificate,
 			Key:               cfg.Key,
 			PingHost:          cfg.PingHost,

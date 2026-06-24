@@ -229,7 +229,25 @@ tunnels:
     ...
 ```
 
-The password is stored securely in the OS keychain (macOS Keychain / Linux Secret Service) on first use. hopscotch validates that `sudo` can run openconnect before daemonizing, and kills the entire openconnect process group on shutdown.
+hopscotch validates that `sudo` can run openconnect before daemonizing, and kills the entire openconnect process group on shutdown.
+
+#### VPN password
+
+Three options in priority order:
+
+| Option | How |
+|--------|-----|
+| `password_env: VAR` | Read from environment variable — ideal for containers and systemd units |
+| `password_cmd: "..."` | Run any shell command; its stdout becomes the password — works with `pass`, `gpg`, HashiCorp Vault, or any secret store |
+| OS keychain *(default)* | macOS Keychain / Linux Secret Service; run `hopscotch vpn password <name>` to store |
+
+`password_cmd` examples:
+```yaml
+password_cmd: "pass vpn/corp"
+password_cmd: "gpg --decrypt /etc/hopscotch/vpn.pass.gpg"
+password_cmd: "vault kv get -field=password secret/vpn"
+password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
+```
 
 #### VPN options
 
@@ -242,8 +260,11 @@ The password is stored securely in the OS keychain (macOS Keychain / Linux Secre
 | `authgroup` | — | Authentication group / realm |
 | `sudo` | `false` | Run openconnect via `sudo` |
 | `binary` | `openconnect` | Path to openconnect binary |
+| `password_env` | — | Environment variable name containing the password |
+| `password_cmd` | — | Shell command whose stdout is the password |
 | `ping_host` | — | `host:port` TCP probe to confirm VPN is up |
 | `pre_connect` | — | Shell commands to run before each connection attempt |
+| `post_disconnect` | — | Shell commands to run after each VPN disconnect (runs even on shutdown) |
 | `extra_args` | — | Additional openconnect flags (managed flags like `--user` are rejected) |
 | `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |

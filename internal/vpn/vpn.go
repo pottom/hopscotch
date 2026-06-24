@@ -46,6 +46,7 @@ type connConfig struct {
 	User              string
 	AuthGroup         string
 	PasswordEnv       string
+	PasswordCmd       string
 	Certificate       string
 	Key               string
 	PingHost          string   // host[:port] TCP-probed to confirm VPN connectivity
