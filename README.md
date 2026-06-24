@@ -216,10 +216,11 @@ docker pull ghcr.io/pottom/hopscotch:latest
 
 ## Quick start
 
-1. Copy and edit the example config:
+1. Create the config directory and write a minimal config:
    ```bash
-   cp hopscotch.example.yaml hopscotch.yaml
+   mkdir -p ~/.config/hopscotch
    ```
+   Then create `~/.config/hopscotch/config.yaml` — see the [Configuration](#configuration) section below for a minimal example, or download the [annotated example](https://raw.githubusercontent.com/pottom/hopscotch/main/hopscotch.example.yaml) for all available options.
 
 2. Trust your SSH hosts (first run):
    ```bash
@@ -252,6 +253,8 @@ docker pull ghcr.io/pottom/hopscotch:latest
    open http://localhost:9090  # web UI
    ```
 
+> **Tutorials, troubleshooting, and integration guides** are in the [wiki](https://github.com/pottom/hopscotch/wiki).
+
 ## Configuration
 
 See [`hopscotch.example.yaml`](hopscotch.example.yaml) for a full annotated example. Minimal working config:
@@ -277,7 +280,7 @@ tunnels:
 
 proxy:
   port: 8080
-  no_proxy: "localhost,127.0.0.1,::1"
+  no_proxy: "localhost,127.0.0.1,::1"   # excluded from HTTP_PROXY when using `hopscotch enable`
   rules:
     - pattern: "*.prod.internal"
       tunnel: prod-jump
