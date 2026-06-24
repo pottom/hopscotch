@@ -45,10 +45,8 @@ rsync -av report.csv user@prod-01.internal:/data/
 ```
 
 **Open an internal web UI in your own browser:**
-```bash
-hopscotch enable
-# then just open http://grafana.infra.internal in your browser
-```
+
+Configure your browser to use SOCKS5 proxy at `localhost:8080`, or use [FoxyProxy](https://getfoxyproxy.org/) to route only internal hostnames through it — your public browsing stays direct.
 
 **Edit code on a remote server:**
 ```
