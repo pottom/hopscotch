@@ -32,6 +32,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			PingHost:          cfg.PingHost,
 			ExtraArgs:         cfg.ExtraArgs,
 			PreConnect:        cfg.PreConnect,
+			PostDisconnect:    cfg.PostDisconnect,
 			Sudo:              cfg.Sudo,
 			ReconnectDelay:    cfg.ReconnectDelay,
 			ReconnectMaxDelay: cfg.ReconnectMaxDelay,

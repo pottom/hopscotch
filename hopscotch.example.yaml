@@ -21,6 +21,8 @@
 #     pre_connect:                   # commands before each VPN connection attempt
 #       - "sudo networksetup -setdnsservers Wi-Fi Empty"   # macOS: reset DNS
 #       - "sudo route delete 79.120.196.68 2>/dev/null || true"  # remove stale route
+#     post_disconnect:               # commands after each VPN disconnect (runs even on shutdown)
+#       - "sudo networksetup -setdnsservers Wi-Fi Empty"   # macOS: restore DNS
 #     # extra_args:                  # extra openconnect flags (managed flags like --user rejected)
 #     #   - "--no-dtls"
 #     reconnect_delay: 15

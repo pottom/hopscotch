@@ -54,6 +54,7 @@ type VPNConfig struct {
 	PingHost          string   `yaml:"ping_host"`      // host[:port] TCP-probed to detect connectivity
 	ExtraArgs         []string `yaml:"extra_args"`     // passed through to openconnect verbatim
 	PreConnect        []string `yaml:"pre_connect"`    // commands to run before each connection attempt
+	PostDisconnect    []string `yaml:"post_disconnect"` // commands to run after each VPN disconnect
 	Sudo              bool     `yaml:"sudo"`           // prepend sudo (needed on most platforms)
 	ReconnectDelay    int      `yaml:"reconnect_delay"`
 	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`

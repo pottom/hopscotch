@@ -51,6 +51,7 @@ type connConfig struct {
 	PingHost          string   // host[:port] TCP-probed to confirm VPN connectivity
 	ExtraArgs         []string
 	PreConnect        []string // commands to run before each connection attempt
+	PostDisconnect    []string // commands to run after each VPN disconnect
 	Sudo              bool
 	ReconnectDelay    int
 	ReconnectMaxDelay int

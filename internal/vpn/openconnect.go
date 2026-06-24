@@ -99,6 +99,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		if err != nil && ctx.Err() == nil {
 			log.Warn("vpn subprocess exited", "vpn", c.cfg.Name, "err", err)
 		}
+		c.runPostDisconnect()
 		return err
 	case <-ctx.Done():
 		// Kill entire process group (sudo + openconnect child) so the pipe
@@ -109,6 +110,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		case <-time.After(3 * time.Second):
 			log.Warn("vpn subprocess did not exit after kill", "vpn", c.cfg.Name)
 		}
+		c.runPostDisconnect()
 		return ctx.Err()
 	}
 }
@@ -194,6 +196,29 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 					}
 				}
 			}
+		}
+	}
+}
+
+// runPostDisconnect executes each post_disconnect command after the VPN subprocess exits.
+// Uses a fresh background context so commands run even during shutdown.
+// Errors are logged but not returned — cleanup should not block reconnect or exit.
+func (c *Connection) runPostDisconnect() {
+	if len(c.cfg.PostDisconnect) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, cmdStr := range c.cfg.PostDisconnect {
+		log.Info("vpn post_disconnect", "vpn", c.cfg.Name, "cmd", cmdStr)
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Error("vpn post_disconnect failed", "vpn", c.cfg.Name, "cmd", cmdStr, "err", err, "output", strings.TrimSpace(string(out)))
 		}
 	}
 }
