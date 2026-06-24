@@ -21,8 +21,9 @@ var rootCmd = &cobra.Command{
 	Short:        "SSH tunnel manager with built-in SOCKS5 proxy router",
 	SilenceUsage: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// version and validate don't need a logger init.
-		if cmd.Name() == "version" {
+		// these commands only write to stdout, no logger needed.
+		switch cmd.Name() {
+		case "version", "enable", "disable":
 			return nil
 		}
 		return logger.Init(verbose, logFile)

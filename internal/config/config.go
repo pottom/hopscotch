@@ -46,8 +46,10 @@ type Rule struct {
 
 // ProxyConfig holds the SOCKS5 router configuration.
 type ProxyConfig struct {
-	Port  int    `yaml:"port"`
-	Rules []Rule `yaml:"rules"`
+	Port      int    `yaml:"port"`
+	Rules     []Rule `yaml:"rules"`
+	NoProxy   string `yaml:"no_proxy"`   // passed to NO_PROXY / no_proxy on shell enable
+	ShellIcon string `yaml:"shell_icon"` // icon shown in HOPSCOTCH_ACTIVE; default ⇢
 }
 
 // AdminConfig controls the HTTP admin server.
@@ -148,6 +150,9 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Proxy.Port == 0 {
 		cfg.Proxy.Port = DefaultProxyPort
+	}
+	if cfg.Proxy.ShellIcon == "" {
+		cfg.Proxy.ShellIcon = "⇢"
 	}
 	if cfg.Admin.Port == 0 {
 		cfg.Admin.Port = DefaultAdminPort
