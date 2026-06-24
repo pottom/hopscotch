@@ -267,6 +267,7 @@ hopscotch start --restart    # replace running instance without prompting
 hopscotch stop               # stop the daemon
 hopscotch status             # open interactive TUI (plain text when piped)
 hopscotch status --plain     # force plain text output (useful for scripts, watch)
+hopscotch logs               # stream live log output from the daemon
 hopscotch enable             # activate proxy in current shell
 hopscotch disable            # deactivate proxy, restore previous env
 hopscotch shell-init         # print shell integration (source once in .zshrc)
