@@ -18,7 +18,9 @@ import (
 
 // runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.
 func (c *Connection) runOnce(ctx context.Context) error {
-	args := c.buildArgs()
+	// Resolve password once — needed both for --passwd-on-stdin flag and stdin feed.
+	pw := c.password()
+	args := c.buildArgs(pw != "")
 
 	binary := c.cfg.Binary
 	if binary == "" {
@@ -32,9 +34,12 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		cmd = exec.CommandContext(ctx, binary, args...)
 	}
 
-	if pw := c.password(); pw != "" {
+	if pw != "" {
 		cmd.Stdin = strings.NewReader(pw + "\n")
 	}
+
+	// Force English output so log lines are predictable regardless of system locale.
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -97,15 +102,15 @@ func (c *Connection) password() string {
 	return pw
 }
 
-func (c *Connection) buildArgs() []string {
-	args := []string{"--non-inter"}
+func (c *Connection) buildArgs(hasPassword bool) []string {
+	var args []string
 	if c.cfg.AuthGroup != "" {
 		args = append(args, "--authgroup", c.cfg.AuthGroup)
 	}
 	if c.cfg.User != "" {
 		args = append(args, "--user", c.cfg.User)
 	}
-	if c.cfg.PasswordEnv != "" {
+	if hasPassword {
 		args = append(args, "--passwd-on-stdin")
 	}
 	if c.cfg.Certificate != "" {
