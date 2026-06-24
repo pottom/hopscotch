@@ -28,6 +28,7 @@ type TunnelConfig struct {
 	Port               int    `yaml:"port"`
 	User               string `yaml:"user"`
 	IdentityFile       string `yaml:"identity_file"`
+	KnownHostsFile     string `yaml:"known_hosts_file"`
 	LocalPort          int    `yaml:"local_port"`
 	DialTimeout        int    `yaml:"dial_timeout"`        // seconds; SSH TCP + handshake
 	KeepaliveInterval  int    `yaml:"keepalive_interval"`  // seconds between keepalive probes
@@ -172,8 +173,13 @@ func applyDefaults(cfg *Config) {
 		if t.ReconnectMaxDelay == 0 {
 			t.ReconnectMaxDelay = DefaultReconnectMaxDelay
 		}
-		if home != "" && strings.HasPrefix(t.IdentityFile, "~/") {
-			t.IdentityFile = filepath.Join(home, t.IdentityFile[2:])
+		if home != "" {
+			if strings.HasPrefix(t.IdentityFile, "~/") {
+				t.IdentityFile = filepath.Join(home, t.IdentityFile[2:])
+			}
+			if strings.HasPrefix(t.KnownHostsFile, "~/") {
+				t.KnownHostsFile = filepath.Join(home, t.KnownHostsFile[2:])
+			}
 		}
 	}
 

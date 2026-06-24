@@ -36,6 +36,7 @@ tunnels:
     user: alice
     local_port: 1080
     # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent, ssh-agent)
+    # known_hosts_file: /etc/hopscotch/known_hosts  # default: ~/.ssh/known_hosts; useful in containers
     dial_timeout: 15                 # TCP connect + SSH handshake timeout
     keepalive_interval: 5            # seconds between keepalive probes
     keepalive_max_fails: 2           # consecutive failures → reconnect (= 10s dead window)

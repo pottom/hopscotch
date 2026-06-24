@@ -452,14 +452,17 @@ func (t *Tunnel) hostKeyCallback() (ssh.HostKeyCallback, error) {
 		return ssh.InsecureIgnoreHostKey(), nil //nolint:gosec
 	}
 
-	home, _ := os.UserHomeDir()
-	knownHostsFile := filepath.Join(home, ".ssh", "known_hosts")
+	knownHostsFile := t.cfg.KnownHostsFile
+	if knownHostsFile == "" {
+		home, _ := os.UserHomeDir()
+		knownHostsFile = filepath.Join(home, ".ssh", "known_hosts")
+	}
 
 	cb, err := knownhosts.New(knownHostsFile)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"loading known_hosts: %w\n  hint: run 'hopscotch trust %s' to add this host",
-			err, t.cfg.Host,
+			"loading known_hosts %s: %w\n  hint: run 'hopscotch trust %s' to add this host",
+			knownHostsFile, err, t.cfg.Host,
 		)
 	}
 
