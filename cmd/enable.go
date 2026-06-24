@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"hopscotch/internal/config"
@@ -63,6 +64,17 @@ func runEnable(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Printf("export HOPSCOTCH_ACTIVE=%s\n", shellQuote(cfg.Proxy.ShellIcon))
+
+	// Human-readable confirmation to stderr — not captured by eval $().
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("#38bdf8")).Bold(true)
+	muted  := lipgloss.NewStyle().Foreground(lipgloss.Color("#475569"))
+	fmt.Fprintf(os.Stderr, "%s proxy enabled  %s\n",
+		accent.Render(cfg.Proxy.ShellIcon),
+		muted.Render(proxyURL),
+	)
+	if cfg.Proxy.NoProxy != "" {
+		fmt.Fprintf(os.Stderr, "  %s\n", muted.Render("NO_PROXY="+cfg.Proxy.NoProxy))
+	}
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -32,5 +33,8 @@ func runDisable(_ *cobra.Command, _ []string) error {
 		fmt.Printf("unset _HOPSCOTCH_PREV_%s\n", v)
 	}
 	fmt.Println("unset HOPSCOTCH_ACTIVE")
+
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#475569"))
+	fmt.Fprintf(os.Stderr, "%s\n", muted.Render("proxy disabled"))
 	return nil
 }
