@@ -20,6 +20,8 @@ import (
 	"hopscotch/internal/security"
 	"hopscotch/internal/state"
 	"hopscotch/internal/tunnel"
+	"hopscotch/internal/updater"
+	"hopscotch/internal/version"
 )
 
 var (
@@ -89,6 +91,21 @@ func runStart(cmd *cobra.Command, args []string) error {
 		"tunnels", len(cfg.Tunnels),
 	)
 	config.LogConfig(cfg)
+
+	if updater.InContainer() {
+		log.Info("running in a container — self-update disabled")
+	} else {
+		go func() {
+			rel, err := updater.LatestRelease()
+			if err != nil {
+				return
+			}
+			if updater.IsNewer(version.Version, rel.TagName) {
+				version.LatestVersion = rel.TagName
+				log.Info("update available", "latest", rel.TagName, "current", version.Version, "run", "hopscotch update")
+			}
+		}()
+	}
 
 	g, ctx := errgroup.WithContext(ctx)
 

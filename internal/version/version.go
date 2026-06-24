@@ -8,6 +8,10 @@ var (
 	Version   = "dev"
 	GitCommit = "unknown"
 	BuildDate = "unknown"
+
+	// LatestVersion is populated asynchronously by the background update check.
+	// Empty string means "not yet checked" or "up to date".
+	LatestVersion string
 )
 
 // String returns a human-readable version string.
