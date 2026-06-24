@@ -3,25 +3,27 @@
 SSH tunnel manager with automatic reconnect and a built-in SOCKS5 proxy router that routes connections by URL pattern.
 
 ```
-  hopscotch v0.4.0  ✓ healthy  PID 12345  up 5m                     Status · Logs
+  hopscotch v0.4.5  ✓ healthy  PID 12345  up 5m         Status · Routes · Logs
 
   ↓ 1.2 KB/s      ↑ 842 B/s     3 conn total
 
-  TUNNEL                    HOST                   PORT   STATUS           UPTIME     RC   ↓              ↑              CONN    REASON
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  prod-jump                 10.0.0.1:22            1080   ● connected      5m12s      0    ↓ 1.1 KB/s     ↑ 800 B/s      2       —
+  TUNNEL                    HOST                   PORT   STATUS           UPTIME     RC   ↓              ↑              CONN
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  prod-jump                 10.0.0.1:22            1080   ● connected      5m12s      0    ↓ 1.1 KB/s     ↑ 800 B/s      2
   ⣤⣦⣶⣷⣿⣷⣶⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤⣄⣀⣄⣤⣦⣶⣷⣿⣷⣦⣤
-  staging-jump              10.0.1.1:22            1081   ◌ connecting     —          1    ↓ 0 B/s        ↑ 0 B/s        0       SSH handshake: unable to authenticate
-  direct                                                                              0    ↓ 0 B/s        ↑ 0 B/s        0       —
+  staging-jump              10.0.1.1:22            1081   ○ disconnected   —          1    ↓ 0 B/s        ↑ 0 B/s        0
+  direct                                                                              0    ↓ 0 B/s        ↑ 0 B/s        0
 
-  q quit  tab/s/l switch  ↑↓/jk scroll  c compact  g mirror                         PROXY :8080  ADMIN :9090
+  q quit  tab/s/l/r switch  ↑↓/jk scroll  c compact  g mirror  / test URL     PROXY :8080  ADMIN :9090
 ```
 
 ## Features
 
-- **Interactive TUI** — `hopscotch status` opens a live dashboard with tabbed Status/Logs views, dual-channel braille traffic graphs, reconnect countdowns, keepalive indicators, and per-tunnel error reasons
+- **Interactive TUI** — `hopscotch status` opens a live dashboard with tabbed Status / Routes / Logs views, dual-channel braille traffic graphs, reconnect countdowns, keepalive indicators, and per-tunnel error reasons
+- **Routes tab** — shows which URL patterns route through which tunnels; press `/` in the TUI to test any hostname or URL interactively
 - **Dual-channel traffic graph** — filled braille area chart: ↓ download fills upward (cyan), ↑ upload fills downward (purple); toggle mirror/single mode with `g`
 - **Compact mode** — press `c` to collapse graphs for a denser tunnel list
+- **Shell proxy activation** — `hopscotch enable` / `disable` sets and restores `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` in the current shell, like Python venv
 - **Automatic reconnect** with exponential backoff — tunnels come back on their own after network interruptions
 - **Fast VPN drop detection** — keepalive timeout matches `dial_timeout`; dead connections detected in seconds, not minutes
 - **SOCKS5 proxy router** on a single port that routes each connection through the right tunnel based on hostname pattern
@@ -29,7 +31,7 @@ SSH tunnel manager with automatic reconnect and a built-in SOCKS5 proxy router t
 - **SSH agent support** — works with YubiKey, gpg-agent, and ssh-agent out of the box
 - **Force PTY** — `force_pty: true` opens a PTY shell session to satisfy jump host channel policies (SPS/SCB)
 - **Hot reload** — config reloads automatically on file change or `SIGHUP`; no restart needed
-- **Admin UI** — built-in web dashboard with dual-channel live traffic graphs, error reasons, keepalive status, live log stream, and global stats
+- **Admin UI** — built-in web dashboard with Status / Routes / Logs tabs, dual-channel live traffic graphs, interactive URL tester, live log stream, and global stats
 - **Prometheus metrics** — `/metrics` endpoint with bytes, active connections, and reconnect counters
 - **Health endpoint** — `GET /health` for load balancers and container probes
 - **Multiarch Docker image** — `linux/amd64` and `linux/arm64`
@@ -106,6 +108,8 @@ tunnels:
 
 proxy:
   port: 8080
+  no_proxy: "localhost,127.0.0.1,::1"   # exported by `hopscotch enable`
+  shell_icon: "⇢"                        # exported as HOPSCOTCH_ACTIVE
   rules:
     - pattern: "*.prod.internal"
       tunnel: prod-jump
@@ -157,6 +161,9 @@ hopscotch start --foreground # stay in foreground (for Docker, systemd)
 hopscotch start --restart    # replace a running instance without prompting
 hopscotch stop               # stop the daemon
 hopscotch status             # interactive TUI (plain text when piped)
+hopscotch enable             # activate proxy in current shell (use with shell-init)
+hopscotch disable            # deactivate proxy and restore previous env
+hopscotch shell-init         # output shell integration code (source once in .zshrc)
 hopscotch trust <name|host|all>  # add SSH host key to known_hosts
 hopscotch validate           # validate the config file
 hopscotch version            # print version information
@@ -164,7 +171,7 @@ hopscotch version            # print version information
 
 Global flags:
 ```
---config <path>    path to config file (default: hopscotch.yaml)
+--config <path>    path to config file (default: hopscotch.yaml next to binary, or ~/.config/hopscotch/config.yaml)
 --verbose          enable debug logging
 ```
 
@@ -172,26 +179,53 @@ Global flags:
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `s` / `l` | Switch between Status and Logs tabs |
+| `Tab` / `s` / `r` / `l` | Switch between Status, Routes, and Logs tabs |
 | `↑` / `↓` / `j` / `k` | Scroll |
+| `/` | Focus URL tester on the Routes tab |
 | `c` | Toggle compact mode (hides graphs) |
 | `g` | Toggle mirror graph (dual-channel ↔ download only) |
 | `q` / `Esc` / `Ctrl+C` | Quit |
 
 ## Using the proxy
 
-Set the `ALL_PROXY` environment variable so all tools use hopscotch automatically:
+### Shell activation (recommended)
+
+Works like Python venv — activates and deactivates the proxy in the current shell session.
+
+Add shell integration once to your `~/.zshrc` or `~/.bashrc`:
 
 ```bash
-export ALL_PROXY=socks5h://localhost:8080
+eval "$(hopscotch shell-init)"
 ```
 
-The `socks5h` scheme means DNS is resolved through the proxy (inside the tunnel), which is required for internal hostnames.
+Then toggle the proxy without restarting the shell:
+
+```bash
+hopscotch enable    # sets HTTP_PROXY, HTTPS_PROXY, NO_PROXY
+hopscotch disable   # restores the previous environment
+```
+
+`enable` saves the current proxy env state before overwriting it; `disable` restores exactly that state.
+
+Configure what goes into `NO_PROXY` and the indicator icon in the config:
+
+```yaml
+proxy:
+  no_proxy: "localhost,127.0.0.1,::1"
+  shell_icon: "⇢"
+```
+
+### Manual
+
+```bash
+export HTTP_PROXY=socks5://localhost:8080
+export HTTPS_PROXY=socks5://localhost:8080
+```
 
 Per-request override:
 
 ```bash
-curl -x socks5h://localhost:8080 https://internal.service.example.com
+curl -x socks5://localhost:8080 https://internal.service.example.com
 ```
 
 ## Admin UI
