@@ -18,6 +18,8 @@ import (
 	"hopscotch/internal/tui"
 )
 
+var plainStatus bool
+
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show status of running tunnels and proxy",
@@ -26,6 +28,7 @@ var statusCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(statusCmd)
+	statusCmd.Flags().BoolVar(&plainStatus, "plain", false, "print plain text instead of opening the TUI")
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
@@ -36,14 +39,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/status", adminPort)
 
-	if term.IsTerminal(os.Stdout.Fd()) {
+	if !plainStatus && term.IsTerminal(os.Stdout.Fd()) {
 		m := tui.New(url)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		_, err := p.Run()
 		return err
 	}
 
-	// Non-TTY (pipe / script): fetch once and print plain text.
+	// Non-TTY or --plain: fetch once and print plain text.
 	resp, err := http.Get(url) //nolint:noctx
 	if err != nil {
 		return fmt.Errorf("hopscotch is not running")
@@ -59,22 +62,55 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// printStatus renders a plain-text status table (used when stdout is not a TTY).
+// printStatus renders a plain-text status table (used when stdout is not a TTY or --plain).
 func printStatus(st admin.StatusResponse) {
 	badge := "✓ " + st.Status
-	fmt.Printf("hopscotch %s  %s  PID %d  up %s\n\n",
-		st.Version, badge, st.PID, st.Uptime)
+	fmt.Printf("hopscotch %s  %s  PID %d  up %s\n", st.Version, badge, st.PID, st.Uptime)
 
 	const (
 		wName   = 26
-		wPort   = 7
 		wStatus = 16
 		wUptime = 10
+		wRC     = 4
 	)
-	sepLen := wName + wPort + wStatus + wUptime + len("RECONNECTS")
 
-	fmt.Printf("%-*s%-*s%-*s%-*s%s\n",
-		wName, "TUNNEL", wPort, "PORT", wStatus, "STATUS", wUptime, "UPTIME", "RECONNECTS")
+	// VPN section.
+	if len(st.VPNs) > 0 {
+		fmt.Println()
+		sepLen := wName + wStatus + wUptime + wRC
+		fmt.Printf("%-*s%-*s%-*s%s\n", wName, "VPN", wStatus, "STATUS", wUptime, "UPTIME", "RC")
+		fmt.Println(strings.Repeat("─", sepLen))
+
+		vpnNames := make([]string, 0, len(st.VPNs))
+		for name := range st.VPNs {
+			vpnNames = append(vpnNames, name)
+		}
+		sort.Strings(vpnNames)
+
+		for _, name := range vpnNames {
+			v := st.VPNs[name]
+			uptime := "—"
+			if v.UptimeSeconds > 0 {
+				uptime = formatDuration(time.Duration(v.UptimeSeconds) * time.Second)
+			}
+			icon := "○"
+			if v.State == "connected" {
+				icon = "✓"
+			}
+			fmt.Printf("%-*s%-*s%-*s%d\n",
+				wName, name,
+				wStatus, icon+" "+v.State,
+				wUptime, uptime,
+				v.Reconnects,
+			)
+		}
+	}
+
+	// Tunnel section.
+	const wPort = 7
+	fmt.Println()
+	sepLen := wName + wPort + wStatus + wUptime + len("RECONNECTS")
+	fmt.Printf("%-*s%-*s%-*s%-*s%s\n", wName, "TUNNEL", wPort, "PORT", wStatus, "STATUS", wUptime, "UPTIME", "RECONNECTS")
 	fmt.Println(strings.Repeat("─", sepLen))
 
 	names := make([]string, 0, len(st.Tunnels))

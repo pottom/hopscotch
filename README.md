@@ -266,9 +266,11 @@ hopscotch start --foreground # stay in foreground (for Docker, systemd)
 hopscotch start --restart    # replace running instance without prompting
 hopscotch stop               # stop the daemon
 hopscotch status             # open interactive TUI (plain text when piped)
+hopscotch status --plain     # force plain text output (useful for scripts, watch)
 hopscotch enable             # activate proxy in current shell
 hopscotch disable            # deactivate proxy, restore previous env
 hopscotch shell-init         # print shell integration (source once in .zshrc)
+hopscotch vpn password <name>  # store or update VPN password in OS keychain
 hopscotch update             # check for newer release and update the binary
 hopscotch update --check     # check only, do not download
 hopscotch trust <name|host|all>  # add SSH host key to known_hosts
