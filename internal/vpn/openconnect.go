@@ -1,0 +1,284 @@
+package vpn
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/log"
+
+	"hopscotch/internal/keychain"
+)
+
+// runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.
+func (c *Connection) runOnce(ctx context.Context) error {
+	if err := c.runPreConnect(ctx); err != nil {
+		return err
+	}
+
+	// Resolve password once — needed both for --passwd-on-stdin flag and stdin feed.
+	pw := c.password()
+	args := c.buildArgs(pw != "")
+
+	binary := c.cfg.Binary
+	if binary == "" {
+		binary = "openconnect"
+	}
+
+	var cmd *exec.Cmd
+	if c.cfg.Sudo {
+		cmd = exec.CommandContext(ctx, "sudo", append([]string{binary}, args...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, binary, args...)
+	}
+
+	// New process group so we can kill sudo + its children (e.g. openconnect)
+	// as a unit on shutdown. Without this, killing sudo leaves openconnect
+	// orphaned with the pipe write-end open, which blocks cmd.Wait() forever.
+	setProcGroup(cmd)
+
+	if pw != "" {
+		cmd.Stdin = strings.NewReader(pw + "\n")
+	}
+
+	// Force English output so log lines are predictable regardless of system locale.
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
+	cmd.Stdout = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting openconnect: %w", err)
+	}
+	log.Info("vpn subprocess started", "vpn", c.cfg.Name, "pid", cmd.Process.Pid)
+
+	// Watch stderr lines for status events.
+	go c.watchStderr(stderr)
+
+	// done carries the cmd.Wait() error; died is closed after Wait() returns so
+	// multiple goroutines (pollPingHost, etc.) can all observe subprocess exit
+	// without competing for a single channel receive.
+	done := make(chan error, 1)
+	died := make(chan struct{})
+	go func() {
+		done <- cmd.Wait()
+		close(died)
+	}()
+
+	if c.cfg.PingHost != "" {
+		// Poll ping_host to detect when VPN is up and when it drops.
+		go c.pollPingHost(ctx, cmd, died)
+	} else {
+		// No ping host: assume connected after a short startup delay.
+		go func() {
+			select {
+			case <-time.After(8 * time.Second):
+				if c.State() == StateConnecting {
+					c.setState(StateConnected)
+					log.Info("vpn assumed connected (no ping_host configured)", "vpn", c.cfg.Name)
+				}
+			case <-died:
+			case <-ctx.Done():
+			}
+		}()
+	}
+
+	select {
+	case err := <-done:
+		if err != nil && ctx.Err() == nil {
+			log.Warn("vpn subprocess exited", "vpn", c.cfg.Name, "err", err)
+		}
+		c.runPostDisconnect()
+		return err
+	case <-ctx.Done():
+		// Kill entire process group (sudo + openconnect child) so the pipe
+		// write-end closes on both sides and cmd.Wait() can return promptly.
+		killProcGroup(cmd)
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			log.Warn("vpn subprocess did not exit after kill", "vpn", c.cfg.Name)
+		}
+		c.runPostDisconnect()
+		return ctx.Err()
+	}
+}
+
+// password returns the VPN password. Priority: password_env > password_cmd > keychain.
+// Returns empty string if none is configured or all fail.
+func (c *Connection) password() string {
+	if c.cfg.PasswordEnv != "" {
+		return os.Getenv(c.cfg.PasswordEnv)
+	}
+	if c.cfg.PasswordCmd != "" {
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/C", c.cfg.PasswordCmd)
+		} else {
+			cmd = exec.Command("sh", "-c", c.cfg.PasswordCmd)
+		}
+		out, err := cmd.Output()
+		if err != nil {
+			log.Error("password_cmd failed", "vpn", c.cfg.Name, "cmd", c.cfg.PasswordCmd, "err", err)
+			return ""
+		}
+		return strings.TrimRight(string(out), "\r\n")
+	}
+	pw, err := keychain.GetVPNPassword(c.cfg.Name)
+	if err != nil {
+		if !errors.Is(err, keychain.ErrNotFound) {
+			log.Warn("keychain not available, proceeding without password — set password_cmd or password_env if running in a container",
+				"vpn", c.cfg.Name, "err", err)
+		}
+		return ""
+	}
+	return pw
+}
+
+func (c *Connection) buildArgs(hasPassword bool) []string {
+	var args []string
+	if c.cfg.AuthGroup != "" {
+		args = append(args, "--authgroup", c.cfg.AuthGroup)
+	}
+	if c.cfg.User != "" {
+		args = append(args, "--user", c.cfg.User)
+	}
+	if hasPassword {
+		args = append(args, "--passwd-on-stdin")
+	}
+	if c.cfg.Certificate != "" {
+		args = append(args, "--certificate", c.cfg.Certificate)
+	}
+	if c.cfg.Key != "" {
+		args = append(args, "--sslkey", c.cfg.Key)
+	}
+	args = append(args, c.cfg.ExtraArgs...)
+	args = append(args, c.cfg.Server)
+	return args
+}
+
+// pollPingHost probes host:port via TCP every 3 seconds.
+// After 2 consecutive successes it marks the VPN connected.
+// After 3 consecutive failures (post-connect) it kills the subprocess.
+func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
+	host := c.cfg.PingHost
+	if !strings.Contains(host, ":") {
+		host += ":443"
+	}
+
+	var ok, fail int
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-died:
+			return
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", host, 2*time.Second)
+			if err == nil {
+				conn.Close()
+				fail = 0
+				ok++
+				if ok >= 2 && c.State() != StateConnected {
+					c.setState(StateConnected)
+					log.Info("vpn connected", "vpn", c.cfg.Name, "via", host)
+				}
+			} else {
+				ok = 0
+				if c.State() == StateConnected {
+					fail++
+					log.Debug("vpn ping failed", "vpn", c.cfg.Name, "host", host, "consecutive", fail)
+					if fail >= 3 {
+						log.Warn("vpn connectivity lost, restarting", "vpn", c.cfg.Name)
+						c.setState(StateDisconnected)
+						killProcGroup(cmd)
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+// runPostDisconnect executes each post_disconnect command after the VPN subprocess exits.
+// Uses a fresh background context so commands run even during shutdown.
+// Errors are logged but not returned — cleanup should not block reconnect or exit.
+func (c *Connection) runPostDisconnect() {
+	if len(c.cfg.PostDisconnect) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, cmdStr := range c.cfg.PostDisconnect {
+		log.Info("vpn post_disconnect", "vpn", c.cfg.Name, "cmd", cmdStr)
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Error("vpn post_disconnect failed", "vpn", c.cfg.Name, "cmd", cmdStr, "err", err, "output", strings.TrimSpace(string(out)))
+		}
+	}
+}
+
+// runPreConnect executes each pre_connect command in order before connecting.
+// On failure it logs and returns an error so the reconnect loop retries.
+func (c *Connection) runPreConnect(ctx context.Context) error {
+	for _, cmdStr := range c.cfg.PreConnect {
+		log.Info("vpn pre_connect", "vpn", c.cfg.Name, "cmd", cmdStr)
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Error("vpn pre_connect failed", "vpn", c.cfg.Name, "cmd", cmdStr, "err", err, "output", strings.TrimSpace(string(out)))
+			return fmt.Errorf("pre_connect %q: %w", cmdStr, err)
+		}
+	}
+	return nil
+}
+
+// watchStderr logs openconnect output and promotes connection events.
+func (c *Connection) watchStderr(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(line, "Established DTLS connection"),
+			strings.Contains(line, "Established TLS connection"),
+			strings.Contains(line, "Connected as"):
+			log.Info("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
+			if c.State() != StateConnected {
+				c.setState(StateConnected)
+			}
+		case strings.Contains(line, "error") || strings.Contains(line, "Error") ||
+			strings.Contains(line, "failed") || strings.Contains(line, "Failed"):
+			log.Error("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
+		case strings.Contains(line, "writing to routing socket: File exists"):
+			// normal during reconnect — routes already present, not an error
+		default:
+			log.Debug("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
+		}
+	}
+}

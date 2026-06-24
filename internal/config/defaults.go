@@ -14,4 +14,8 @@ const (
 	DefaultPingHost            = "example.com"
 	DefaultPingCount           = 3
 	DefaultPingTunnelWait      = 10 // seconds
+
+	DefaultVPNType              = "openconnect"
+	DefaultVPNReconnectDelay    = 10 // seconds
+	DefaultVPNReconnectMaxDelay = 60 // seconds
 )

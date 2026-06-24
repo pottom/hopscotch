@@ -1,20 +1,62 @@
+# hopscotch example configuration
+# Copy to hopscotch.yaml (local) or ~/.config/hopscotch/config.yaml (global)
+# All durations are in seconds unless noted.
+
+# ── VPN ────────────────────────────────────────────────────────────────────────
+# Optional. hopscotch manages the VPN subprocess and restarts it on failure.
+# Tunnels with requires_vpn wait until the VPN is connected before dialing.
+#
+# vpn:
+#   - name: corp-vpn
+#     type: openconnect              # only supported type
+#     server: https://vpn.corp.com
+#     user: alice
+#     authgroup: "Engineering"       # --authgroup (Cisco AnyConnect)
+#     sudo: true                     # run openconnect via sudo
+#     # binary: /usr/local/bin/openconnect  # custom path; default: openconnect in PATH
+#     # Password source — priority: password_env > password_cmd > OS keychain
+#     # password_env: CORP_VPN_PASS         # read from environment variable
+#     # password_cmd: "pass vpn/corp"       # stdout of any shell command
+#     # password_cmd: "gpg --decrypt /etc/hopscotch/vpn.pass.gpg"
+#     # password_cmd: "vault kv get -field=password secret/vpn"
+#     # certificate: ~/.certs/client.pem   # client certificate for cert-based auth
+#     # key: ~/.certs/client.key           # private key for cert-based auth
+#     ping_host: "10.0.0.1:22"      # TCP probe to confirm VPN is up
+#     pre_connect:                   # commands before each VPN connection attempt
+#       - "sudo networksetup -setdnsservers Wi-Fi Empty"   # macOS: reset DNS
+#       - "sudo route delete 79.120.196.68 2>/dev/null || true"  # remove stale route
+#     post_disconnect:               # commands after each VPN disconnect (runs even on shutdown)
+#       - "sudo networksetup -setdnsservers Wi-Fi Empty"   # macOS: restore DNS
+#     # extra_args:                  # extra openconnect flags (managed flags like --user rejected)
+#     #   - "--no-dtls"
+#     reconnect_delay: 15
+#     reconnect_max_delay: 120
+#
+# Run `hopscotch vpn password <name>` to store the VPN password in the OS keychain.
+
+# ── Tunnels ────────────────────────────────────────────────────────────────────
 tunnels:
   - name: prod-jump
-    host: 10.0.0.1
+    host: bastion.corp.com
     port: 22
-    user: myuser
+    user: alice
     local_port: 1080
-    # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent)
-    dial_timeout: 15                 # seconds; TCP connect + SSH handshake
+    # identity_file: ~/.ssh/id_rsa   # omit to use SSH agent (YubiKey, gpg-agent, ssh-agent)
+    # known_hosts_file: /etc/hopscotch/known_hosts  # default: ~/.ssh/known_hosts; useful in containers
+    dial_timeout: 15                 # TCP connect + SSH handshake timeout
     keepalive_interval: 5            # seconds between keepalive probes
     keepalive_max_fails: 2           # consecutive failures → reconnect (= 10s dead window)
-    reconnect_delay: 5               # initial backoff seconds (doubles each attempt)
-    reconnect_max_delay: 30          # backoff cap seconds
+    reconnect_delay: 5               # initial backoff (doubles each attempt)
+    reconnect_max_delay: 30          # backoff cap
+    # force_pty: true                # open a PTY shell — needed for SPS/SCB jump hosts
+    # requires_vpn: corp-vpn         # wait for this VPN before connecting
+    # pre_connect:                   # commands before each dial attempt
+    #   - "nc -z 10.0.0.1 22 || exit 1"   # check if host is reachable first
 
   - name: staging-jump
-    host: 10.0.1.1
+    host: dev.corp.com
     port: 22
-    user: myuser
+    user: alice
     identity_file: ~/.ssh/id_rsa
     local_port: 1081
     dial_timeout: 15
@@ -23,18 +65,23 @@ tunnels:
     reconnect_delay: 5
     reconnect_max_delay: 30
 
+# ── Proxy ──────────────────────────────────────────────────────────────────────
 proxy:
   port: 8080
-  no_proxy: "localhost,127.0.0.1,::1"   # set in NO_PROXY / no_proxy on `hopscotch enable`
-  shell_icon: "⇢"                               # icon exported as HOPSCOTCH_ACTIVE; add to PS1
+  # bind: "127.0.0.1"   # restrict SOCKS5 to localhost only; default: 0.0.0.0
+  no_proxy: "localhost,127.0.0.1,::1"   # set in NO_PROXY on `hopscotch enable`
+  shell_icon: "⇢"                        # icon exported as HOPSCOTCH_ACTIVE
   rules:
     - pattern: "*.prod.internal"
       tunnel: prod-jump
     - pattern: "*.staging.internal"
       tunnel: staging-jump
+    - pattern: "10.0.*"
+      tunnel: prod-jump
     - pattern: "*"
-      via: direct          # everything else goes direct
+      via: direct                        # everything else goes direct
 
+# ── Admin ──────────────────────────────────────────────────────────────────────
 admin:
   port: 9090
-  bind: "127.0.0.1"       # change to 0.0.0.0 to expose in containers
+  bind: "127.0.0.1"                     # change to 0.0.0.0 to expose in containers

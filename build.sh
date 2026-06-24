@@ -134,6 +134,18 @@ cmd_release() {
     cmd_publish
 }
 
+cmd_install() {
+    cmd_binary
+    local dest="/usr/local/bin/${BINARY_NAME}"
+    echo "▶ Installing to ${dest}..."
+    cp "${DIST_DIR}/${BINARY_NAME}" "${dest}"
+    if [[ "$(uname)" == "Darwin" ]] && command -v codesign &>/dev/null; then
+        codesign --force --sign - "${dest}"
+        echo "  ✓ Ad-hoc signed (macOS)"
+    fi
+    echo "✓ Installed ${dest}"
+}
+
 cmd_clean() {
     rm -rf "${DIST_DIR}"
     echo "✓ Cleaned ${DIST_DIR}/"
@@ -143,6 +155,7 @@ cmd_clean() {
 case "${1:-help}" in
     binary)      cmd_binary ;;
     binary-all)  cmd_binary_all ;;
+    install)     cmd_install ;;
     container)   cmd_container ;;
     publish)     cmd_publish ;;
     release)     cmd_release ;;
@@ -155,6 +168,7 @@ case "${1:-help}" in
         echo "Commands:"
         echo "  binary       Build local binary for the current platform"
         echo "  binary-all   Build binaries for all platforms (dist/)"
+        echo "  install      Build and install to /usr/local/bin (ad-hoc signed on macOS)"
         echo "  container    Build multiarch Docker image (local, no push)"
         echo "  publish      Build multiarch Docker image and push to registry"
         echo "  release      binary-all + publish"

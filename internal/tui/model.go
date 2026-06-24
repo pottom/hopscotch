@@ -18,7 +18,6 @@ import (
 
 	"hopscotch/internal/admin"
 	"hopscotch/internal/proxy"
-	"hopscotch/internal/version"
 )
 
 var (
@@ -49,9 +48,10 @@ var (
 	styleBadgeDegraded = lipgloss.NewStyle().Foreground(colorConnecting).Bold(true)
 	styleBadgeOffline  = lipgloss.NewStyle().Foreground(colorDisconnected).Bold(true)
 
-	styleColName   = lipgloss.NewStyle().Foreground(colorBright).Width(26)
-	styleColHost   = lipgloss.NewStyle().Foreground(colorMuted).Width(22)
-	styleColPort   = lipgloss.NewStyle().Foreground(colorText).Width(7)
+	styleColName    = lipgloss.NewStyle().Foreground(colorBright).Width(26)
+	styleColHost    = lipgloss.NewStyle().Foreground(colorMuted).Width(22)
+	styleColPort    = lipgloss.NewStyle().Foreground(colorText).Width(7)
+	styleVPNColHost = lipgloss.NewStyle().Foreground(colorMuted).Width(29) // HOST+PORT combined so STATUS aligns with tunnel rows
 	styleColStatus = lipgloss.NewStyle().Width(16)
 	styleColUptime = lipgloss.NewStyle().Foreground(colorText).Width(10)
 	styleColRecon  = lipgloss.NewStyle().Foreground(colorMuted).Width(5)
@@ -75,7 +75,7 @@ const (
 	numTabs   = 3
 )
 
-const headerHeight = 6 // blank · title+tabs · stats · blank · label · separator
+const headerHeight = 4 // blank · title+tabs · stats · blank
 
 const footerHeight = 2 // separator newline + hints+ports line
 
@@ -331,6 +331,7 @@ func New(adminURL string) Model {
 		logCh:    logCh,
 		done:     done,
 		traffic:     make(map[string]*trafficWindow),
+		compact:     true,
 		mirrorGraph: true,
 		width:       80,
 		height:      24,
@@ -386,7 +387,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.resizeViewports()
 			return m, nil
 
-		case "r", "R":
+		case "p", "P":
 			m.activeTab = tabRoutes
 			m = m.resizeViewports()
 			return m, nil
@@ -399,7 +400,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "c", "C":
+		case "f", "F":
 			if m.activeTab == tabStatus {
 				m.compact = !m.compact
 				if m.vpReady {
@@ -517,12 +518,16 @@ func (m Model) resizeViewports() Model {
 	}
 	m.vp.SetContent(m.buildStatusContent())
 
+	logVPH := vpH - 2
+	if logVPH < 1 {
+		logVPH = 1
+	}
 	if !m.logVPReady {
-		m.logVP = viewport.New(m.width, vpH)
+		m.logVP = viewport.New(m.width, logVPH)
 		m.logVPReady = true
 	} else {
 		m.logVP.Width = m.width
-		m.logVP.Height = vpH
+		m.logVP.Height = logVPH
 	}
 	if len(m.logLines) > 0 {
 		atBottom := m.logVP.AtBottom()
@@ -532,8 +537,8 @@ func (m Model) resizeViewports() Model {
 		}
 	}
 
-	// Routes viewport is 3 rows shorter to make room for input + result + separator.
-	routeVPH := vpH - 3
+	// Routes viewport is 4 rows shorter to make room for blank + input + result + blank + headers + separator.
+	routeVPH := vpH - 4
 	if routeVPH < 1 {
 		routeVPH = 1
 	}
@@ -572,8 +577,8 @@ func (m Model) View() string {
 
 func (m Model) renderTitleLine() string {
 	versionStr := m.status.Version
-	if v := version.LatestVersion; v != "" {
-		versionStr += "  " + styleConnecting.Render("↑ "+v+" available — hopscotch update")
+	if v := m.status.LatestVersion; v != "" {
+		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
 	left := fmt.Sprintf("  %s  %s  %s  %s",
 		styleHeader.Render("hopscotch "+versionStr),
@@ -604,7 +609,7 @@ func (m Model) renderTabBar() string {
 		idx  int
 	}{
 		{"Status", tabStatus},
-		{"Routes", tabRoutes},
+		{"Patterns", tabRoutes},
 		{"Logs", tabLogs},
 	}
 	var parts []string
@@ -624,31 +629,12 @@ func (m Model) renderHeader() string {
 	var b strings.Builder
 	b.WriteString(m.renderTitleLine())
 	b.WriteString(m.renderStatsLine())
-	b.WriteString("\n")
 
 	switch m.activeTab {
 	case tabStatus:
-		hdr := func(s lipgloss.Style, label string) string {
-			return s.Foreground(colorMuted).Render(label)
-		}
-		rW := m.width - fixedColsWidth - 2
-		reasonHdr := ""
-		if rW >= 8 {
-			reasonHdr = styleMuted.Render("REASON")
-		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
-			hdr(styleColName, "TUNNEL"),
-			hdr(styleColHost, "HOST"),
-			hdr(styleColPort, "PORT"),
-			hdr(styleColStatus, "STATUS"),
-			hdr(styleColUptime, "UPTIME"),
-			hdr(styleColRecon, "RC"),
-			hdr(styleColBpsIn, "↓"),
-			hdr(styleColBpsOut, "↑"),
-			hdr(styleColConn, "CONN"),
-			reasonHdr,
-		)
+		fmt.Fprintf(&b, "\n")
 	case tabRoutes:
+		fmt.Fprintf(&b, "\n")
 		// Input line — styled by focus state.
 		var inputPrefix string
 		if m.routeFocused {
@@ -675,25 +661,25 @@ func (m Model) renderHeader() string {
 			fmt.Fprintf(&b, "  %s\n", styleMuted.Render("no rule matched → direct (fallback)"))
 		}
 
-		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
-
+		fmt.Fprintf(&b, "\n")
 		fmt.Fprintf(&b, "  %s%s%s%s\n",
 			styleRouteNum.Render("#"),
 			styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
 			lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
 			styleMuted.Render("STATUS"),
 		)
+		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 	default:
+		fmt.Fprintf(&b, "\n")
 		fmt.Fprintf(&b, "  %s\n", styleMuted.Render("LOGS"))
+		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 	}
-	fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
-
 	return b.String()
 }
 
 // renderFooter returns a single-line bar: hints on the left, ports on the right.
 func (m Model) renderFooter() string {
-	hints := "q quit  tab/s/l/r switch  ↑↓/jk scroll"
+	hints := "q quit  tab/s/l/p switch  ↑↓/jk scroll"
 	if m.activeTab == tabRoutes {
 		if m.routeFocused {
 			hints += "  esc unfocus"
@@ -702,11 +688,7 @@ func (m Model) renderFooter() string {
 		}
 	}
 	if m.activeTab == tabStatus {
-		if m.compact {
-			hints += "  c expand"
-		} else {
-			hints += "  c compact"
-		}
+		hints += "  f format"
 		if m.mirrorGraph {
 			hints += "  g single"
 		} else {
@@ -807,9 +789,13 @@ func (m Model) buildRoutesContent() string {
 	return b.String()
 }
 
-// buildStatusContent renders the scrollable tunnel list for the status viewport.
+// buildStatusContent renders the scrollable content for the status viewport.
 // fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
 const fixedColsWidth = 2 + 26 + 22 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 126
+
+func (m Model) sectionSep() string {
+	return "  " + styleMuted.Render(strings.Repeat("─", max(m.width-4, 10))) + "\n"
+}
 
 func (m Model) buildStatusContent() string {
 	sparkW := m.width - 4
@@ -823,7 +809,77 @@ func (m Model) buildStatusContent() string {
 		reasonW = 0
 	}
 
+	hdr := func(s lipgloss.Style, label string) string {
+		return s.Foreground(colorMuted).Render(label)
+	}
+
 	var b strings.Builder
+
+	// ── VPN section ───────────────────────────────────────────────────────────
+	if len(m.status.VPNs) > 0 {
+		fmt.Fprintf(&b, "  %s%s%s%s%s\n",
+			hdr(styleColName, "VPN"),
+			hdr(styleVPNColHost, "HOST"),
+			hdr(styleColStatus, "STATUS"),
+			hdr(styleColUptime, "UPTIME"),
+			hdr(styleColRecon, "RC"),
+		)
+		b.WriteString(m.sectionSep())
+
+		vpnNames := make([]string, 0, len(m.status.VPNs))
+		for name := range m.status.VPNs {
+			vpnNames = append(vpnNames, name)
+		}
+		sort.Strings(vpnNames)
+
+		for _, name := range vpnNames {
+			v := m.status.VPNs[name]
+
+			var stateStyle lipgloss.Style
+			switch v.State {
+			case "connected":
+				stateStyle = styleConnected
+			case "connecting":
+				stateStyle = styleConnecting
+			default:
+				stateStyle = styleDisconnected
+			}
+			statusStr := stateStyle.Render("● " + v.State)
+
+			uptime := "—"
+			if v.UptimeSeconds > 0 {
+				uptime = fmtDuration(time.Duration(v.UptimeSeconds) * time.Second)
+			}
+
+			fmt.Fprintf(&b, "  %s%s%s%s%s\n",
+				styleColName.Render(name),
+				styleVPNColHost.Render(v.Host),
+				styleColStatus.Render(statusStr),
+				styleColUptime.Render(uptime),
+				styleColRecon.Render(fmt.Sprintf("%d", v.Reconnects)),
+			)
+		}
+		b.WriteString("\n")
+	}
+
+	// ── Tunnel section ────────────────────────────────────────────────────────
+	reasonHdr := ""
+	if reasonW >= 8 {
+		reasonHdr = hdr(styleMuted, "REASON")
+	}
+	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
+		hdr(styleColName, "TUNNEL"),
+		hdr(styleColHost, "HOST"),
+		hdr(styleColPort, "PORT"),
+		hdr(styleColStatus, "STATUS"),
+		hdr(styleColUptime, "UPTIME"),
+		hdr(styleColRecon, "RC"),
+		hdr(styleColBpsIn, "↓"),
+		hdr(styleColBpsOut, "↑"),
+		hdr(styleColConn, "CONN"),
+		reasonHdr,
+	)
+	b.WriteString(m.sectionSep())
 
 	names := make([]string, 0, len(m.status.Tunnels))
 	for name := range m.status.Tunnels {
@@ -856,7 +912,11 @@ func (m Model) buildStatusContent() string {
 			var reasonStyle lipgloss.Style
 			if t.LastError != "" && t.Status != "connected" {
 				reason = t.LastError
-				reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
+				if strings.HasPrefix(t.LastError, "waiting for VPN") {
+					reasonStyle = styleConnecting // amber — informational, not an error
+				} else {
+					reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
+				}
 			} else {
 				reasonStyle = styleMuted
 			}
@@ -928,7 +988,7 @@ func (m Model) totalStats() (bpsIn, bpsOut uint64, active int64) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func fmtActive(n int64) string {
-	return fmt.Sprintf("%d conn", n)
+	return fmt.Sprintf("%d", n)
 }
 
 // wrapAt breaks s into lines of at most width runes, splitting at spaces where possible.

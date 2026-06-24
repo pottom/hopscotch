@@ -37,7 +37,7 @@
 
   <span class="badge" :class="$store.hop.meta.status" x-text="$store.hop.meta.status"></span>
   <div class="header-meta">
-    <span x-text="$store.hop.meta.version"></span>
+    <span x-text="$store.hop.meta.version"></span><template x-if="$store.hop.meta.latest_version"><span class="update-badge" x-text="'⚡' + $store.hop.meta.latest_version"></span></template>
     <span class="header-sep">·</span>
     <span x-text="'PID ' + $store.hop.meta.pid"></span>
     <span class="header-sep">·</span>
@@ -47,7 +47,7 @@
 
 <nav class="tab-bar" id="tab-bar">
   <a class="active" data-tab="status" href="#" onclick="switchTab('status');return false">Status</a>
-  <a data-tab="routes"  href="#" onclick="switchTab('routes');return false">Routes</a>
+  <a data-tab="patterns"  href="#" onclick="switchTab('patterns');return false">Patterns</a>
   <a data-tab="logs"    href="#" onclick="switchTab('logs');return false">Logs</a>
   <a data-tab="docs"    href="#" onclick="switchTab('docs');return false">Docs</a>
 </nav>
@@ -64,6 +64,34 @@
   </div>
 
   <main class="main">
+    <template x-if="$store.hop.vpnList().length > 0">
+      <div>
+        <div class="section-label">VPN</div>
+        <template x-for="name in $store.hop.vpnList()" :key="name">
+          <div class="tc-card" :class="$store.hop.vpnVisualStatus(name)">
+            <div class="tc-header">
+              <div class="tc-id">
+                <span class="tc-name" x-text="name"></span>
+              </div>
+              <div class="tc-status-group">
+                <span class="dot" :class="$store.hop.vpnVisualStatus(name)"></span>
+                <span class="status-label"
+                      :class="$store.hop.vpnVisualStatus(name)"
+                      x-text="$store.hop.vpns[name]?.state || '…'"></span>
+              </div>
+              <div class="tc-info">
+                <span class="tc-info-item"
+                      x-text="fmtUptime($store.hop.vpns[name]?.uptime_seconds)"></span>
+                <span class="tc-info-item tc-recon"
+                      x-show="($store.hop.vpns[name]?.reconnects || 0) > 0"
+                      x-text="'recon ' + $store.hop.vpns[name]?.reconnects"></span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
     <div class="section-label">Tunnels</div>
 
     <template x-for="name in $store.hop.tunnelList()" :key="name">
@@ -111,7 +139,7 @@
         </div>
 
         <div class="tc-reason"
-             :class="$store.hop.tunnels[name]?.last_error ? 'has-error' : 'no-error'"
+             :class="$store.hop.tunnels[name]?.last_error?.startsWith('waiting for VPN') ? 'waiting' : ($store.hop.tunnels[name]?.last_error ? 'has-error' : 'no-error')"
              x-text="$store.hop.tunnels[name]?.last_error || '—'"></div>
 
         <div class="tc-chart-wrap">
@@ -155,7 +183,7 @@
 </div>
 
 <!-- ── ROUTES TAB ─────────────────────────────────────────────────────────── -->
-<div id="panel-routes" class="tab-panel">
+<div id="panel-patterns" class="tab-panel">
   <div class="routes-wrap">
     <div class="routes-label">URL → Tunnel routing rules</div>
 

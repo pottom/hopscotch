@@ -22,6 +22,7 @@ import (
 	"hopscotch/internal/tunnel"
 	"hopscotch/internal/updater"
 	"hopscotch/internal/version"
+	"hopscotch/internal/vpn"
 )
 
 var (
@@ -62,6 +63,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Ensure VPN passwords are available before potentially daemonizing.
+	// This prompts interactively when the password is missing and stores it
+	// in the OS keychain so subsequent starts are fully unattended.
+	if err := ensureVPNPasswords(cfg.VPNs); err != nil {
+		return err
+	}
+
+	if err := checkVPNSudo(cfg.VPNs); err != nil {
+		return err
+	}
+
 	if !foreground {
 		return daemonize()
 	}
@@ -74,14 +86,24 @@ func runStart(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	mgr := tunnel.NewManager(cfg.Tunnels)
+	var vpnGater tunnel.VPNGater
+	if len(cfg.VPNs) > 0 {
+		vpnGater = vpn.NewManager(cfg.VPNs)
+	}
+
+	mgr := tunnel.NewManager(cfg.Tunnels, vpnGater)
 	router := proxy.NewRouter(cfg.Proxy.Rules, mgr)
-	proxySrv := proxy.NewServer(cfg.Proxy.Port, router)
-	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, router, router, ReadmeContent)
+	proxySrv := proxy.NewServer(cfg.Proxy.Bind, cfg.Proxy.Port, router)
+	var vpnStatter admin.VPNStatter
+	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
+		vpnStatter = vpnMgr
+	}
+	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent)
 
 	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)
 		router.UpdateRules(next.Proxy.Rules)
+		refreshSSHConfig(next)
 	})
 
 	log.Info("hopscotch starting",
@@ -89,26 +111,35 @@ func runStart(cmd *cobra.Command, args []string) error {
 		"proxy", fmt.Sprintf(":%d", cfg.Proxy.Port),
 		"admin", fmt.Sprintf("%s:%d", cfg.Admin.Bind, cfg.Admin.Port),
 		"tunnels", len(cfg.Tunnels),
+		"vpns", len(cfg.VPNs),
 	)
 	config.LogConfig(cfg)
 
 	if updater.InContainer() {
 		log.Info("running in a container — self-update disabled")
 	} else {
-		go func() {
-			rel, err := updater.LatestRelease()
-			if err != nil {
-				return
-			}
-			if updater.IsNewer(version.Version, rel.TagName) {
-				version.LatestVersion = rel.TagName
-				log.Info("update available", "latest", rel.TagName, "current", version.Version, "run", "hopscotch update")
-			}
-		}()
+		if fake := os.Getenv("HOPSCOTCH_FAKE_LATEST_VERSION"); fake != "" {
+			version.LatestVersion = fake
+			log.Info("update available (faked)", "latest", fake, "current", version.Version)
+		} else {
+			go func() {
+				rel, err := updater.LatestRelease()
+				if err != nil {
+					return
+				}
+				if updater.IsNewer(version.Version, rel.TagName) {
+					version.LatestVersion = rel.TagName
+					log.Info("update available", "latest", rel.TagName, "current", version.Version, "run", "hopscotch update")
+				}
+			}()
+		}
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
 
+	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
+		g.Go(func() error { return vpnMgr.Run(ctx) })
+	}
 	g.Go(func() error { return mgr.Run(ctx) })
 	g.Go(func() error { return proxySrv.ListenAndServe(ctx) })
 	g.Go(func() error { return adminSrv.ListenAndServe(ctx) })

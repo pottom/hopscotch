@@ -84,6 +84,12 @@ body {
 
 .header-sep { opacity: 0.4; }
 
+.update-badge {
+  color: var(--connecting);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+}
+
 /* ── TAB BAR ──────────────────────────────── */
 .tab-bar {
   display: flex;
@@ -426,6 +432,7 @@ main, main.main {
 }
 .tc-reason.no-error  { color: var(--muted); opacity: .45; }
 .tc-reason.has-error { color: var(--disconnected); }
+.tc-reason.waiting   { color: var(--connecting); }
 
 /* chart area */
 .tc-chart-wrap {

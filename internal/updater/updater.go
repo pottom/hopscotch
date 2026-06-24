@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -116,6 +117,10 @@ func Download(url, dst string) error {
 
 	if err := os.Rename(tmpName, dst); err != nil {
 		return fmt.Errorf("replacing binary: %w", err)
+	}
+	// macOS requires ad-hoc signing; cross-compiled binaries have no signature.
+	if runtime.GOOS == "darwin" {
+		_ = exec.Command("codesign", "--force", "--sign", "-", dst).Run()
 	}
 	return nil
 }

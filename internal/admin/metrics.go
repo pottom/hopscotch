@@ -75,6 +75,32 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeLine("# TYPE hopscotch_direct_active_connections gauge")
 	writeLine(`hopscotch_direct_active_connections %d`, directSnap.ActiveConns)
 
+	if s.vpns != nil {
+		vpnStats := s.vpns.AllStats()
+
+		writeLine("# HELP hopscotch_vpn_status VPN connection state (0=disconnected 1=connecting 2=connected)")
+		writeLine("# TYPE hopscotch_vpn_status gauge")
+		for name, st := range vpnStats {
+			writeLine(`hopscotch_vpn_status{vpn=%q} %d`, name, int(st.State))
+		}
+
+		writeLine("# HELP hopscotch_vpn_reconnects_total Total reconnect attempts per VPN")
+		writeLine("# TYPE hopscotch_vpn_reconnects_total counter")
+		for name, st := range vpnStats {
+			writeLine(`hopscotch_vpn_reconnects_total{vpn=%q} %d`, name, st.Reconnects)
+		}
+
+		writeLine("# HELP hopscotch_vpn_uptime_seconds Seconds since VPN last connected")
+		writeLine("# TYPE hopscotch_vpn_uptime_seconds gauge")
+		for name, st := range vpnStats {
+			uptime := 0.0
+			if !st.ConnectedAt.IsZero() {
+				uptime = time.Since(st.ConnectedAt).Seconds()
+			}
+			writeLine(`hopscotch_vpn_uptime_seconds{vpn=%q} %.0f`, name, uptime)
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprint(w, b.String())
 }

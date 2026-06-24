@@ -12,7 +12,7 @@
 
 **hopscotch** manages your SSH tunnels and routes outgoing connections through them automatically — like a personal VPN router for jump hosts. It watches your tunnels, reconnects them in seconds when they drop, and handles the `HTTP_PROXY` setup so your dev tools just work without per-app configuration.
 
-One binary. Zero services. No VPN client.
+One binary. Zero services.
 
 ## What you get
 
@@ -23,23 +23,26 @@ One binary. Zero services. No VPN client.
 | **TUI dashboard** | Live tunnel cards with dual-channel traffic graphs, reconnect countdowns, log streaming |
 | **Shell integration** | `hopscotch enable` / `disable` like Python venv — sets and restores `HTTP_PROXY` in the current shell |
 | **Web UI** | Same data as TUI, in the browser at `localhost:9090`, with live SSE updates |
+| **VPN integration** | Manages openconnect VPN as a subprocess; tunnels wait for VPN before connecting |
 | **Self-update** | `hopscotch update` fetches and atomically replaces the binary; container-aware |
 | **Hot reload** | Config reloads on `SIGHUP` or file change, no restart needed |
 | **SSH agent** | Works with YubiKey, gpg-agent, and ssh-agent out of the box |
 
 ## TUI dashboard
 
-`hopscotch status` opens a live terminal dashboard with three tabs: Status, Routes, and Logs.
+`hopscotch status` opens a live terminal dashboard with four tabs: Status, Patterns, Logs, and Docs.
 
 ![TUI status tab](docs/tui-status.svg)
 
-Each tunnel card shows: status dot (animated), host, local SOCKS5 port, uptime, reconnect counter, per-second throughput, active connections, last error — and a rolling dual-channel traffic graph (↓ download fills upward in cyan, ↑ upload fills downward in purple).
+The Status tab shows a **VPN table** (if configured) and a **Tunnel table**. Each tunnel card shows: status dot, host, local SOCKS5 port, uptime, reconnect counter, per-second throughput, active connections, and reason (e.g. `waiting for VPN: corp-vpn`).
 
-Press `c` to collapse graphs for a denser view. Press `g` to toggle mirror mode. Press `q` to quit.
+Press `f` to toggle graphs on/off (compact mode is the default). Press `g` to toggle mirror mode. Press `q` to quit.
 
-## Routing rules
+When a newer version is available, a `⚡v0.5.1` indicator appears next to the current version in both the TUI and web UI.
 
-The **Routes tab** shows exactly which hostname patterns route to which tunnel. Press `/` to focus the URL tester — type any hostname and hopscotch highlights the matching rule in real time.
+## Routing patterns
+
+The **Patterns tab** shows exactly which hostname patterns route to which tunnel. Press `/` to focus the URL tester — type any hostname and hopscotch highlights the matching rule in real time.
 
 ![TUI routes tab with URL tester](docs/tui-routes.svg)
 
@@ -64,11 +67,13 @@ hopscotch enable    # sets HTTP_PROXY, HTTPS_PROXY, NO_PROXY in current shell
 hopscotch disable   # restores the previous environment exactly
 ```
 
+Without `shell-init`, `enable`/`disable` print the export statements but can't apply them — hopscotch will warn you with the fix. For a quick one-off: `eval "$(hopscotch enable)"`.
+
 When the proxy is active, `HOPSCOTCH_ACTIVE` is exported so your prompt or scripts can react to it.
 
 ## Web admin UI
 
-The web dashboard lives at `http://localhost:9090`. It mirrors the TUI — tunnel cards with live traffic graphs, a Routes tab with interactive URL tester, and a Logs tab streaming structured output in real time. No polling, pure SSE.
+The web dashboard lives at `http://localhost:9090`. It mirrors the TUI — tunnel cards with live traffic graphs, a Patterns tab with interactive URL tester, VPN status cards, and a Logs tab streaming structured output in real time. No polling, pure SSE.
 
 ![Admin web UI](docs/ui-preview.svg)
 
@@ -119,12 +124,18 @@ docker pull ghcr.io/pottom/hopscotch:latest
    hopscotch trust all
    ```
 
-3. Start:
+3. Load shell integration (once, in `~/.zshrc` or `~/.bashrc`):
+   ```bash
+   eval "$(hopscotch shell-init)"
+   ```
+   > **Required** for `hopscotch enable` / `disable` to work. Without this, the commands only print the export statements — they don't apply them to your shell. For a one-time workaround: `eval "$(hopscotch enable)"`.
+
+4. Start:
    ```bash
    hopscotch start
    ```
 
-4. Route traffic:
+5. Route traffic:
    ```bash
    # per-request
    curl -x socks5h://localhost:8080 https://internal.service.corp
@@ -184,12 +195,79 @@ admin:
 | `user` | — | SSH username |
 | `identity_file` | — | Path to private key; omit to use SSH agent |
 | `local_port` | — | Local SOCKS5 port for this tunnel |
+| `requires_vpn` | — | Name of a `vpn` entry; tunnel waits for VPN before connecting |
+| `pre_connect` | — | Shell commands to run before each dial attempt (e.g. port check, custom script) |
 | `dial_timeout` | `30` | TCP connect + SSH handshake timeout (seconds) |
 | `keepalive_interval` | `5` | Keepalive probe interval (seconds) |
 | `keepalive_max_fails` | `2` | Consecutive failures before reconnect |
 | `reconnect_delay` | `5` | Initial reconnect backoff (doubles each attempt) |
 | `reconnect_max_delay` | `30` | Reconnect backoff cap (seconds) |
 | `force_pty` | `false` | Open a PTY shell session — for jump hosts that enforce channel policies (SPS/SCB) |
+
+### VPN integration
+
+hopscotch can manage an **openconnect** VPN subprocess and make tunnels wait for it before connecting:
+
+```yaml
+vpn:
+  - name: corp-vpn
+    type: openconnect
+    server: https://vpn.corp.com
+    authgroup: "Engineering"
+    user: alice
+    sudo: true                    # run openconnect via sudo
+    ping_host: "10.0.0.1:22"     # TCP probe to confirm VPN connectivity
+    pre_connect:                  # commands to run before each connection attempt
+      - "sudo networksetup -setdnsservers Wi-Fi Empty"
+    reconnect_delay: 15
+    reconnect_max_delay: 120
+
+tunnels:
+  - name: prod-jump
+    requires_vpn: corp-vpn        # waits for VPN; shows reason in TUI/web UI
+    host: 10.0.0.10
+    ...
+```
+
+hopscotch validates that `sudo` can run openconnect before daemonizing, and kills the entire openconnect process group on shutdown.
+
+#### VPN password
+
+Three options in priority order:
+
+| Option | How |
+|--------|-----|
+| `password_env: VAR` | Read from environment variable — ideal for containers and systemd units |
+| `password_cmd: "..."` | Run any shell command; its stdout becomes the password — works with `pass`, `gpg`, HashiCorp Vault, or any secret store |
+| OS keychain *(default)* | macOS Keychain / Linux Secret Service; run `hopscotch vpn password <name>` to store |
+
+`password_cmd` examples:
+```yaml
+password_cmd: "pass vpn/corp"
+password_cmd: "gpg --decrypt /etc/hopscotch/vpn.pass.gpg"
+password_cmd: "vault kv get -field=password secret/vpn"
+password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
+```
+
+#### VPN options
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `name` | — | Unique VPN name (referenced by `requires_vpn`) |
+| `type` | — | `openconnect` (only supported type) |
+| `server` | — | VPN server URL |
+| `user` | — | VPN username |
+| `authgroup` | — | Authentication group / realm |
+| `sudo` | `false` | Run openconnect via `sudo` |
+| `binary` | `openconnect` | Path to openconnect binary |
+| `password_env` | — | Environment variable name containing the password |
+| `password_cmd` | — | Shell command whose stdout is the password |
+| `ping_host` | — | `host:port` TCP probe to confirm VPN is up |
+| `pre_connect` | — | Shell commands to run before each connection attempt |
+| `post_disconnect` | — | Shell commands to run after each VPN disconnect (runs even on shutdown) |
+| `extra_args` | — | Additional openconnect flags (managed flags like `--user` are rejected) |
+| `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
+| `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |
 
 ### Proxy rules
 
@@ -210,29 +288,87 @@ hopscotch start --foreground # stay in foreground (for Docker, systemd)
 hopscotch start --restart    # replace running instance without prompting
 hopscotch stop               # stop the daemon
 hopscotch status             # open interactive TUI (plain text when piped)
+hopscotch status --plain     # force plain text output (useful for scripts, watch)
+hopscotch logs               # stream live log output from the daemon
 hopscotch enable             # activate proxy in current shell
 hopscotch disable            # deactivate proxy, restore previous env
 hopscotch shell-init         # print shell integration (source once in .zshrc)
+hopscotch vpn password <name>  # store or update VPN password in OS keychain
 hopscotch update             # check for newer release and update the binary
 hopscotch update --check     # check only, do not download
 hopscotch trust <name|host|all>  # add SSH host key to known_hosts
 hopscotch validate           # validate the config file
 hopscotch version            # print version info
+hopscotch ssh-config         # print SSH config block for ProxyCommand integration
+hopscotch ssh-config --write # write to ~/.config/hopscotch/ssh_config
+hopscotch proxy-connect <host> <port>  # SOCKS5 stdio bridge (used as SSH ProxyCommand)
 ```
 
 Global flags: `--config <path>` · `--verbose` · `--log-file <path>`
+
+### SSH ProxyCommand integration
+
+hopscotch can act as an SSH `ProxyCommand`, routing any SSH-based tool through your tunnels transparently — without extra flags or per-command proxy configuration.
+
+**What this means in practice:** once set up, tools like `ssh`, `scp`, `rsync`, VSCode Remote SSH, and Ansible work against internal hosts automatically, as long as hopscotch is running.
+
+#### Setup (one time)
+
+```bash
+hopscotch ssh-config --write
+```
+
+This does two things:
+
+1. Writes `~/.config/hopscotch/ssh_config` — an SSH config snippet generated from your proxy rules, for example:
+   ```
+   Host *.prod.internal 10.0.1.*
+       ProxyCommand hopscotch proxy-connect %h %p
+
+   Host *.staging.internal
+       ProxyCommand hopscotch proxy-connect %h %p
+   ```
+
+2. Asks whether to add the `Include` line to `~/.ssh/config` automatically. Answer `y` and it's done — or add it manually:
+   ```bash
+   echo 'Include ~/.config/hopscotch/ssh_config' >> ~/.ssh/config
+   ```
+
+#### Usage
+
+Start hopscotch as usual, then use SSH tools normally — no proxy flags needed:
+
+```bash
+ssh user@10.0.1.50
+scp report.csv user@10.0.1.50:/data/
+rsync -av ./app/ user@10.0.1.50:/srv/app/
+```
+
+**VSCode Remote SSH:** open the Command Palette → *Connect to Host* → type `user@10.0.1.50`. VSCode will tunnel through hopscotch automatically.
+
+**Ansible:** works out of the box if your inventory hosts match a proxy rule pattern. No `ansible.cfg` changes needed.
+
+#### Keeping it up to date
+
+The generated file reflects your proxy rules at the time of writing. Re-run after any rule change:
+
+```bash
+hopscotch ssh-config --write
+```
+
+hopscotch also refreshes the file automatically on config reload (SIGHUP or file change), as long as `--write` has been run at least once.
 
 ### TUI key bindings
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `s` / `r` / `l` | Switch tabs (Status → Routes → Logs → Docs) |
+| `Tab` / `s` / `l` / `p` | Switch tabs (Status → Logs → Patterns → Docs) |
 | `↑` `↓` / `j` `k` | Scroll |
-| `/` | Focus URL tester (Routes tab) |
+| `/` | Focus URL tester (Patterns tab) |
 | `Esc` | Unfocus tester |
-| `c` | Toggle compact mode (hides traffic graphs) |
+| `f` | Toggle graphs on/off (format) |
 | `g` | Toggle mirror graph (dual-channel ↔ download only) |
-| `q` / `Esc` / `Ctrl+C` | Quit |
+| `q` / `Ctrl+C` | Quit |
 
 ## Docker
 
@@ -265,6 +401,9 @@ Metrics are exposed at `/metrics` in Prometheus text format:
 | `hopscotch_direct_bytes_in_total` | counter | Bytes via direct path |
 | `hopscotch_direct_bytes_out_total` | counter | Bytes via direct path |
 | `hopscotch_direct_active_connections` | gauge | Current direct connections |
+| `hopscotch_vpn_status` | gauge | `2` = connected, `1` = connecting, `0` = disconnected; label `vpn` |
+| `hopscotch_vpn_uptime_seconds` | gauge | Seconds since VPN connected |
+| `hopscotch_vpn_reconnects_total` | counter | Total VPN reconnect attempts |
 
 ```promql
 rate(hopscotch_tunnel_bytes_in_total{tunnel="prod-jump"}[1m])

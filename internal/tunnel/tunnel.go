@@ -6,7 +6,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,6 +37,7 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 type Tunnel struct {
 	cfg        config.TunnelConfig
 	clock      Clock
+	vpnGate    func(ctx context.Context) error // non-nil when requires_vpn is set
 	stats      atomic.Value // holds Stats (without traffic counters)
 	client     *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
 	ptySession *ssh.Session // held open when force_pty is set; closed after keepalive exits
@@ -46,7 +49,13 @@ type Tunnel struct {
 
 // New creates a Tunnel with a real system clock.
 func New(cfg config.TunnelConfig) *Tunnel {
-	t := &Tunnel{cfg: cfg, clock: realClock{}}
+	return NewWithGate(cfg, nil)
+}
+
+// NewWithGate creates a Tunnel whose reconnect loop waits for gate before each dial.
+// gate is called at the start of every connect attempt; a non-nil return aborts the tunnel.
+func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error) *Tunnel {
+	t := &Tunnel{cfg: cfg, clock: realClock{}, vpnGate: gate}
 	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
 	return t
 }
@@ -135,6 +144,37 @@ func (t *Tunnel) Run(ctx context.Context) error {
 	)
 
 	for {
+		// Wait for VPN if this tunnel has a dependency.
+		if t.vpnGate != nil {
+			s := t.Stats()
+			s.LastError = "waiting for VPN: " + t.cfg.RequiresVPN
+			t.stats.Store(s)
+
+			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN)
+			if err := t.vpnGate(ctx); err != nil {
+				// ctx cancelled — clean shutdown.
+				t.setStatus(StatusDisconnected)
+				return nil
+			}
+
+			s = t.Stats()
+			s.LastError = ""
+			t.stats.Store(s)
+
+			log.Info("vpn ready, connecting tunnel", "tunnel", t.cfg.Name)
+		}
+
+		// Run pre_connect commands before each dial attempt.
+		if err := t.runPreConnect(ctx); err != nil {
+			if ctx.Err() != nil {
+				t.setStatus(StatusDisconnected)
+				return nil
+			}
+			s := t.Stats()
+			s.LastError = "pre_connect: " + err.Error()
+			t.stats.Store(s)
+		}
+
 		// Clear reconnect timer so the UI shows "connecting" during the dial,
 		// not a stale countdown frozen at 0s.
 		s0 := t.Stats()
@@ -412,14 +452,17 @@ func (t *Tunnel) hostKeyCallback() (ssh.HostKeyCallback, error) {
 		return ssh.InsecureIgnoreHostKey(), nil //nolint:gosec
 	}
 
-	home, _ := os.UserHomeDir()
-	knownHostsFile := filepath.Join(home, ".ssh", "known_hosts")
+	knownHostsFile := t.cfg.KnownHostsFile
+	if knownHostsFile == "" {
+		home, _ := os.UserHomeDir()
+		knownHostsFile = filepath.Join(home, ".ssh", "known_hosts")
+	}
 
 	cb, err := knownhosts.New(knownHostsFile)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"loading known_hosts: %w\n  hint: run 'hopscotch trust %s' to add this host",
-			err, t.cfg.Host,
+			"loading known_hosts %s: %w\n  hint: run 'hopscotch trust %s' to add this host",
+			knownHostsFile, err, t.cfg.Host,
 		)
 	}
 
@@ -440,6 +483,32 @@ func loadSigner(path string) (ssh.Signer, error) {
 	return ssh.ParsePrivateKey(data)
 }
 
+
+// runPreConnect executes each pre_connect command before a dial attempt.
+func (t *Tunnel) runPreConnect(ctx context.Context) error {
+	for _, cmdStr := range t.cfg.PreConnect {
+		log.Info("tunnel pre_connect", "tunnel", t.cfg.Name, "cmd", cmdStr)
+		s := t.Stats()
+		s.LastError = "pre_connect: " + cmdStr
+		t.stats.Store(s)
+
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Error("tunnel pre_connect failed", "tunnel", t.cfg.Name, "cmd", cmdStr, "err", err, "output", strings.TrimSpace(string(out)))
+			return fmt.Errorf("%q: %w", cmdStr, err)
+		}
+	}
+	// Clear pre_connect reason after all commands succeed.
+	s := t.Stats()
+	s.LastError = ""
+	t.stats.Store(s)
+	return nil
+}
 
 // backoff implements capped exponential backoff.
 type backoff struct {

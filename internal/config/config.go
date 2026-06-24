@@ -28,13 +28,37 @@ type TunnelConfig struct {
 	Port               int    `yaml:"port"`
 	User               string `yaml:"user"`
 	IdentityFile       string `yaml:"identity_file"`
+	KnownHostsFile     string `yaml:"known_hosts_file"`
 	LocalPort          int    `yaml:"local_port"`
 	DialTimeout        int    `yaml:"dial_timeout"`        // seconds; SSH TCP + handshake
 	KeepaliveInterval  int    `yaml:"keepalive_interval"`  // seconds between keepalive probes
 	KeepaliveMaxFails  int    `yaml:"keepalive_max_fails"` // consecutive failures before reconnect
 	ReconnectDelay    int  `yaml:"reconnect_delay"`     // initial backoff seconds
 	ReconnectMaxDelay int  `yaml:"reconnect_max_delay"` // backoff cap seconds
-	ForcePTY          bool `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
+	ForcePTY          bool     `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
+	RequiresVPN       string   `yaml:"requires_vpn"`        // wait for this VPN before connecting
+	PreConnect        []string `yaml:"pre_connect"`         // commands to run before each dial attempt
+}
+
+// VPNConfig describes a VPN connection managed as a subprocess.
+type VPNConfig struct {
+	Name              string   `yaml:"name"`
+	Type              string   `yaml:"type"`         // currently only "openconnect"
+	Server            string   `yaml:"server"`
+	User              string   `yaml:"user"`
+	Binary            string   `yaml:"binary"`       // path to openconnect binary; default: "openconnect" (PATH)
+	AuthGroup         string   `yaml:"authgroup"`    // --authgroup value (Cisco AnyConnect groups)
+	PasswordEnv       string   `yaml:"password_env"` // env var containing the password
+	PasswordCmd       string   `yaml:"password_cmd"` // shell command whose stdout is the password
+	Certificate       string   `yaml:"certificate"`  // path to client cert (cert auth)
+	Key               string   `yaml:"key"`          // path to private key (cert auth)
+	PingHost          string   `yaml:"ping_host"`      // host[:port] TCP-probed to detect connectivity
+	ExtraArgs         []string `yaml:"extra_args"`     // passed through to openconnect verbatim
+	PreConnect        []string `yaml:"pre_connect"`    // commands to run before each connection attempt
+	PostDisconnect    []string `yaml:"post_disconnect"` // commands to run after each VPN disconnect
+	Sudo              bool     `yaml:"sudo"`           // prepend sudo (needed on most platforms)
+	ReconnectDelay    int      `yaml:"reconnect_delay"`
+	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
 }
 
 // Rule maps a host pattern to a tunnel name or "direct".
@@ -47,6 +71,7 @@ type Rule struct {
 // ProxyConfig holds the SOCKS5 router configuration.
 type ProxyConfig struct {
 	Port      int    `yaml:"port"`
+	Bind      string `yaml:"bind"`       // listen address; default 0.0.0.0
 	Rules     []Rule `yaml:"rules"`
 	NoProxy   string `yaml:"no_proxy"`   // passed to NO_PROXY / no_proxy on shell enable
 	ShellIcon string `yaml:"shell_icon"` // icon shown in HOPSCOTCH_ACTIVE; default ⇢
@@ -61,6 +86,7 @@ type AdminConfig struct {
 // Config is the root configuration object.
 type Config struct {
 	Tunnels []TunnelConfig `yaml:"tunnels"`
+	VPNs    []VPNConfig    `yaml:"vpn"`
 	Proxy   ProxyConfig    `yaml:"proxy"`
 	Admin   AdminConfig    `yaml:"admin"`
 
@@ -96,7 +122,14 @@ func Load(explicit string) (*Config, error) {
 }
 
 func resolvePath(explicit string) (string, error) {
-	candidates := []string{explicit, os.Getenv("HOPSCOTCH_CONFIG")}
+	if explicit != "" {
+		if _, err := os.Stat(explicit); err != nil {
+			return "", fmt.Errorf("config file not found: %s", explicit)
+		}
+		return explicit, nil
+	}
+
+	candidates := []string{os.Getenv("HOPSCOTCH_CONFIG")}
 
 	// binary directory
 	if exe, err := os.Executable(); err == nil {
@@ -143,13 +176,42 @@ func applyDefaults(cfg *Config) {
 		if t.ReconnectMaxDelay == 0 {
 			t.ReconnectMaxDelay = DefaultReconnectMaxDelay
 		}
-		if home != "" && strings.HasPrefix(t.IdentityFile, "~/") {
-			t.IdentityFile = filepath.Join(home, t.IdentityFile[2:])
+		if home != "" {
+			if strings.HasPrefix(t.IdentityFile, "~/") {
+				t.IdentityFile = filepath.Join(home, t.IdentityFile[2:])
+			}
+			if strings.HasPrefix(t.KnownHostsFile, "~/") {
+				t.KnownHostsFile = filepath.Join(home, t.KnownHostsFile[2:])
+			}
+		}
+	}
+
+	for i := range cfg.VPNs {
+		v := &cfg.VPNs[i]
+		if v.Type == "" {
+			v.Type = DefaultVPNType
+		}
+		if v.ReconnectDelay == 0 {
+			v.ReconnectDelay = DefaultVPNReconnectDelay
+		}
+		if v.ReconnectMaxDelay == 0 {
+			v.ReconnectMaxDelay = DefaultVPNReconnectMaxDelay
+		}
+		if home != "" {
+			if strings.HasPrefix(v.Certificate, "~/") {
+				v.Certificate = filepath.Join(home, v.Certificate[2:])
+			}
+			if strings.HasPrefix(v.Key, "~/") {
+				v.Key = filepath.Join(home, v.Key[2:])
+			}
 		}
 	}
 
 	if cfg.Proxy.Port == 0 {
 		cfg.Proxy.Port = DefaultProxyPort
+	}
+	if cfg.Proxy.Bind == "" {
+		cfg.Proxy.Bind = "0.0.0.0"
 	}
 	if cfg.Proxy.ShellIcon == "" {
 		cfg.Proxy.ShellIcon = "⇢"
@@ -160,6 +222,36 @@ func applyDefaults(cfg *Config) {
 	if cfg.Admin.Bind == "" {
 		cfg.Admin.Bind = DefaultAdminBind
 	}
+}
+
+// managedVPNFlags maps each openconnect flag (and its short form) that hopscotch
+// controls via an explicit config field to the field name shown in error messages.
+// If a user puts one of these in extra_args it would be applied twice.
+var managedVPNFlags = map[string]string{
+	"--authgroup":      "authgroup",
+	"--user":          "user",
+	"-u":              "user",
+	"--passwd-on-stdin": "(automatic — set when a password is available)",
+	"--certificate":   "certificate",
+	"-c":              "certificate",
+	"--sslkey":        "key",
+	"-k":              "key",
+}
+
+// validateVPNExtraArgs returns an error if extra_args contains a flag that is
+// already managed by an explicit VPN config field.
+func validateVPNExtraArgs(v VPNConfig) error {
+	for _, arg := range v.ExtraArgs {
+		// Strip optional value part for flags like "--user=foo".
+		flag := strings.SplitN(arg, "=", 2)[0]
+		if field, managed := managedVPNFlags[flag]; managed {
+			return &ConfigError{
+				Field: fmt.Sprintf("vpn[%s].extra_args", v.Name),
+				Message: fmt.Sprintf("%q is already managed via the %q config field; remove it from extra_args", arg, field),
+			}
+		}
+	}
+	return nil
 }
 
 func validate(cfg *Config) error {
@@ -199,6 +291,37 @@ func validate(cfg *Config) error {
 
 	if cfg.Proxy.Port == cfg.Admin.Port {
 		return &ConfigError{Field: "proxy.port / admin.port", Message: "proxy and admin ports must differ"}
+	}
+
+	// Validate VPN definitions.
+	vpnNames := make(map[string]bool, len(cfg.VPNs))
+	for _, v := range cfg.VPNs {
+		if v.Name == "" {
+			return &ConfigError{Field: "vpn[].name", Message: "name is required"}
+		}
+		if v.Server == "" {
+			return &ConfigError{Field: fmt.Sprintf("vpn[%s].server", v.Name), Message: "server is required"}
+		}
+		if v.Type != "openconnect" {
+			return &ConfigError{Field: fmt.Sprintf("vpn[%s].type", v.Name), Message: fmt.Sprintf("unsupported type %q; only \"openconnect\" is supported", v.Type)}
+		}
+		if vpnNames[v.Name] {
+			return &ConfigError{Field: "vpn[].name", Message: fmt.Sprintf("duplicate vpn name %q", v.Name)}
+		}
+		vpnNames[v.Name] = true
+		if err := validateVPNExtraArgs(v); err != nil {
+			return err
+		}
+	}
+
+	// Validate requires_vpn references.
+	for _, t := range cfg.Tunnels {
+		if t.RequiresVPN != "" && !vpnNames[t.RequiresVPN] {
+			return &ConfigError{
+				Field:   fmt.Sprintf("tunnels[%s].requires_vpn", t.Name),
+				Message: fmt.Sprintf("vpn %q is not defined in the vpn section", t.RequiresVPN),
+			}
+		}
 	}
 
 	for _, rule := range cfg.Proxy.Rules {

@@ -24,7 +24,15 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # --- Final stage ---
 FROM alpine:3.21
 
+# WITH_VPN=true installs openconnect for VPN-managed deployments.
+# The VPN-enabled image also requires --cap-add NET_ADMIN and
+# --device /dev/net/tun at runtime (see docker-compose.yml).
+ARG WITH_VPN=false
+
 RUN apk add --no-cache ca-certificates tzdata && \
+    if [ "$WITH_VPN" = "true" ]; then \
+      apk add --no-cache openconnect; \
+    fi && \
     addgroup -g 1000 hopscotch && \
     adduser -u 1000 -G hopscotch -s /bin/sh -D hopscotch
 
