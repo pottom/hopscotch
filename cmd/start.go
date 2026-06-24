@@ -83,6 +83,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	})
 
 	log.Info("hopscotch starting",
+		"config", cfg.Path,
 		"proxy", fmt.Sprintf(":%d", cfg.Proxy.Port),
 		"admin", fmt.Sprintf("%s:%d", cfg.Admin.Bind, cfg.Admin.Port),
 		"tunnels", len(cfg.Tunnels),
