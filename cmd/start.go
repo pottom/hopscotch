@@ -22,6 +22,7 @@ import (
 	"hopscotch/internal/tunnel"
 	"hopscotch/internal/updater"
 	"hopscotch/internal/version"
+	"hopscotch/internal/vpn"
 )
 
 var (
@@ -74,7 +75,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	mgr := tunnel.NewManager(cfg.Tunnels)
+	var vpnGater tunnel.VPNGater
+	if len(cfg.VPNs) > 0 {
+		vpnGater = vpn.NewManager(cfg.VPNs)
+	}
+
+	mgr := tunnel.NewManager(cfg.Tunnels, vpnGater)
 	router := proxy.NewRouter(cfg.Proxy.Rules, mgr)
 	proxySrv := proxy.NewServer(cfg.Proxy.Port, router)
 	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, router, router, ReadmeContent)
@@ -89,6 +95,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		"proxy", fmt.Sprintf(":%d", cfg.Proxy.Port),
 		"admin", fmt.Sprintf("%s:%d", cfg.Admin.Bind, cfg.Admin.Port),
 		"tunnels", len(cfg.Tunnels),
+		"vpns", len(cfg.VPNs),
 	)
 	config.LogConfig(cfg)
 
@@ -109,6 +116,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 
+	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
+		g.Go(func() error { return vpnMgr.Run(ctx) })
+	}
 	g.Go(func() error { return mgr.Run(ctx) })
 	g.Go(func() error { return proxySrv.ListenAndServe(ctx) })
 	g.Go(func() error { return adminSrv.ListenAndServe(ctx) })

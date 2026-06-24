@@ -35,6 +35,7 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 type Tunnel struct {
 	cfg        config.TunnelConfig
 	clock      Clock
+	vpnGate    func(ctx context.Context) error // non-nil when requires_vpn is set
 	stats      atomic.Value // holds Stats (without traffic counters)
 	client     *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
 	ptySession *ssh.Session // held open when force_pty is set; closed after keepalive exits
@@ -46,7 +47,13 @@ type Tunnel struct {
 
 // New creates a Tunnel with a real system clock.
 func New(cfg config.TunnelConfig) *Tunnel {
-	t := &Tunnel{cfg: cfg, clock: realClock{}}
+	return NewWithGate(cfg, nil)
+}
+
+// NewWithGate creates a Tunnel whose reconnect loop waits for gate before each dial.
+// gate is called at the start of every connect attempt; a non-nil return aborts the tunnel.
+func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error) *Tunnel {
+	t := &Tunnel{cfg: cfg, clock: realClock{}, vpnGate: gate}
 	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
 	return t
 }
@@ -135,6 +142,17 @@ func (t *Tunnel) Run(ctx context.Context) error {
 	)
 
 	for {
+		// Wait for VPN if this tunnel has a dependency.
+		if t.vpnGate != nil {
+			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN)
+			if err := t.vpnGate(ctx); err != nil {
+				// ctx cancelled — clean shutdown.
+				t.setStatus(StatusDisconnected)
+				return nil
+			}
+			log.Info("vpn ready, connecting tunnel", "tunnel", t.cfg.Name)
+		}
+
 		// Clear reconnect timer so the UI shows "connecting" during the dial,
 		// not a stale countdown frozen at 0s.
 		s0 := t.Stats()

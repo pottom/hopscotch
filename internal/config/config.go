@@ -35,6 +35,23 @@ type TunnelConfig struct {
 	ReconnectDelay    int  `yaml:"reconnect_delay"`     // initial backoff seconds
 	ReconnectMaxDelay int  `yaml:"reconnect_max_delay"` // backoff cap seconds
 	ForcePTY          bool `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
+	RequiresVPN       string `yaml:"requires_vpn"`      // wait for this VPN before connecting
+}
+
+// VPNConfig describes a VPN connection managed as a subprocess.
+type VPNConfig struct {
+	Name              string   `yaml:"name"`
+	Type              string   `yaml:"type"`         // currently only "openconnect"
+	Server            string   `yaml:"server"`
+	User              string   `yaml:"user"`
+	PasswordEnv       string   `yaml:"password_env"` // env var containing the password
+	Certificate       string   `yaml:"certificate"`  // path to client cert (cert auth)
+	Key               string   `yaml:"key"`          // path to private key (cert auth)
+	PingHost          string   `yaml:"ping_host"`    // host[:port] TCP-probed to detect connectivity
+	ExtraArgs         []string `yaml:"extra_args"`   // passed through to openconnect verbatim
+	Sudo              bool     `yaml:"sudo"`         // prepend sudo (needed on most platforms)
+	ReconnectDelay    int      `yaml:"reconnect_delay"`
+	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
 }
 
 // Rule maps a host pattern to a tunnel name or "direct".
@@ -61,6 +78,7 @@ type AdminConfig struct {
 // Config is the root configuration object.
 type Config struct {
 	Tunnels []TunnelConfig `yaml:"tunnels"`
+	VPNs    []VPNConfig    `yaml:"vpn"`
 	Proxy   ProxyConfig    `yaml:"proxy"`
 	Admin   AdminConfig    `yaml:"admin"`
 
@@ -148,6 +166,19 @@ func applyDefaults(cfg *Config) {
 		}
 	}
 
+	for i := range cfg.VPNs {
+		v := &cfg.VPNs[i]
+		if v.Type == "" {
+			v.Type = DefaultVPNType
+		}
+		if v.ReconnectDelay == 0 {
+			v.ReconnectDelay = DefaultVPNReconnectDelay
+		}
+		if v.ReconnectMaxDelay == 0 {
+			v.ReconnectMaxDelay = DefaultVPNReconnectMaxDelay
+		}
+	}
+
 	if cfg.Proxy.Port == 0 {
 		cfg.Proxy.Port = DefaultProxyPort
 	}
@@ -199,6 +230,34 @@ func validate(cfg *Config) error {
 
 	if cfg.Proxy.Port == cfg.Admin.Port {
 		return &ConfigError{Field: "proxy.port / admin.port", Message: "proxy and admin ports must differ"}
+	}
+
+	// Validate VPN definitions.
+	vpnNames := make(map[string]bool, len(cfg.VPNs))
+	for _, v := range cfg.VPNs {
+		if v.Name == "" {
+			return &ConfigError{Field: "vpn[].name", Message: "name is required"}
+		}
+		if v.Server == "" {
+			return &ConfigError{Field: fmt.Sprintf("vpn[%s].server", v.Name), Message: "server is required"}
+		}
+		if v.Type != "openconnect" {
+			return &ConfigError{Field: fmt.Sprintf("vpn[%s].type", v.Name), Message: fmt.Sprintf("unsupported type %q; only \"openconnect\" is supported", v.Type)}
+		}
+		if vpnNames[v.Name] {
+			return &ConfigError{Field: "vpn[].name", Message: fmt.Sprintf("duplicate vpn name %q", v.Name)}
+		}
+		vpnNames[v.Name] = true
+	}
+
+	// Validate requires_vpn references.
+	for _, t := range cfg.Tunnels {
+		if t.RequiresVPN != "" && !vpnNames[t.RequiresVPN] {
+			return &ConfigError{
+				Field:   fmt.Sprintf("tunnels[%s].requires_vpn", t.Name),
+				Message: fmt.Sprintf("vpn %q is not defined in the vpn section", t.RequiresVPN),
+			}
+		}
 	}
 
 	for _, rule := range cfg.Proxy.Rules {

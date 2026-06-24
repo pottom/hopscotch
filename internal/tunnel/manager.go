@@ -12,19 +12,39 @@ import (
 	"hopscotch/internal/config"
 )
 
+// VPNGater is implemented by vpn.Manager. Defined here as an interface
+// to avoid an import cycle between the tunnel and vpn packages.
+type VPNGater interface {
+	WaitConnected(ctx context.Context, name string) error
+}
+
 // Manager owns all tunnels and exposes status and dialing.
 type Manager struct {
 	mu      sync.RWMutex
 	tunnels map[string]*Tunnel
+	vpn     VPNGater // may be nil when no VPNs are configured
 }
 
 // NewManager creates a Manager from the given config.
-func NewManager(tunnelCfgs []config.TunnelConfig) *Manager {
-	m := &Manager{tunnels: make(map[string]*Tunnel, len(tunnelCfgs))}
+// vpn may be nil when no VPN dependencies are used.
+func NewManager(tunnelCfgs []config.TunnelConfig, vpn VPNGater) *Manager {
+	m := &Manager{tunnels: make(map[string]*Tunnel, len(tunnelCfgs)), vpn: vpn}
 	for _, cfg := range tunnelCfgs {
-		m.tunnels[cfg.Name] = New(cfg)
+		m.tunnels[cfg.Name] = m.newTunnel(cfg)
 	}
 	return m
+}
+
+// newTunnel creates a Tunnel, wiring a VPN gate if requires_vpn is set.
+func (m *Manager) newTunnel(cfg config.TunnelConfig) *Tunnel {
+	if cfg.RequiresVPN != "" && m.vpn != nil {
+		name := cfg.RequiresVPN
+		gate := func(ctx context.Context) error {
+			return m.vpn.WaitConnected(ctx, name)
+		}
+		return NewWithGate(cfg, gate)
+	}
+	return New(cfg)
 }
 
 // Run starts all tunnels and blocks until ctx is cancelled.
@@ -89,7 +109,7 @@ func (m *Manager) ApplyConfig(ctx context.Context, newCfgs []config.TunnelConfig
 	for name, cfg := range newSet {
 		if _, exists := m.tunnels[name]; !exists {
 			log.Info("starting new tunnel", "tunnel", name)
-			t := New(cfg)
+			t := m.newTunnel(cfg)
 			m.tunnels[name] = t
 			go func(t *Tunnel) {
 				if err := t.Run(ctx); err != nil {
