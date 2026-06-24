@@ -40,21 +40,7 @@ hopscotch() {
       command hopscotch "$@"
       ;;
   esac
-}
-# Prepend proxy icon to prompt on every command via precmd hook.
-# Runs after theme hooks (p10k, oh-my-zsh) since we're added last.
-if [ -n "${ZSH_VERSION:-}" ]; then
-  autoload -Uz add-zsh-hook
-  _hopscotch_precmd() {
-    [[ -n "${HOPSCOTCH_ACTIVE:-}" ]] && PROMPT="${HOPSCOTCH_ACTIVE} ${PROMPT}"
-  }
-  add-zsh-hook precmd _hopscotch_precmd
-elif [ -n "${BASH_VERSION:-}" ]; then
-  _hopscotch_precmd() {
-    [[ -n "${HOPSCOTCH_ACTIVE:-}" && "$PS1" != *"${HOPSCOTCH_ACTIVE}"* ]] && PS1="${HOPSCOTCH_ACTIVE} ${PS1}"
-  }
-  PROMPT_COMMAND="_hopscotch_precmd${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
-fi`
+}`
 
 func runShellInit(_ *cobra.Command, _ []string) error {
 	fmt.Println(shellInitScript)
