@@ -47,8 +47,9 @@
 
 <nav class="tab-bar" id="tab-bar">
   <a class="active" data-tab="status" href="#" onclick="switchTab('status');return false">Status</a>
-  <a data-tab="logs"   href="#" onclick="switchTab('logs');return false">Logs</a>
-  <a data-tab="docs"   href="#" onclick="switchTab('docs');return false">Docs</a>
+  <a data-tab="logs"    href="#" onclick="switchTab('logs');return false">Logs</a>
+  <a data-tab="routes"  href="#" onclick="switchTab('routes');return false">Routes</a>
+  <a data-tab="docs"    href="#" onclick="switchTab('docs');return false">Docs</a>
 </nav>
 
 <!-- ── STATUS TAB ─────────────────────────────────────────────────────────── -->
@@ -150,6 +151,34 @@
   <div class="log-wrap">
     <div class="log-label">Live log stream</div>
     <div class="log-scroll" id="log-scroll"></div>
+  </div>
+</div>
+
+<!-- ── ROUTES TAB ─────────────────────────────────────────────────────────── -->
+<div id="panel-routes" class="tab-panel">
+  <div class="routes-wrap">
+    <div class="routes-label">URL → Tunnel routing rules</div>
+
+    <div class="routes-tester">
+      <input type="text" id="routes-tester-input" class="routes-tester-input"
+             placeholder="test a URL or hostname, e.g. api.example.com"
+             oninput="routesTesterUpdate(this.value)">
+      <div class="routes-tester-result" id="routes-tester-result"></div>
+    </div>
+
+    <table class="routes-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Pattern</th>
+          <th>Via</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="routes-tbody">
+        <tr><td colspan="4" class="routes-empty">Loading…</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 

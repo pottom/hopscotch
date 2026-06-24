@@ -58,6 +58,9 @@ var (
 
 	styleTabActive   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleTabInactive = lipgloss.NewStyle().Foreground(colorMuted)
+
+	styleRouteNum     = lipgloss.NewStyle().Foreground(colorMuted).Width(4)
+	styleRoutePattern = lipgloss.NewStyle().Foreground(colorBright).Width(32)
 )
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -65,7 +68,8 @@ var (
 const (
 	tabStatus = 0
 	tabLogs   = 1
-	numTabs   = 2
+	tabRoutes = 2
+	numTabs   = 3
 )
 
 const headerHeight = 6 // blank · title+tabs · stats · blank · label · separator
@@ -286,10 +290,12 @@ type Model struct {
 	logCh    chan string
 	done     chan struct{}
 
-	activeTab  int
-	logLines   []string
-	logVP      viewport.Model
-	logVPReady bool
+	activeTab    int
+	logLines     []string
+	logVP        viewport.Model
+	logVPReady   bool
+	routeVP      viewport.Model
+	routeVPReady bool
 
 	tick    int
 	width   int
@@ -352,6 +358,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.resizeViewports()
 			return m, nil
 
+		case "r", "R":
+			m.activeTab = tabRoutes
+			m = m.resizeViewports()
+			return m, nil
+
 		case "c", "C":
 			if m.activeTab == tabStatus {
 				m.compact = !m.compact
@@ -375,6 +386,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.vp, cmd = m.vp.Update(msg)
 			} else if m.activeTab == tabLogs && m.logVPReady {
 				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
 			}
 			return m, cmd
 		}
@@ -398,6 +411,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.vpReady {
 			m.vp.SetContent(m.buildStatusContent())
+		}
+		if m.routeVPReady {
+			m.routeVP.SetContent(m.buildRoutesContent())
 		}
 
 	case sseMsg:
@@ -451,30 +467,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // resizeViewports recalculates both viewports for the current terminal size
 // and active tab. Called on WindowSizeMsg and when switching tabs.
 func (m Model) resizeViewports() Model {
-	statusVpH := m.height - headerHeight - footerHeight
-	logsVpH   := m.height - headerHeight - footerHeight
-	if statusVpH < 1 {
-		statusVpH = 1
-	}
-	if logsVpH < 1 {
-		logsVpH = 1
+	vpH := m.height - headerHeight - footerHeight
+	if vpH < 1 {
+		vpH = 1
 	}
 
 	if !m.vpReady {
-		m.vp = viewport.New(m.width, statusVpH)
+		m.vp = viewport.New(m.width, vpH)
 		m.vpReady = true
 	} else {
 		m.vp.Width = m.width
-		m.vp.Height = statusVpH
+		m.vp.Height = vpH
 	}
 	m.vp.SetContent(m.buildStatusContent())
 
 	if !m.logVPReady {
-		m.logVP = viewport.New(m.width, logsVpH)
+		m.logVP = viewport.New(m.width, vpH)
 		m.logVPReady = true
 	} else {
 		m.logVP.Width = m.width
-		m.logVP.Height = logsVpH
+		m.logVP.Height = vpH
 	}
 	if len(m.logLines) > 0 {
 		atBottom := m.logVP.AtBottom()
@@ -483,6 +495,15 @@ func (m Model) resizeViewports() Model {
 			m.logVP.GotoBottom()
 		}
 	}
+
+	if !m.routeVPReady {
+		m.routeVP = viewport.New(m.width, vpH)
+		m.routeVPReady = true
+	} else {
+		m.routeVP.Width = m.width
+		m.routeVP.Height = vpH
+	}
+	m.routeVP.SetContent(m.buildRoutesContent())
 
 	return m
 }
@@ -496,8 +517,11 @@ func (m Model) View() string {
 	}
 
 	vp := m.vp.View()
-	if m.activeTab == tabLogs {
+	switch m.activeTab {
+	case tabLogs:
 		vp = m.logVP.View()
+	case tabRoutes:
+		vp = m.routeVP.View()
 	}
 	return m.renderHeader() + vp + m.renderFooter()
 }
@@ -535,6 +559,7 @@ func (m Model) renderTabBar() string {
 	}{
 		{"Status", tabStatus},
 		{"Logs", tabLogs},
+		{"Routes", tabRoutes},
 	}
 	var parts []string
 	for _, t := range tabs {
@@ -555,7 +580,8 @@ func (m Model) renderHeader() string {
 	b.WriteString(m.renderStatsLine())
 	b.WriteString("\n")
 
-	if m.activeTab == tabStatus {
+	switch m.activeTab {
+	case tabStatus:
 		hdr := func(s lipgloss.Style, label string) string {
 			return s.Foreground(colorMuted).Render(label)
 		}
@@ -576,7 +602,14 @@ func (m Model) renderHeader() string {
 			hdr(styleColConn, "CONN"),
 			reasonHdr,
 		)
-	} else {
+	case tabRoutes:
+		fmt.Fprintf(&b, "  %s%s%s%s\n",
+			styleRouteNum.Render("#"),
+			styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
+			lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
+			styleMuted.Render("STATUS"),
+		)
+	default:
 		fmt.Fprintf(&b, "  %s\n", styleMuted.Render("LOGS"))
 	}
 	fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
@@ -586,7 +619,7 @@ func (m Model) renderHeader() string {
 
 // renderFooter returns a single-line bar: hints on the left, ports on the right.
 func (m Model) renderFooter() string {
-	hints := "q quit  tab/s/l switch  ↑↓/jk scroll"
+	hints := "q quit  tab/s/l/r switch  ↑↓/jk scroll"
 	if m.activeTab == tabStatus {
 		if m.compact {
 			hints += "  c expand"
@@ -601,8 +634,11 @@ func (m Model) renderFooter() string {
 	}
 
 	activeVP := m.vp
-	if m.activeTab == tabLogs {
+	switch m.activeTab {
+	case tabLogs:
 		activeVP = m.logVP
+	case tabRoutes:
+		activeVP = m.routeVP
 	}
 	if !activeVP.AtBottom() {
 		hints += "  ↓"
@@ -618,6 +654,38 @@ func (m Model) renderFooter() string {
 	}
 
 	return "\n  " + left + strings.Repeat(" ", gap) + right + "\n"
+}
+
+// buildRoutesContent renders the routing rules table for the routes viewport.
+func (m Model) buildRoutesContent() string {
+	if len(m.status.Routes) == 0 {
+		return "\n" + styleMuted.Render("  no routing rules configured") + "\n"
+	}
+
+	var b strings.Builder
+	for i, r := range m.status.Routes {
+		num := styleRouteNum.Render(fmt.Sprintf("%d", i+1))
+		pattern := styleRoutePattern.Render(r.Pattern)
+
+		via := r.Tunnel
+		if via == "" {
+			via = r.Via
+		}
+
+		var viaRendered string
+		var statusStr string
+		if via == "direct" || via == "" {
+			viaRendered = lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render(via)
+		} else {
+			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
+			if t, ok := m.status.Tunnels[via]; ok {
+				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures)
+			}
+		}
+
+		fmt.Fprintf(&b, "  %s%s%s%s\n", num, pattern, viaRendered, statusStr)
+	}
+	return b.String()
 }
 
 // buildStatusContent renders the scrollable tunnel list for the status viewport.

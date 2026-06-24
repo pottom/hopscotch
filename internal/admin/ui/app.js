@@ -95,6 +95,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.store('hop', {
     tunnels: {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
+    routes:  [],
     meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, admin_port: 0, status: '…' },
 
     tunnelList() {
@@ -159,6 +160,12 @@ async function refreshStatus() {
       };
     }
     store.tunnels = next;
+    store.routes = st.routes || [];
+
+    if (TAB_INIT['routes']) {
+      const testerVal = document.getElementById('routes-tester-input')?.value || '';
+      renderRoutesTable(testerVal ? findMatchIdx(testerVal) : undefined);
+    }
 
     document.title = `hopscotch ${st.version}`;
   } catch {
@@ -224,8 +231,9 @@ window.switchTab = function(name) {
 
   if (!TAB_INIT[name]) {
     TAB_INIT[name] = true;
-    if (name === 'logs')  initLogStream();
-    if (name === 'docs')  initDocs();
+    if (name === 'logs')   initLogStream();
+    if (name === 'routes') initRoutes();
+    if (name === 'docs')   initDocs();
   }
 };
 
@@ -277,6 +285,108 @@ function initLogStream() {
 
   scroll.appendChild(cursor);
 }
+
+// ── Routes tab ────────────────────────────────────────────────────────────────
+
+function matchPattern(pattern, host) {
+  if (pattern === '*') return true;
+  if (pattern.endsWith('.*')) {
+    return host.startsWith(pattern.slice(0, -1));
+  }
+  if (pattern.startsWith('*.')) {
+    const suffix = pattern.slice(1);
+    return host.endsWith(suffix) || host === pattern.slice(2);
+  }
+  return pattern === host;
+}
+
+function extractHostname(input) {
+  const s = input.trim();
+  if (!s) return '';
+  try {
+    return new URL(s.includes('://') ? s : 'https://' + s).hostname;
+  } catch {
+    return s;
+  }
+}
+
+function findMatchIdx(input) {
+  const host = extractHostname(input);
+  if (!host) return undefined;
+  const routes = Alpine.store('hop').routes || [];
+  for (let i = 0; i < routes.length; i++) {
+    if (matchPattern(routes[i].pattern, host)) return i;
+  }
+  return undefined;
+}
+
+function tunnelVisualStatus(t) {
+  if (!t) return '';
+  if (t.status === 'connected' && t.keepalive_failures > 0) return 'warning';
+  return t.status;
+}
+
+function renderRoutesTable(highlightIdx) {
+  const tbody = document.getElementById('routes-tbody');
+  if (!tbody) return;
+  const routes = Alpine.store('hop').routes || [];
+  const tunnels = Alpine.store('hop').tunnels || {};
+
+  if (routes.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="routes-empty">No routing rules configured.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
+  routes.forEach((r, i) => {
+    const via = r.tunnel || r.via || 'direct';
+    const t = tunnels[via];
+    const vs = tunnelVisualStatus(t);
+
+    const viaHtml = (via === 'direct' || !r.tunnel)
+      ? `<span class="routes-via-direct">${via}</span>`
+      : `<span class="routes-via-tunnel">${via}</span>`;
+
+    let statusHtml = '';
+    if (t) {
+      statusHtml = `<span class="dot ${vs}" style="display:inline-block;margin-right:.4em;vertical-align:middle"></span><span class="status-label ${vs}">${t.status}</span>`;
+    } else if (via === 'direct') {
+      statusHtml = '<span class="routes-via-direct">—</span>';
+    }
+
+    const tr = document.createElement('tr');
+    if (highlightIdx === i) tr.className = 'routes-match';
+    tr.innerHTML = `<td class="routes-num">${i + 1}</td><td class="routes-pattern">${r.pattern}</td><td>${viaHtml}</td><td>${statusHtml}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function initRoutes() {
+  renderRoutesTable();
+}
+
+window.routesTesterUpdate = function(input) {
+  const result = document.getElementById('routes-tester-result');
+  const routes = Alpine.store('hop').routes || [];
+  const host = extractHostname(input);
+
+  if (!host) {
+    if (result) result.innerHTML = '';
+    renderRoutesTable();
+    return;
+  }
+
+  let matchIdx = findMatchIdx(input);
+  if (result) {
+    if (matchIdx !== undefined) {
+      const via = routes[matchIdx].tunnel || routes[matchIdx].via || 'direct';
+      result.innerHTML = `<span class="routes-tester-match">✓ rule ${matchIdx + 1} matched &rarr; <strong>${via}</strong></span>`;
+    } else {
+      result.innerHTML = `<span class="routes-tester-nomatch">no rule matched &rarr; direct (fallback)</span>`;
+    }
+  }
+  renderRoutesTable(matchIdx);
+};
 
 // ── Docs tab ──────────────────────────────────────────────────────────────────
 

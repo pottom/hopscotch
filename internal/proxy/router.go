@@ -47,6 +47,11 @@ func (r *Router) UpdateRules(rules []config.Rule) {
 	r.rules = rules
 }
 
+// Rules returns a snapshot of the current routing rules.
+func (r *Router) Rules() []config.Rule {
+	return r.rules
+}
+
 // DialContext selects the tunnel matching addr and dials through it.
 func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
