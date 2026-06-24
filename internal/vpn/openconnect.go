@@ -3,6 +3,7 @@ package vpn
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -120,6 +121,10 @@ func (c *Connection) password() string {
 	}
 	pw, err := keychain.GetVPNPassword(c.cfg.Name)
 	if err != nil {
+		if !errors.Is(err, keychain.ErrNotFound) {
+			log.Warn("keychain not available, proceeding without password — set password_env if running in a container",
+				"vpn", c.cfg.Name, "err", err)
+		}
 		return ""
 	}
 	return pw
