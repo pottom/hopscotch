@@ -23,7 +23,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// these commands only write to stdout, no logger needed.
 		switch cmd.Name() {
-		case "version", "enable", "disable", "shell-init", "update":
+		case "version", "enable", "disable", "shell-init", "update", "password":
 			return nil
 		}
 		return logger.Init(verbose, logFile)

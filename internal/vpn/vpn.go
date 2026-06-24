@@ -32,6 +32,7 @@ type connConfig struct {
 	Name              string
 	Server            string
 	User              string
+	AuthGroup         string
 	PasswordEnv       string
 	Certificate       string
 	Key               string

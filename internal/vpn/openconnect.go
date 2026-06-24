@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+
+	"hopscotch/internal/keychain"
 )
 
 // runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.
@@ -25,8 +27,8 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		cmd = exec.CommandContext(ctx, "openconnect", args...)
 	}
 
-	if c.cfg.PasswordEnv != "" {
-		cmd.Stdin = strings.NewReader(os.Getenv(c.cfg.PasswordEnv) + "\n")
+	if pw := c.password(); pw != "" {
+		cmd.Stdin = strings.NewReader(pw + "\n")
 	}
 
 	stderr, err := cmd.StderrPipe()
@@ -77,8 +79,24 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	}
 }
 
+// password returns the VPN password from environment variable or OS keychain.
+// Priority: password_env > keychain. Returns empty string if neither is set.
+func (c *Connection) password() string {
+	if c.cfg.PasswordEnv != "" {
+		return os.Getenv(c.cfg.PasswordEnv)
+	}
+	pw, err := keychain.GetVPNPassword(c.cfg.Name)
+	if err != nil {
+		return ""
+	}
+	return pw
+}
+
 func (c *Connection) buildArgs() []string {
 	args := []string{"--non-inter"}
+	if c.cfg.AuthGroup != "" {
+		args = append(args, "--authgroup", c.cfg.AuthGroup)
+	}
 	if c.cfg.User != "" {
 		args = append(args, "--user", c.cfg.User)
 	}

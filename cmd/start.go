@@ -63,6 +63,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Ensure VPN passwords are available before potentially daemonizing.
+	// This prompts interactively when the password is missing and stores it
+	// in the OS keychain so subsequent starts are fully unattended.
+	if err := ensureVPNPasswords(cfg.VPNs); err != nil {
+		return err
+	}
+
 	if !foreground {
 		return daemonize()
 	}

@@ -44,6 +44,7 @@ type VPNConfig struct {
 	Type              string   `yaml:"type"`         // currently only "openconnect"
 	Server            string   `yaml:"server"`
 	User              string   `yaml:"user"`
+	AuthGroup         string   `yaml:"authgroup"`    // --authgroup value (Cisco AnyConnect groups)
 	PasswordEnv       string   `yaml:"password_env"` // env var containing the password
 	Certificate       string   `yaml:"certificate"`  // path to client cert (cert auth)
 	Key               string   `yaml:"key"`          // path to private key (cert auth)
