@@ -7,6 +7,7 @@ import (
 
 	"hopscotch/internal/tunnel"
 	"hopscotch/internal/version"
+	"hopscotch/internal/vpn"
 )
 
 // RouteJSON is a single routing rule in the /status response.
@@ -27,16 +28,26 @@ type TunnelStatusJSON struct {
 	LastError         string  `json:"last_error,omitempty"`
 }
 
+// VPNStatusJSON is the per-VPN block in the /status response.
+type VPNStatusJSON struct {
+	State         string  `json:"state"`
+	Host          string  `json:"host"`
+	Reconnects    int     `json:"reconnects"`
+	UptimeSeconds float64 `json:"uptime_seconds"`
+}
+
 // StatusResponse is the full /status JSON response.
 type StatusResponse struct {
-	Status    string                      `json:"status"`
-	Version   string                      `json:"version"`
-	Uptime    string                      `json:"uptime"`
-	PID       int                         `json:"pid"`
-	ProxyPort int                         `json:"proxy_port"`
-	AdminPort int                         `json:"admin_port"`
-	Tunnels   map[string]TunnelStatusJSON `json:"tunnels"`
-	Routes    []RouteJSON                 `json:"routes"`
+	Status        string                      `json:"status"`
+	Version       string                      `json:"version"`
+	LatestVersion string                      `json:"latest_version,omitempty"`
+	Uptime        string                      `json:"uptime"`
+	PID           int                         `json:"pid"`
+	ProxyPort     int                         `json:"proxy_port"`
+	AdminPort     int                         `json:"admin_port"`
+	Tunnels       map[string]TunnelStatusJSON `json:"tunnels"`
+	VPNs          map[string]VPNStatusJSON    `json:"vpns,omitempty"`
+	Routes        []RouteJSON                 `json:"routes"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +79,27 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		overall = "degraded"
 	}
 
+	var vpnMap map[string]VPNStatusJSON
+	if s.vpns != nil {
+		vpnStats := s.vpns.AllStats()
+		vpnMap = make(map[string]VPNStatusJSON, len(vpnStats))
+		for name, st := range vpnStats {
+			uptime := 0.0
+			if st.State == vpn.StateConnected && !st.ConnectedAt.IsZero() {
+				uptime = time.Since(st.ConnectedAt).Seconds()
+			}
+			if st.State != vpn.StateConnected {
+				overall = "degraded"
+			}
+			vpnMap[name] = VPNStatusJSON{
+				State:         st.State.String(),
+				Host:          st.Server,
+				Reconnects:    st.Reconnects,
+				UptimeSeconds: uptime,
+			}
+		}
+	}
+
 	rules := s.routes.Rules()
 	routes := make([]RouteJSON, len(rules))
 	for i, r := range rules {
@@ -75,14 +107,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := StatusResponse{
-		Status:    overall,
-		Version:   version.Version,
-		Uptime:    time.Since(s.startedAt).Round(time.Second).String(),
-		PID:       s.pid,
-		ProxyPort: s.proxyPort,
-		AdminPort: s.port,
-		Tunnels:   tunnels,
-		Routes:    routes,
+		Status:        overall,
+		Version:       version.Version,
+		LatestVersion: version.LatestVersion,
+		Uptime:        time.Since(s.startedAt).Round(time.Second).String(),
+		PID:           s.pid,
+		ProxyPort:     s.proxyPort,
+		AdminPort:     s.port,
+		Tunnels:       tunnels,
+		VPNs:          vpnMap,
+		Routes:        routes,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

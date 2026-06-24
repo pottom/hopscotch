@@ -70,6 +70,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := checkVPNSudo(cfg.VPNs); err != nil {
+		return err
+	}
+
 	if !foreground {
 		return daemonize()
 	}
@@ -90,7 +94,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 	mgr := tunnel.NewManager(cfg.Tunnels, vpnGater)
 	router := proxy.NewRouter(cfg.Proxy.Rules, mgr)
 	proxySrv := proxy.NewServer(cfg.Proxy.Port, router)
-	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, router, router, ReadmeContent)
+	var vpnStatter admin.VPNStatter
+	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
+		vpnStatter = vpnMgr
+	}
+	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent)
 
 	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)
@@ -109,16 +117,21 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if updater.InContainer() {
 		log.Info("running in a container — self-update disabled")
 	} else {
-		go func() {
-			rel, err := updater.LatestRelease()
-			if err != nil {
-				return
-			}
-			if updater.IsNewer(version.Version, rel.TagName) {
-				version.LatestVersion = rel.TagName
-				log.Info("update available", "latest", rel.TagName, "current", version.Version, "run", "hopscotch update")
-			}
-		}()
+		if fake := os.Getenv("HOPSCOTCH_FAKE_LATEST_VERSION"); fake != "" {
+			version.LatestVersion = fake
+			log.Info("update available (faked)", "latest", fake, "current", version.Version)
+		} else {
+			go func() {
+				rel, err := updater.LatestRelease()
+				if err != nil {
+					return
+				}
+				if updater.IsNewer(version.Version, rel.TagName) {
+					version.LatestVersion = rel.TagName
+					log.Info("update available", "latest", rel.TagName, "current", version.Version, "run", "hopscotch update")
+				}
+			}()
+		}
 	}
 
 	g, ctx := errgroup.WithContext(ctx)

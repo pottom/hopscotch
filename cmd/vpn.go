@@ -3,8 +3,11 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -95,6 +98,95 @@ func ensureVPNPasswords(vpns []config.VPNConfig) error {
 		fmt.Printf("stored — run 'hopscotch vpn password %s' to update it later\n", v.Name)
 	}
 	return nil
+}
+
+// checkVPNSudo verifies that sudo is available without a password for each
+// command the VPN subsystem needs to run (openconnect binary + pre_connect
+// commands that use sudo). Called before daemonizing so the terminal is available.
+//
+// On Windows sudo semantics differ; the check is skipped.
+func checkVPNSudo(vpns []config.VPNConfig) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	for _, v := range vpns {
+		if !v.Sudo {
+			continue
+		}
+
+		binary := v.Binary
+		if binary == "" {
+			binary = "openconnect"
+		}
+		if err := sudoCheck(binary); err != nil {
+			hint := sudoHint(binary)
+			return fmt.Errorf(
+				"vpn %q: sudo access for %q requires a password (daemon cannot prompt)\n  Fix: run 'sudo visudo' and add:\n    %s",
+				v.Name, binary, hint,
+			)
+		}
+
+		for _, cmdStr := range v.PreConnect {
+			exe := sudoCmdExe(cmdStr)
+			if exe == "" {
+				continue
+			}
+			if err := sudoCheck(exe); err != nil {
+				hint := sudoHint(exe)
+				return fmt.Errorf(
+					"vpn %q: pre_connect %q requires a sudo password (daemon cannot prompt)\n  Fix: run 'sudo visudo' and add:\n    %s",
+					v.Name, cmdStr, hint,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+// sudoCheck runs `sudo -n -l <exe>` non-interactively to verify that
+// the executable can be invoked via sudo without a password prompt.
+func sudoCheck(exe string) error {
+	cmd := exec.Command("sudo", "-n", "-l", exe)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run()
+}
+
+// sudoHint returns a sudoers line hint for the given executable, using the
+// full resolved path when available.
+func sudoHint(exe string) string {
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "YOUR_USER"
+	}
+	if full, err := exec.LookPath(exe); err == nil {
+		exe = full
+	}
+	return fmt.Sprintf("%s ALL=(ALL) NOPASSWD: %s", user, exe)
+}
+
+// sudoCmdExe extracts the executable name from a command string that starts
+// with "sudo". Returns "" if the command does not invoke sudo.
+func sudoCmdExe(cmdStr string) string {
+	fields := strings.Fields(cmdStr)
+	i := 0
+	if len(fields) == 0 || fields[0] != "sudo" {
+		return ""
+	}
+	i++ // skip "sudo"
+	// skip sudo flags and their arguments
+	for i < len(fields) && strings.HasPrefix(fields[i], "-") {
+		flag := fields[i]
+		i++
+		// flags that take a value argument
+		if flag == "-u" || flag == "-g" || flag == "-C" || flag == "-p" || flag == "-r" || flag == "-t" {
+			i++
+		}
+	}
+	if i >= len(fields) {
+		return ""
+	}
+	return fields[i]
 }
 
 func keychainLabel() string {

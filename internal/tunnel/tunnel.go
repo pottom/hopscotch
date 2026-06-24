@@ -144,12 +144,21 @@ func (t *Tunnel) Run(ctx context.Context) error {
 	for {
 		// Wait for VPN if this tunnel has a dependency.
 		if t.vpnGate != nil {
+			s := t.Stats()
+			s.LastError = "waiting for VPN: " + t.cfg.RequiresVPN
+			t.stats.Store(s)
+
 			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN)
 			if err := t.vpnGate(ctx); err != nil {
 				// ctx cancelled — clean shutdown.
 				t.setStatus(StatusDisconnected)
 				return nil
 			}
+
+			s = t.Stats()
+			s.LastError = ""
+			t.stats.Store(s)
+
 			log.Info("vpn ready, connecting tunnel", "tunnel", t.cfg.Name)
 		}
 

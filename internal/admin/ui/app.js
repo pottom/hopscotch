@@ -94,12 +94,17 @@ function pushChart(name, bpsIn, bpsOut) {
 document.addEventListener('alpine:init', () => {
   Alpine.store('hop', {
     tunnels: {},
+    vpns:    {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
     meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, admin_port: 0, status: '…' },
 
     tunnelList() {
       return Object.keys(this.tunnels).sort();
+    },
+
+    vpnList() {
+      return Object.keys(this.vpns).sort();
     },
 
     // Returns the effective visual state for a tunnel — mirrors TUI renderStatus logic.
@@ -109,6 +114,12 @@ document.addEventListener('alpine:init', () => {
       if (!t) return '';
       if (t.status === 'connected' && t.keepalive_failures > 0) return 'warning';
       return t.status;
+    },
+
+    vpnVisualStatus(name) {
+      const v = this.vpns[name];
+      if (!v) return '';
+      return v.state; // 'connected' | 'connecting' | 'disconnected'
     },
 
     totalStats() {
@@ -133,12 +144,13 @@ async function refreshStatus() {
     const store = Alpine.store('hop');
 
     store.meta = {
-      version:    st.version,
-      pid:        st.pid,
-      uptime:     st.uptime,
-      proxy_port: st.proxy_port,
-      admin_port: st.admin_port,
-      status:     st.status,
+      version:        st.version,
+      latest_version: st.latest_version || '',
+      pid:            st.pid,
+      uptime:         st.uptime,
+      proxy_port:     st.proxy_port,
+      admin_port:     st.admin_port,
+      status:         st.status,
     };
 
     // Rebuild tunnel map, preserving live bps/active values from SSE.
@@ -160,9 +172,21 @@ async function refreshStatus() {
       };
     }
     store.tunnels = next;
+
+    // Rebuild VPN map.
+    const nextVpns = {};
+    for (const [name, v] of Object.entries(st.vpns || {})) {
+      nextVpns[name] = {
+        state:          v.state,
+        reconnects:     v.reconnects || 0,
+        uptime_seconds: v.uptime_seconds || 0,
+      };
+    }
+    store.vpns = nextVpns;
+
     store.routes = st.routes || [];
 
-    if (TAB_INIT['routes']) {
+    if (TAB_INIT['patterns']) {
       const testerVal = document.getElementById('routes-tester-input')?.value || '';
       renderRoutesTable(testerVal ? findMatchIdx(testerVal) : undefined);
     }
@@ -232,7 +256,7 @@ window.switchTab = function(name) {
   if (!TAB_INIT[name]) {
     TAB_INIT[name] = true;
     if (name === 'logs')   initLogStream();
-    if (name === 'routes') initRoutes();
+    if (name === 'patterns') initRoutes();
     if (name === 'docs')   initDocs();
   }
 };

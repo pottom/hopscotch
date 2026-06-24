@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -18,6 +20,10 @@ import (
 
 // runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.
 func (c *Connection) runOnce(ctx context.Context) error {
+	if err := c.runPreConnect(ctx); err != nil {
+		return err
+	}
+
 	// Resolve password once — needed both for --passwd-on-stdin flag and stdin feed.
 	pw := c.password()
 	args := c.buildArgs(pw != "")
@@ -33,6 +39,11 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	} else {
 		cmd = exec.CommandContext(ctx, binary, args...)
 	}
+
+	// New process group so we can kill sudo + its children (e.g. openconnect)
+	// as a unit on shutdown. Without this, killing sudo leaves openconnect
+	// orphaned with the pipe write-end open, which blocks cmd.Wait() forever.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if pw != "" {
 		cmd.Stdin = strings.NewReader(pw + "\n")
@@ -55,13 +66,19 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	// Watch stderr lines for status events.
 	go c.watchStderr(stderr)
 
-	// Wait for subprocess in a goroutine so we can also watch ctx.
+	// done carries the cmd.Wait() error; died is closed after Wait() returns so
+	// multiple goroutines (pollPingHost, etc.) can all observe subprocess exit
+	// without competing for a single channel receive.
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	died := make(chan struct{})
+	go func() {
+		done <- cmd.Wait()
+		close(died)
+	}()
 
 	if c.cfg.PingHost != "" {
 		// Poll ping_host to detect when VPN is up and when it drops.
-		go c.pollPingHost(ctx, cmd, done)
+		go c.pollPingHost(ctx, cmd, died)
 	} else {
 		// No ping host: assume connected after a short startup delay.
 		go func() {
@@ -71,6 +88,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 					c.setState(StateConnected)
 					log.Info("vpn assumed connected (no ping_host configured)", "vpn", c.cfg.Name)
 				}
+			case <-died:
 			case <-ctx.Done():
 			}
 		}()
@@ -83,8 +101,16 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		}
 		return err
 	case <-ctx.Done():
-		cmd.Process.Kill()
-		<-done
+		// Kill entire process group (sudo + openconnect child) so the pipe
+		// write-end closes on both sides and cmd.Wait() can return promptly.
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			log.Warn("vpn subprocess did not exit after kill", "vpn", c.cfg.Name)
+		}
 		return ctx.Err()
 	}
 }
@@ -127,7 +153,7 @@ func (c *Connection) buildArgs(hasPassword bool) []string {
 // pollPingHost probes host:port via TCP every 3 seconds.
 // After 2 consecutive successes it marks the VPN connected.
 // After 3 consecutive failures (post-connect) it kills the subprocess.
-func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, done <-chan error) {
+func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
 	host := c.cfg.PingHost
 	if !strings.Contains(host, ":") {
 		host += ":443"
@@ -141,7 +167,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, done <-cha
 		select {
 		case <-ctx.Done():
 			return
-		case <-done:
+		case <-died:
 			return
 		case <-ticker.C:
 			conn, err := net.DialTimeout("tcp", host, 2*time.Second)
@@ -161,13 +187,34 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, done <-cha
 					if fail >= 3 {
 						log.Warn("vpn connectivity lost, restarting", "vpn", c.cfg.Name)
 						c.setState(StateDisconnected)
-						cmd.Process.Kill()
+						if cmd.Process != nil {
+							syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+						}
 						return
 					}
 				}
 			}
 		}
 	}
+}
+
+// runPreConnect executes each pre_connect command in order before connecting.
+// On failure it logs and returns an error so the reconnect loop retries.
+func (c *Connection) runPreConnect(ctx context.Context) error {
+	for _, cmdStr := range c.cfg.PreConnect {
+		log.Info("vpn pre_connect", "vpn", c.cfg.Name, "cmd", cmdStr)
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Error("vpn pre_connect failed", "vpn", c.cfg.Name, "cmd", cmdStr, "err", err, "output", strings.TrimSpace(string(out)))
+			return fmt.Errorf("pre_connect %q: %w", cmdStr, err)
+		}
+	}
+	return nil
 }
 
 // watchStderr logs openconnect output and promotes connection events.
@@ -189,6 +236,8 @@ func (c *Connection) watchStderr(r io.Reader) {
 		case strings.Contains(line, "error") || strings.Contains(line, "Error") ||
 			strings.Contains(line, "failed") || strings.Contains(line, "Failed"):
 			log.Error("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
+		case strings.Contains(line, "writing to routing socket: File exists"):
+			// normal during reconnect — routes already present, not an error
 		default:
 			log.Debug("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
 		}

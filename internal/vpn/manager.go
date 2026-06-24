@@ -31,6 +31,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			Key:               cfg.Key,
 			PingHost:          cfg.PingHost,
 			ExtraArgs:         cfg.ExtraArgs,
+			PreConnect:        cfg.PreConnect,
 			Sudo:              cfg.Sudo,
 			ReconnectDelay:    cfg.ReconnectDelay,
 			ReconnectMaxDelay: cfg.ReconnectMaxDelay,
@@ -71,11 +72,11 @@ func (m *Manager) WaitConnected(ctx context.Context, name string) error {
 	}
 }
 
-// AllStats returns a snapshot of every VPN connection's current state, keyed by name.
-func (m *Manager) AllStats() map[string]State {
-	out := make(map[string]State, len(m.connections))
+// AllStats returns a Stats snapshot of every VPN connection, keyed by name.
+func (m *Manager) AllStats() map[string]Stats {
+	out := make(map[string]Stats, len(m.connections))
 	for name, conn := range m.connections {
-		out[name] = conn.State()
+		out[name] = conn.Stats()
 	}
 	return out
 }

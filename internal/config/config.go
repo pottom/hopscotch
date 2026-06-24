@@ -49,9 +49,10 @@ type VPNConfig struct {
 	PasswordEnv       string   `yaml:"password_env"` // env var containing the password
 	Certificate       string   `yaml:"certificate"`  // path to client cert (cert auth)
 	Key               string   `yaml:"key"`          // path to private key (cert auth)
-	PingHost          string   `yaml:"ping_host"`    // host[:port] TCP-probed to detect connectivity
-	ExtraArgs         []string `yaml:"extra_args"`   // passed through to openconnect verbatim
-	Sudo              bool     `yaml:"sudo"`         // prepend sudo (needed on most platforms)
+	PingHost          string   `yaml:"ping_host"`      // host[:port] TCP-probed to detect connectivity
+	ExtraArgs         []string `yaml:"extra_args"`     // passed through to openconnect verbatim
+	PreConnect        []string `yaml:"pre_connect"`    // commands to run before each connection attempt
+	Sudo              bool     `yaml:"sudo"`           // prepend sudo (needed on most platforms)
 	ReconnectDelay    int      `yaml:"reconnect_delay"`
 	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
 }
@@ -195,6 +196,36 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
+// managedVPNFlags maps each openconnect flag (and its short form) that hopscotch
+// controls via an explicit config field to the field name shown in error messages.
+// If a user puts one of these in extra_args it would be applied twice.
+var managedVPNFlags = map[string]string{
+	"--authgroup":      "authgroup",
+	"--user":          "user",
+	"-u":              "user",
+	"--passwd-on-stdin": "(automatic — set when a password is available)",
+	"--certificate":   "certificate",
+	"-c":              "certificate",
+	"--sslkey":        "key",
+	"-k":              "key",
+}
+
+// validateVPNExtraArgs returns an error if extra_args contains a flag that is
+// already managed by an explicit VPN config field.
+func validateVPNExtraArgs(v VPNConfig) error {
+	for _, arg := range v.ExtraArgs {
+		// Strip optional value part for flags like "--user=foo".
+		flag := strings.SplitN(arg, "=", 2)[0]
+		if field, managed := managedVPNFlags[flag]; managed {
+			return &ConfigError{
+				Field: fmt.Sprintf("vpn[%s].extra_args", v.Name),
+				Message: fmt.Sprintf("%q is already managed via the %q config field; remove it from extra_args", arg, field),
+			}
+		}
+	}
+	return nil
+}
+
 func validate(cfg *Config) error {
 	if len(cfg.Tunnels) == 0 {
 		return &ConfigError{Field: "tunnels", Message: "at least one tunnel is required"}
@@ -250,6 +281,9 @@ func validate(cfg *Config) error {
 			return &ConfigError{Field: "vpn[].name", Message: fmt.Sprintf("duplicate vpn name %q", v.Name)}
 		}
 		vpnNames[v.Name] = true
+		if err := validateVPNExtraArgs(v); err != nil {
+			return err
+		}
 	}
 
 	// Validate requires_vpn references.
