@@ -1,10 +1,5 @@
 <div align="center">
-<svg width="64" height="64" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="6"  cy="26" r="5" fill="#38bdf8" opacity=".9"/>
-  <circle cx="30" cy="26" r="5" fill="#818cf8" opacity=".9"/>
-  <path d="M11 26 Q18 7 25 26" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-  <circle cx="18" cy="14.5" r="2.6" fill="#38bdf8" opacity=".85"/>
-</svg>
+<img src="docs/logo.svg" width="96" alt="hopscotch logo">
 
 # hopscotch
 
