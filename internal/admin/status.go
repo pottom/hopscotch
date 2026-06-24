@@ -9,6 +9,13 @@ import (
 	"hopscotch/internal/version"
 )
 
+// RouteJSON is a single routing rule in the /status response.
+type RouteJSON struct {
+	Pattern string `json:"pattern"`
+	Tunnel  string `json:"tunnel,omitempty"`
+	Via     string `json:"via,omitempty"`
+}
+
 // TunnelStatusJSON is the per-tunnel block in the /status response.
 type TunnelStatusJSON struct {
 	Status            string  `json:"status"`
@@ -29,6 +36,7 @@ type StatusResponse struct {
 	ProxyPort int                         `json:"proxy_port"`
 	AdminPort int                         `json:"admin_port"`
 	Tunnels   map[string]TunnelStatusJSON `json:"tunnels"`
+	Routes    []RouteJSON                 `json:"routes"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +68,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		overall = "degraded"
 	}
 
+	rules := s.routes.Rules()
+	routes := make([]RouteJSON, len(rules))
+	for i, r := range rules {
+		routes[i] = RouteJSON{Pattern: r.Pattern, Tunnel: r.Tunnel, Via: r.Via}
+	}
+
 	resp := StatusResponse{
 		Status:    overall,
 		Version:   version.Version,
@@ -68,6 +82,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ProxyPort: s.proxyPort,
 		AdminPort: s.port,
 		Tunnels:   tunnels,
+		Routes:    routes,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

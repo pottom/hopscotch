@@ -25,6 +25,8 @@ tunnels:
 
 proxy:
   port: 8080
+  no_proxy: "localhost,127.0.0.1,::1"   # set in NO_PROXY / no_proxy on `hopscotch enable`
+  shell_icon: "⇢"                               # icon exported as HOPSCOTCH_ACTIVE; add to PS1
   rules:
     - pattern: "*.prod.internal"
       tunnel: prod-jump

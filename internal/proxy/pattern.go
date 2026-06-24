@@ -9,6 +9,9 @@ import "strings"
 //   - "*.example.com" – matches any subdomain
 //   - "10.0.1.*"      – matches any host with that IP prefix
 //   - "exact.host"    – exact match
+// MatchPattern is the exported form used by the TUI.
+func MatchPattern(pattern, host string) bool { return matchPattern(pattern, host) }
+
 func matchPattern(pattern, host string) bool {
 	if pattern == "*" {
 		return true

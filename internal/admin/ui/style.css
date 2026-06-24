@@ -15,6 +15,10 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html {
+  font-size: 95%;
+}
+
 html, body {
   height: 100%;
   font-family: 'Space Grotesk', system-ui, sans-serif;
@@ -435,6 +439,89 @@ main, main.main {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* ── ROUTES PANEL ────────────────────────── */
+.routes-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 1rem 1.75rem 1.5rem;
+  gap: 1rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.routes-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.routes-tester {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.routes-tester-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.35rem 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--text);
+  outline: none;
+  transition: border-color .15s;
+}
+.routes-tester-input::placeholder { color: var(--muted); }
+.routes-tester-input:focus { border-color: var(--accent); }
+
+.routes-tester-result {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  min-height: 1.2em;
+}
+.routes-tester-match   { color: var(--connected); }
+.routes-tester-nomatch { color: var(--muted); }
+
+.routes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+}
+
+.routes-table th {
+  text-align: left;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.routes-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,.03);
+  vertical-align: middle;
+}
+
+.routes-table tr.routes-match td { background: rgba(56,189,248,.07); }
+.routes-table tr.routes-match .routes-pattern { color: var(--accent); }
+
+.routes-num        { color: var(--muted); width: 2.5rem; }
+.routes-pattern    { color: #e2e8f0; }
+.routes-via-tunnel { color: var(--accent); }
+.routes-via-direct { color: var(--muted); }
+.routes-empty      { color: var(--muted); padding: 1.5rem 0.75rem; }
 
 /* ── FOOTER ──────────────────────────────── */
 .footer {

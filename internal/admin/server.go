@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
+	"hopscotch/internal/config"
 	"hopscotch/internal/logger"
 	"hopscotch/internal/tunnel"
 )
@@ -25,6 +26,11 @@ type DirectStatter interface {
 	DirectSnapshot() tunnel.TrafficSnapshot
 }
 
+// RouteStatter exposes the proxy routing rules to the admin server.
+type RouteStatter interface {
+	Rules() []config.Rule
+}
+
 // Server is the HTTP admin server.
 type Server struct {
 	bind      string
@@ -34,13 +40,14 @@ type Server struct {
 	readme    []byte
 	tunnels   TunnelStatter
 	direct    DirectStatter
+	routes    RouteStatter
 	logs      *logger.Broadcaster
 	startedAt time.Time
 }
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, direct DirectStatter, readme []byte) *Server {
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, direct DirectStatter, routes RouteStatter, readme []byte) *Server {
 	return &Server{
 		bind:      bind,
 		port:      port,
@@ -49,6 +56,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, direct D
 		readme:    readme,
 		tunnels:   tunnels,
 		direct:    direct,
+		routes:    routes,
 		logs:      logger.GetBroadcaster(),
 		startedAt: time.Now(),
 	}

@@ -10,12 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	colorful "github.com/lucasb-eyer/go-colorful"
 
 	"hopscotch/internal/admin"
+	"hopscotch/internal/proxy"
 )
 
 var (
@@ -58,14 +60,18 @@ var (
 
 	styleTabActive   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleTabInactive = lipgloss.NewStyle().Foreground(colorMuted)
+
+	styleRouteNum     = lipgloss.NewStyle().Foreground(colorMuted).Width(4)
+	styleRoutePattern = lipgloss.NewStyle().Foreground(colorBright).Width(32)
 )
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 const (
 	tabStatus = 0
-	tabLogs   = 1
-	numTabs   = 2
+	tabRoutes = 1
+	tabLogs   = 2
+	numTabs   = 3
 )
 
 const headerHeight = 6 // blank · title+tabs · stats · blank · label · separator
@@ -286,10 +292,14 @@ type Model struct {
 	logCh    chan string
 	done     chan struct{}
 
-	activeTab  int
-	logLines   []string
-	logVP      viewport.Model
-	logVPReady bool
+	activeTab    int
+	logLines     []string
+	logVP        viewport.Model
+	logVPReady   bool
+	routeVP      viewport.Model
+	routeVPReady bool
+	routeInput   textinput.Model
+	routeFocused bool
 
 	tick    int
 	width   int
@@ -306,6 +316,12 @@ func New(adminURL string) Model {
 	sseCh := make(chan ssePayload, 8)
 	logCh := make(chan string, 64)
 	done := make(chan struct{})
+
+	ti := textinput.New()
+	ti.Placeholder = "hostname or URL…"
+	ti.CharLimit = 256
+	ti.Width = 60
+
 	return Model{
 		adminURL: adminURL,
 		sseURL:   base + "/traffic/stream",
@@ -317,6 +333,7 @@ func New(adminURL string) Model {
 		mirrorGraph: true,
 		width:       80,
 		height:      24,
+		routeInput:  ti,
 	}
 }
 
@@ -332,6 +349,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		// When the route input is focused, only esc/enter escape; everything else goes to the input.
+		if m.routeFocused {
+			switch msg.String() {
+			case "esc", "enter":
+				m.routeFocused = false
+				m.routeInput.Blur()
+			default:
+				m.routeInput, cmd = m.routeInput.Update(msg)
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesContent())
+				}
+				return m, cmd
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "Q", "ctrl+c", "esc":
 			close(m.done)
@@ -350,6 +383,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "l", "L":
 			m.activeTab = tabLogs
 			m = m.resizeViewports()
+			return m, nil
+
+		case "r", "R":
+			m.activeTab = tabRoutes
+			m = m.resizeViewports()
+			return m, nil
+
+		case "/":
+			if m.activeTab == tabRoutes {
+				m.routeFocused = true
+				m.routeInput.Focus()
+				return m, textinput.Blink
+			}
 			return m, nil
 
 		case "c", "C":
@@ -375,6 +421,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.vp, cmd = m.vp.Update(msg)
 			} else if m.activeTab == tabLogs && m.logVPReady {
 				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
 			}
 			return m, cmd
 		}
@@ -398,6 +446,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.vpReady {
 			m.vp.SetContent(m.buildStatusContent())
+		}
+		if m.routeVPReady {
+			m.routeVP.SetContent(m.buildRoutesContent())
 		}
 
 	case sseMsg:
@@ -451,30 +502,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // resizeViewports recalculates both viewports for the current terminal size
 // and active tab. Called on WindowSizeMsg and when switching tabs.
 func (m Model) resizeViewports() Model {
-	statusVpH := m.height - headerHeight - footerHeight
-	logsVpH   := m.height - headerHeight - footerHeight
-	if statusVpH < 1 {
-		statusVpH = 1
-	}
-	if logsVpH < 1 {
-		logsVpH = 1
+	vpH := m.height - headerHeight - footerHeight
+	if vpH < 1 {
+		vpH = 1
 	}
 
 	if !m.vpReady {
-		m.vp = viewport.New(m.width, statusVpH)
+		m.vp = viewport.New(m.width, vpH)
 		m.vpReady = true
 	} else {
 		m.vp.Width = m.width
-		m.vp.Height = statusVpH
+		m.vp.Height = vpH
 	}
 	m.vp.SetContent(m.buildStatusContent())
 
 	if !m.logVPReady {
-		m.logVP = viewport.New(m.width, logsVpH)
+		m.logVP = viewport.New(m.width, vpH)
 		m.logVPReady = true
 	} else {
 		m.logVP.Width = m.width
-		m.logVP.Height = logsVpH
+		m.logVP.Height = vpH
 	}
 	if len(m.logLines) > 0 {
 		atBottom := m.logVP.AtBottom()
@@ -483,6 +530,21 @@ func (m Model) resizeViewports() Model {
 			m.logVP.GotoBottom()
 		}
 	}
+
+	// Routes viewport is 3 rows shorter to make room for input + result + separator.
+	routeVPH := vpH - 3
+	if routeVPH < 1 {
+		routeVPH = 1
+	}
+	m.routeInput.Width = m.width - 6
+	if !m.routeVPReady {
+		m.routeVP = viewport.New(m.width, routeVPH)
+		m.routeVPReady = true
+	} else {
+		m.routeVP.Width = m.width
+		m.routeVP.Height = routeVPH
+	}
+	m.routeVP.SetContent(m.buildRoutesContent())
 
 	return m
 }
@@ -496,8 +558,11 @@ func (m Model) View() string {
 	}
 
 	vp := m.vp.View()
-	if m.activeTab == tabLogs {
+	switch m.activeTab {
+	case tabLogs:
 		vp = m.logVP.View()
+	case tabRoutes:
+		vp = m.routeVP.View()
 	}
 	return m.renderHeader() + vp + m.renderFooter()
 }
@@ -534,6 +599,7 @@ func (m Model) renderTabBar() string {
 		idx  int
 	}{
 		{"Status", tabStatus},
+		{"Routes", tabRoutes},
 		{"Logs", tabLogs},
 	}
 	var parts []string
@@ -555,7 +621,8 @@ func (m Model) renderHeader() string {
 	b.WriteString(m.renderStatsLine())
 	b.WriteString("\n")
 
-	if m.activeTab == tabStatus {
+	switch m.activeTab {
+	case tabStatus:
 		hdr := func(s lipgloss.Style, label string) string {
 			return s.Foreground(colorMuted).Render(label)
 		}
@@ -576,7 +643,42 @@ func (m Model) renderHeader() string {
 			hdr(styleColConn, "CONN"),
 			reasonHdr,
 		)
-	} else {
+	case tabRoutes:
+		// Input line — styled by focus state.
+		var inputPrefix string
+		if m.routeFocused {
+			inputPrefix = styleTabActive.Render("/ ")
+		} else {
+			inputPrefix = styleMuted.Render("/ ")
+		}
+		fmt.Fprintf(&b, "  %s%s\n", inputPrefix, m.routeInput.View())
+
+		// Result line.
+		matchIdx := m.findRouteMatch()
+		if m.routeInput.Value() == "" {
+			fmt.Fprintf(&b, "  %s\n", styleMuted.Render("type a hostname or URL to test routing"))
+		} else if matchIdx >= 0 {
+			r := m.status.Routes[matchIdx]
+			via := r.Tunnel
+			if via == "" {
+				via = r.Via
+			}
+			fmt.Fprintf(&b, "  %s\n",
+				styleConnected.Render(fmt.Sprintf("✓ rule %d → %s", matchIdx+1, via)),
+			)
+		} else {
+			fmt.Fprintf(&b, "  %s\n", styleMuted.Render("no rule matched → direct (fallback)"))
+		}
+
+		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
+
+		fmt.Fprintf(&b, "  %s%s%s%s\n",
+			styleRouteNum.Render("#"),
+			styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
+			lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
+			styleMuted.Render("STATUS"),
+		)
+	default:
 		fmt.Fprintf(&b, "  %s\n", styleMuted.Render("LOGS"))
 	}
 	fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
@@ -586,7 +688,14 @@ func (m Model) renderHeader() string {
 
 // renderFooter returns a single-line bar: hints on the left, ports on the right.
 func (m Model) renderFooter() string {
-	hints := "q quit  tab/s/l switch  ↑↓/jk scroll"
+	hints := "q quit  tab/s/l/r switch  ↑↓/jk scroll"
+	if m.activeTab == tabRoutes {
+		if m.routeFocused {
+			hints += "  esc unfocus"
+		} else {
+			hints += "  / test URL"
+		}
+	}
 	if m.activeTab == tabStatus {
 		if m.compact {
 			hints += "  c expand"
@@ -601,8 +710,11 @@ func (m Model) renderFooter() string {
 	}
 
 	activeVP := m.vp
-	if m.activeTab == tabLogs {
+	switch m.activeTab {
+	case tabLogs:
 		activeVP = m.logVP
+	case tabRoutes:
+		activeVP = m.routeVP
 	}
 	if !activeVP.AtBottom() {
 		hints += "  ↓"
@@ -618,6 +730,76 @@ func (m Model) renderFooter() string {
 	}
 
 	return "\n  " + left + strings.Repeat(" ", gap) + right + "\n"
+}
+
+// findRouteMatch returns the index of the first rule matching the input value, or -1.
+func (m Model) findRouteMatch() int {
+	host := m.routeInput.Value()
+	if host == "" {
+		return -1
+	}
+	// Strip scheme if present.
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	// Strip path/port.
+	if i := strings.IndexAny(host, "/:?"); i >= 0 {
+		host = host[:i]
+	}
+	for i, r := range m.status.Routes {
+		if proxy.MatchPattern(r.Pattern, host) {
+			return i
+		}
+	}
+	return -1
+}
+
+// buildRoutesContent renders the routing rules table for the routes viewport.
+func (m Model) buildRoutesContent() string {
+	if len(m.status.Routes) == 0 {
+		return "\n" + styleMuted.Render("  no routing rules configured") + "\n"
+	}
+
+	matchIdx := m.findRouteMatch()
+
+	var b strings.Builder
+	for i, r := range m.status.Routes {
+		via := r.Tunnel
+		if via == "" {
+			via = r.Via
+		}
+
+		matched := matchIdx == i
+		prefix := "  "
+		if matched {
+			prefix = styleTabActive.Render("> ")
+		}
+
+		patStyle := styleRoutePattern
+		if matched {
+			patStyle = styleRoutePattern.Foreground(colorAccent)
+		}
+
+		var viaRendered string
+		var statusStr string
+		if via == "direct" || via == "" {
+			viaRendered = lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render(via)
+		} else {
+			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
+			if t, ok := m.status.Tunnels[via]; ok {
+				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures)
+			}
+		}
+
+		fmt.Fprintf(&b, "%s%s%s%s%s\n",
+			prefix,
+			styleRouteNum.Render(fmt.Sprintf("%d", i+1)),
+			patStyle.Render(r.Pattern),
+			viaRendered,
+			statusStr,
+		)
+	}
+	return b.String()
 }
 
 // buildStatusContent renders the scrollable tunnel list for the status viewport.
