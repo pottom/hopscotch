@@ -1,0 +1,263 @@
+<svg width="960" height="560" viewBox="0 0 960 560" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ts-lg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+    <clipPath id="ts-gc1"><rect x="38" y="178" width="884" height="62"/></clipPath>
+    <clipPath id="ts-gc2"><rect x="38" y="302" width="884" height="62"/></clipPath>
+    <clipPath id="ts-gc3"><rect x="38" y="408" width="884" height="50"/></clipPath>
+  </defs>
+
+  <!-- ══ WINDOW CHROME ══════════════════════════════════════════════════ -->
+  <rect width="960" height="36" rx="12" fill="#161f2e"/>
+  <rect y="24" width="960" height="12" fill="#161f2e"/>
+  <!-- Traffic lights -->
+  <circle cx="22" cy="18" r="6" fill="#ff5f56"/>
+  <circle cx="44" cy="18" r="6" fill="#ffbd2e"/>
+  <circle cx="66" cy="18" r="6" fill="#27c93f"/>
+  <!-- Window title -->
+  <text x="480" y="23" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="12" fill="#475569" text-anchor="middle">hopscotch — status</text>
+
+  <!-- ══ TUI HEADER ═════════════════════════════════════════════════════ -->
+  <rect y="36" width="960" height="54" fill="#0a1120"/>
+  <!-- Logo mark -->
+  <circle cx="44" cy="63" r="4.2" fill="#38bdf8" opacity=".9"/>
+  <circle cx="64" cy="63" r="4.2" fill="#818cf8" opacity=".9"/>
+  <path d="M48 63 Q56 51 60 63" stroke="url(#ts-lg)" stroke-width="2.1" stroke-linecap="round" fill="none"/>
+  <circle cx="54" cy="54" r="2.4" fill="#38bdf8" opacity=".85"/>
+  <!-- App name + version -->
+  <text x="78" y="69" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="17" font-weight="600" fill="#e2e8f0" letter-spacing="-0.5">hopscotch</text>
+  <text x="186" y="69" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">v0.4.6</text>
+  <!-- Health badge -->
+  <rect x="228" y="53" width="68" height="20" rx="10"
+        fill="rgba(52,211,153,.1)" stroke="rgba(52,211,153,.25)" stroke-width="1"/>
+  <text x="262" y="67" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="9.5" fill="#34d399" text-anchor="middle" letter-spacing=".6">● healthy</text>
+  <!-- PID / uptime -->
+  <text x="308" y="69" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">PID 48219 · up 3h 22m</text>
+  <!-- Tabs right-aligned -->
+  <text x="676" y="69" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="600" fill="#38bdf8">Status</text>
+  <line x1="676" y1="88" x2="718" y2="88" stroke="#38bdf8" stroke-width="2"/>
+  <text x="738" y="69" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="500" fill="#475569">Routes</text>
+  <text x="810" y="69" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="500" fill="#475569">Logs</text>
+  <text x="858" y="69" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="500" fill="#475569">Docs</text>
+
+  <!-- Separator after header -->
+  <line x1="0" y1="90" x2="960" y2="90" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ STATS BAR ════════════════════════════════════════════════════ -->
+  <text x="28" y="108" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11.5" fill="#38bdf8">↓ 3.4 KB/s</text>
+  <text x="116" y="108" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11.5" fill="#334155">·</text>
+  <text x="128" y="108" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11.5" fill="#818cf8">↑ 1.6 KB/s</text>
+  <text x="214" y="108" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11.5" fill="#334155">·</text>
+  <text x="226" y="108" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11.5" fill="#475569">7 conn total</text>
+
+  <!-- Separator after stats -->
+  <line x1="0" y1="116" x2="960" y2="116" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ COLUMN HEADERS ════════════════════════════════════════════════ -->
+  <text x="48"  y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">TUNNEL</text>
+  <text x="218" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">HOST</text>
+  <text x="368" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">PORT</text>
+  <text x="424" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">STATUS</text>
+  <text x="548" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">UPTIME</text>
+  <text x="634" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">RC</text>
+  <text x="672" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">↓</text>
+  <text x="772" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">↑</text>
+  <text x="872" y="133" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#334155" letter-spacing="1.5">CONN</text>
+
+  <!-- Separator after headers -->
+  <line x1="0" y1="142" x2="960" y2="142" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ CARD 1 — prod-jump (connected, green) ══════════════════════════ -->
+  <rect x="20" y="148" width="920" height="116" rx="8" fill="#0d1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="20" y="148" width="3" height="116" rx="2" fill="#34d399"/>
+
+  <!-- Name row y=170 -->
+  <text x="34" y="170" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="600" fill="#e2e8f0">prod-jump</text>
+  <text x="218" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">bastion.corp:22</text>
+  <text x="368" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">:1080</text>
+  <!-- Animated green dot -->
+  <circle cx="418" cy="166" r="3.5" fill="#34d399"/>
+  <circle cx="418" cy="166" r="3.5" fill="#34d399" opacity=".3">
+    <animate attributeName="r"       values="3.5;6.5;3.5" dur="2.4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0;0.3"   dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+  <text x="428" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#34d399" font-weight="500">connected</text>
+  <text x="548" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">3h 22m</text>
+  <text x="634" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">0</text>
+  <text x="651" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#38bdf8">↓ 2.1 KB/s</text>
+  <text x="751" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#818cf8">↑ 980 B/s</text>
+  <text x="872" y="170" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">3</text>
+
+  <!-- Graph card 1 baseline y=209 -->
+  <g clip-path="url(#ts-gc1)">
+    <line x1="38" y1="209" x2="922" y2="209" stroke="#1a2535" stroke-width=".7"/>
+    <!-- Download fill + stroke -->
+    <path d="M38,209 C80,205 120,200 165,195 S235,190 278,194 S330,199 373,193
+             S425,187 468,191 S520,196 563,190 S615,184 658,188
+             S710,194 753,187 S808,181 851,186 S904,191 922,188 L922,209 Z"
+          fill="rgba(56,189,248,.15)"/>
+    <path d="M38,209 C80,205 120,200 165,195 S235,190 278,194 S330,199 373,193
+             S425,187 468,191 S520,196 563,190 S615,184 658,188
+             S710,194 753,187 S808,181 851,186 S904,191 922,188"
+          fill="none" stroke="#38bdf8" stroke-width="1.5"/>
+    <!-- Upload fill + stroke (below baseline) -->
+    <path d="M38,209 L922,209
+             C904,212 862,217 820,221 S758,226 716,222 S664,217 622,222
+             S570,227 528,223 S476,218 434,222 S382,227 340,223
+             S288,218 246,223 S190,228 150,224 S98,219 38,223 Z"
+          fill="rgba(129,140,248,.12)"/>
+    <path d="M38,223 C98,219 150,224 190,228 S246,223 288,218 S340,223 382,227
+             S434,222 476,218 S528,223 570,227 S622,222 664,217
+             S716,222 758,226 S820,221 862,217 S904,212 922,209"
+          fill="none" stroke="#818cf8" stroke-width="1.5"/>
+  </g>
+
+  <!-- ══ CARD 2 — staging-jump (connected, green) ═══════════════════════ -->
+  <rect x="20" y="272" width="920" height="116" rx="8" fill="#0d1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="20" y="272" width="3" height="116" rx="2" fill="#34d399"/>
+
+  <!-- Name row y=294 -->
+  <text x="34" y="294" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="600" fill="#e2e8f0">staging-jump</text>
+  <text x="218" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">dev.corp:22</text>
+  <text x="368" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">:1081</text>
+  <!-- Animated green dot -->
+  <circle cx="418" cy="290" r="3.5" fill="#34d399"/>
+  <circle cx="418" cy="290" r="3.5" fill="#34d399" opacity=".3">
+    <animate attributeName="r"       values="3.5;6.5;3.5" dur="2.8s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0;0.3"   dur="2.8s" repeatCount="indefinite"/>
+  </circle>
+  <text x="428" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#34d399" font-weight="500">connected</text>
+  <text x="548" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">1h 08m</text>
+  <text x="634" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">2</text>
+  <text x="651" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#38bdf8">↓ 1.3 KB/s</text>
+  <text x="751" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#818cf8">↑ 620 B/s</text>
+  <text x="872" y="294" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">4</text>
+
+  <!-- Graph card 2 baseline y=333 — different wave pattern -->
+  <g clip-path="url(#ts-gc2)">
+    <line x1="38" y1="333" x2="922" y2="333" stroke="#1a2535" stroke-width=".7"/>
+    <path d="M38,333 C70,330 108,326 148,322 S208,325 252,319 S298,314 338,318
+             S390,323 432,317 S484,311 526,316 S578,321 620,315
+             S672,309 714,314 S768,320 810,314 S864,308 922,312 L922,333 Z"
+          fill="rgba(56,189,248,.15)"/>
+    <path d="M38,333 C70,330 108,326 148,322 S208,325 252,319 S298,314 338,318
+             S390,323 432,317 S484,311 526,316 S578,321 620,315
+             S672,309 714,314 S768,320 810,314 S864,308 922,312"
+          fill="none" stroke="#38bdf8" stroke-width="1.5"/>
+    <path d="M38,333 L922,333
+             C864,336 810,341 768,345 S714,349 672,345 S620,340 578,345
+             S526,350 484,346 S432,341 390,345 S338,350 298,346
+             S252,341 208,346 S148,351 108,347 S70,342 38,346 Z"
+          fill="rgba(129,140,248,.12)"/>
+    <path d="M38,346 C70,342 108,347 148,351 S208,346 252,341 S298,346 338,350
+             S390,345 432,341 S484,346 526,350 S578,345 620,340
+             S672,345 714,349 S768,345 810,341 S864,336 922,333"
+          fill="none" stroke="#818cf8" stroke-width="1.5"/>
+  </g>
+
+  <!-- ══ CARD 3 — db-tunnel (reconnecting, amber) ═══════════════════════ -->
+  <rect x="20" y="396" width="920" height="88" rx="8" fill="#0d1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="20" y="396" width="3" height="88" rx="2" fill="#fbbf24"/>
+
+  <!-- Name row y=418 -->
+  <text x="34" y="418" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="600" fill="#e2e8f0">db-tunnel</text>
+  <text x="218" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">db.corp:22</text>
+  <text x="368" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">:1082</text>
+  <!-- Blinking amber dot -->
+  <circle cx="418" cy="414" r="3.5" fill="#fbbf24">
+    <animate attributeName="opacity" values="1;0.25;1" dur="1s" repeatCount="indefinite"/>
+  </circle>
+  <text x="428" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#fbbf24" font-weight="500">connecting</text>
+  <text x="548" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#fbbf24">next in 23s</text>
+  <text x="634" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569">3</text>
+  <text x="651" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#38bdf8" opacity=".3">↓ 0 B/s</text>
+  <text x="751" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#818cf8" opacity=".3">↑ 0 B/s</text>
+  <text x="872" y="418" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569" opacity=".4">0</text>
+
+  <!-- Error message -->
+  <text x="34" y="438" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10.5" fill="#f87171">TCP dial db.corp:22: i/o timeout</text>
+
+  <!-- Near-flat graph for disconnected tunnel -->
+  <g clip-path="url(#ts-gc3)">
+    <line x1="38" y1="443" x2="922" y2="443" stroke="#1a2535" stroke-width=".7"/>
+    <path d="M38,443 C200,442 400,444 600,443 S800,443 922,443"
+          fill="none" stroke="#38bdf8" stroke-width="1" opacity=".2"/>
+    <path d="M38,447 C200,446 400,448 600,447 S800,447 922,447"
+          fill="none" stroke="#818cf8" stroke-width="1" opacity=".15"/>
+  </g>
+
+  <!-- ══ DIRECT CARD ═════════════════════════════════════════════════════ -->
+  <rect x="20" y="492" width="920" height="42" rx="8" fill="#0d1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="20" y="492" width="3" height="42" rx="2" fill="#334155"/>
+
+  <text x="34" y="518" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="13" font-weight="500" fill="#e2e8f0" opacity=".6">direct</text>
+  <text x="634" y="518" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569" opacity=".4">0</text>
+  <text x="651" y="518" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#38bdf8" opacity=".25">↓ 0 B/s</text>
+  <text x="751" y="518" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#818cf8" opacity=".25">↑ 0 B/s</text>
+  <text x="872" y="518" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="11" fill="#475569" opacity=".3">0</text>
+
+  <!-- ══ FOOTER ══════════════════════════════════════════════════════════ -->
+  <line x1="0" y1="544" x2="960" y2="544" stroke="#1a2535" stroke-width="1"/>
+  <text x="20" y="556" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10.5" fill="#334155">q quit · tab switch · ↑↓ scroll · c compact · g mirror · / routes</text>
+  <text x="940" y="556" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10.5" fill="#334155" text-anchor="end">SOCKS5 :8080   ADMIN :9090</text>
+</svg>
