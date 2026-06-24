@@ -33,7 +33,11 @@ Want to open an internal web UI to configure a device? RDP in, wait for the remo
 
 Want to edit code on a remote server? `vim`. No IntelliSense. No extensions. No your-own-terminal.
 
-**hopscotch fixes this.** You run it on your own machine. Your own tools — browser, VS Code, rsync, Ansible, DBeaver, Postman — connect directly to internal hosts as if you were already there. The jump host becomes invisible.
+And if you have two bastions — one for prod, one for staging — you're manually switching `HTTP_PROXY` between `localhost:1080` and `localhost:1081` every time you switch context. And hoping you don't forget.
+
+**hopscotch fixes all of this.** You run it on your own machine. Your own tools — browser, VS Code, rsync, Ansible, DBeaver, Postman — connect directly to internal hosts as if you were already there. The jump host becomes invisible.
+
+The key insight: **one proxy port, pattern-based routing.** You define rules like `*.prod.internal → prod-jump` and `*.staging.internal → staging-jump`, and hopscotch figures out which tunnel to use for every request — automatically, per connection. You set `HTTP_PROXY=localhost:8080` once and never touch it again.
 
 **Copy a file to production:**
 ```bash
@@ -57,8 +61,8 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 
 | | |
 |---|---|
+| **One proxy, smart routing** | One SOCKS5 port for everything. Pattern rules (`*.prod.internal → prod-jump`, `*.staging.internal → staging-jump`) decide per-request which tunnel to use. Set `HTTP_PROXY` once, never touch it again. |
 | **Dead connection detection** | Keepalive probes every few seconds — not TCP's minutes-long timeout. Reconnect starts in under 10 seconds. |
-| **Smart routing** | One SOCKS5 port, wildcard pattern rules (`*.prod.internal → prod-jump`). First match wins. |
 | **Shell integration** | `hopscotch enable` / `disable` like Python venv — sets and restores `HTTP_PROXY` without touching other shells. |
 | **SSH ProxyCommand** | `ssh`, `scp`, `rsync`, VSCode Remote, Ansible — all route through tunnels transparently, zero extra flags. |
 | **TUI dashboard** | Live tunnel cards with dual-channel traffic graphs, reconnect countdowns, URL tester, log streaming. |
