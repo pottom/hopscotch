@@ -122,12 +122,18 @@ docker pull ghcr.io/pottom/hopscotch:latest
    hopscotch trust all
    ```
 
-3. Start:
+3. Load shell integration (once, in `~/.zshrc` or `~/.bashrc`):
+   ```bash
+   eval "$(hopscotch shell-init)"
+   ```
+   > **Required** for `hopscotch enable` / `disable` to work. Without this, the commands only print the export statements — they don't apply them to your shell.
+
+4. Start:
    ```bash
    hopscotch start
    ```
 
-4. Route traffic:
+5. Route traffic:
    ```bash
    # per-request
    curl -x socks5h://localhost:8080 https://internal.service.corp

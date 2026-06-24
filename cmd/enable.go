@@ -36,7 +36,22 @@ func init() {
 	rootCmd.AddCommand(enableCmd)
 }
 
+func warnIfNoShellInit() {
+	if os.Getenv("HOPSCOTCH_SHELL_INIT") == "" {
+		warn := lipgloss.NewStyle().Foreground(lipgloss.Color("#fbbf24")).Bold(true)
+		muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#475569"))
+		fmt.Fprintf(os.Stderr, "%s shell-init not loaded — proxy vars won't apply to this shell\n",
+			warn.Render("⚠"),
+		)
+		fmt.Fprintf(os.Stderr, "  %s\n",
+			muted.Render(`add 'eval "$(hopscotch shell-init)"' to your ~/.zshrc or ~/.bashrc`),
+		)
+	}
+}
+
 func runEnable(_ *cobra.Command, _ []string) error {
+	warnIfNoShellInit()
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
