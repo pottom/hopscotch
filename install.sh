@@ -4,6 +4,8 @@ set -euo pipefail
 REPO="pottom/hopscotch"
 BINARY="hopscotch"
 INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="${HOME}/.config/hopscotch"
+CONFIG_FILE="${CONFIG_DIR}/config.yaml"
 
 # ── Platform detection ────────────────────────────────────────────────────────
 
@@ -40,7 +42,7 @@ echo "Latest version: $TAG"
 
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
 
-# ── Download and install ──────────────────────────────────────────────────────
+# ── Download and install binary ───────────────────────────────────────────────
 
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
@@ -57,3 +59,18 @@ else
 fi
 
 echo "Installed: $(${INSTALL_DIR}/${BINARY} version)"
+
+# ── Example config ────────────────────────────────────────────────────────────
+
+mkdir -p "$CONFIG_DIR"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    echo "Config already exists, skipping: ${CONFIG_FILE}"
+else
+    echo "Creating example config: ${CONFIG_FILE}"
+    curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/hopscotch.example.yaml" \
+        -o "$CONFIG_FILE"
+    echo ""
+    echo "Edit ${CONFIG_FILE} to configure your tunnels, then run:"
+    echo "  hopscotch start"
+fi
