@@ -34,8 +34,9 @@ type TunnelConfig struct {
 	KeepaliveMaxFails  int    `yaml:"keepalive_max_fails"` // consecutive failures before reconnect
 	ReconnectDelay    int  `yaml:"reconnect_delay"`     // initial backoff seconds
 	ReconnectMaxDelay int  `yaml:"reconnect_max_delay"` // backoff cap seconds
-	ForcePTY          bool `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
-	RequiresVPN       string `yaml:"requires_vpn"`      // wait for this VPN before connecting
+	ForcePTY          bool     `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
+	RequiresVPN       string   `yaml:"requires_vpn"`        // wait for this VPN before connecting
+	PreConnect        []string `yaml:"pre_connect"`         // commands to run before each dial attempt
 }
 
 // VPNConfig describes a VPN connection managed as a subprocess.

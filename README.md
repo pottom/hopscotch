@@ -196,6 +196,7 @@ admin:
 | `identity_file` | — | Path to private key; omit to use SSH agent |
 | `local_port` | — | Local SOCKS5 port for this tunnel |
 | `requires_vpn` | — | Name of a `vpn` entry; tunnel waits for VPN before connecting |
+| `pre_connect` | — | Shell commands to run before each dial attempt (e.g. port check, custom script) |
 | `dial_timeout` | `30` | TCP connect + SSH handshake timeout (seconds) |
 | `keepalive_interval` | `5` | Keepalive probe interval (seconds) |
 | `keepalive_max_fails` | `2` | Consecutive failures before reconnect |

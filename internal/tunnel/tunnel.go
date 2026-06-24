@@ -6,7 +6,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -160,6 +162,17 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			t.stats.Store(s)
 
 			log.Info("vpn ready, connecting tunnel", "tunnel", t.cfg.Name)
+		}
+
+		// Run pre_connect commands before each dial attempt.
+		if err := t.runPreConnect(ctx); err != nil {
+			if ctx.Err() != nil {
+				t.setStatus(StatusDisconnected)
+				return nil
+			}
+			s := t.Stats()
+			s.LastError = "pre_connect: " + err.Error()
+			t.stats.Store(s)
 		}
 
 		// Clear reconnect timer so the UI shows "connecting" during the dial,
@@ -467,6 +480,32 @@ func loadSigner(path string) (ssh.Signer, error) {
 	return ssh.ParsePrivateKey(data)
 }
 
+
+// runPreConnect executes each pre_connect command before a dial attempt.
+func (t *Tunnel) runPreConnect(ctx context.Context) error {
+	for _, cmdStr := range t.cfg.PreConnect {
+		log.Info("tunnel pre_connect", "tunnel", t.cfg.Name, "cmd", cmdStr)
+		s := t.Stats()
+		s.LastError = "pre_connect: " + cmdStr
+		t.stats.Store(s)
+
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Error("tunnel pre_connect failed", "tunnel", t.cfg.Name, "cmd", cmdStr, "err", err, "output", strings.TrimSpace(string(out)))
+			return fmt.Errorf("%q: %w", cmdStr, err)
+		}
+	}
+	// Clear pre_connect reason after all commands succeed.
+	s := t.Stats()
+	s.LastError = ""
+	t.stats.Store(s)
+	return nil
+}
 
 // backoff implements capped exponential backoff.
 type backoff struct {
