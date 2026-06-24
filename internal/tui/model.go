@@ -18,6 +18,7 @@ import (
 
 	"hopscotch/internal/admin"
 	"hopscotch/internal/proxy"
+	"hopscotch/internal/version"
 )
 
 var (
@@ -570,8 +571,12 @@ func (m Model) View() string {
 // ── Header renderers ──────────────────────────────────────────────────────────
 
 func (m Model) renderTitleLine() string {
+	versionStr := m.status.Version
+	if v := version.LatestVersion; v != "" {
+		versionStr += "  " + styleConnecting.Render("↑ "+v+" available — hopscotch update")
+	}
 	left := fmt.Sprintf("  %s  %s  %s  %s",
-		styleHeader.Render("hopscotch "+m.status.Version),
+		styleHeader.Render("hopscotch "+versionStr),
 		renderBadge(m.status.Status),
 		styleMuted.Render(fmt.Sprintf("PID %d", m.status.PID)),
 		styleMuted.Render("up "+m.status.Uptime),
