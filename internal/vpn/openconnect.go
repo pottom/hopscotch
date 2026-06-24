@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -43,7 +42,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	// New process group so we can kill sudo + its children (e.g. openconnect)
 	// as a unit on shutdown. Without this, killing sudo leaves openconnect
 	// orphaned with the pipe write-end open, which blocks cmd.Wait() forever.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcGroup(cmd)
 
 	if pw != "" {
 		cmd.Stdin = strings.NewReader(pw + "\n")
@@ -103,9 +102,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	case <-ctx.Done():
 		// Kill entire process group (sudo + openconnect child) so the pipe
 		// write-end closes on both sides and cmd.Wait() can return promptly.
-		if cmd.Process != nil {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
+		killProcGroup(cmd)
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
@@ -187,9 +184,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 					if fail >= 3 {
 						log.Warn("vpn connectivity lost, restarting", "vpn", c.cfg.Name)
 						c.setState(StateDisconnected)
-						if cmd.Process != nil {
-							syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-						}
+						killProcGroup(cmd)
 						return
 					}
 				}
