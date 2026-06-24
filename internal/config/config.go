@@ -94,17 +94,17 @@ func Load(explicit string) (*Config, error) {
 }
 
 func resolvePath(explicit string) (string, error) {
-	candidates := []string{
-		explicit,
-		os.Getenv("HOPSCOTCH_CONFIG"),
-		"/etc/hopscotch/config.yaml",
+	candidates := []string{explicit, os.Getenv("HOPSCOTCH_CONFIG")}
+
+	// binary directory
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "hopscotch.yaml"))
 	}
 
-	home, _ := os.UserHomeDir()
-	if home != "" {
+	// user config dir
+	if home, _ := os.UserHomeDir(); home != "" {
 		candidates = append(candidates, filepath.Join(home, ".config", "hopscotch", "config.yaml"))
 	}
-	candidates = append(candidates, "hopscotch.yaml")
 
 	for _, p := range candidates {
 		if p == "" {
@@ -115,7 +115,7 @@ func resolvePath(explicit string) (string, error) {
 		}
 	}
 
-	return "", errors.New("no config file found; use --config or set HOPSCOTCH_CONFIG")
+	return "", errors.New("no config file found; place hopscotch.yaml next to the binary, use --config, or create ~/.config/hopscotch/config.yaml")
 }
 
 func applyDefaults(cfg *Config) {
