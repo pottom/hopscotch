@@ -74,7 +74,7 @@ func buildPayload(prev, curr trafficState) trafficPayload {
 		p.VPNs = make(map[string]vpnEntry, len(curr.vpns))
 		for name, vs := range curr.vpns {
 			e := vpnEntry{}
-			if vs.State == vpn.StateConnecting && !vs.NextReconnectAt.IsZero() {
+			if !vs.NextReconnectAt.IsZero() {
 				secs := int(time.Until(vs.NextReconnectAt).Seconds())
 				if secs < 0 {
 					secs = 0

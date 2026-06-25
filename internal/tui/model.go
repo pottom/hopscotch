@@ -1088,6 +1088,9 @@ func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int)
 		}
 		return styleConnecting.Render(dot + " connecting")
 	case "disconnected":
+		if reconnectIn != nil && *reconnectIn >= 0 {
+			return styleConnecting.Render(fmt.Sprintf("○ %ds", *reconnectIn))
+		}
 		return styleDisconnected.Render("○ disconnected")
 	default:
 		return styleMuted.Render("? " + status)

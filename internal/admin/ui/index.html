@@ -87,7 +87,7 @@
                       x-show="($store.hop.vpns[name]?.reconnects || 0) > 0"
                       x-text="'recon ' + $store.hop.vpns[name]?.reconnects"></span>
                 <span class="tc-info-item tc-reconnect-cd"
-                      x-show="$store.hop.vpns[name]?.state === 'connecting' && $store.hop.vpns[name]?.reconnect_in != null && $store.hop.vpns[name]?.reconnect_in >= 0"
+                      x-show="$store.hop.vpns[name]?.reconnect_in != null && $store.hop.vpns[name]?.reconnect_in >= 0"
                       x-text="'next in ' + $store.hop.vpns[name]?.reconnect_in + 's'"></span>
               </div>
             </div>

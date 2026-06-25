@@ -94,7 +94,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 				overall = "degraded"
 			}
 				var reconnectIn *int
-			if st.State == vpn.StateConnecting && !st.NextReconnectAt.IsZero() {
+			if !st.NextReconnectAt.IsZero() {
 				secs := int(time.Until(st.NextReconnectAt).Seconds())
 				if secs < 0 {
 					secs = 0
