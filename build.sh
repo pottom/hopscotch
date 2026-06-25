@@ -136,12 +136,25 @@ cmd_release() {
 
 cmd_install() {
     cmd_binary
+    local src="${DIST_DIR}/${BINARY_NAME}"
     local dest="/usr/local/bin/${BINARY_NAME}"
-    echo "▶ Installing to ${dest}..."
-    cp "${DIST_DIR}/${BINARY_NAME}" "${dest}"
+    local dir
+    dir="$(dirname "${dest}")"
+
+    # Sign before moving — codesign on the final path can fail if a previous
+    # binary left the file in a bad security state in /usr/local/bin.
     if [[ "$(uname)" == "Darwin" ]] && command -v codesign &>/dev/null; then
-        codesign --force --sign - "${dest}"
+        codesign --force --sign - "${src}"
         echo "  ✓ Ad-hoc signed (macOS)"
+    fi
+
+    echo "▶ Installing to ${dest}..."
+    rm -f "${dest}" 2>/dev/null || sudo rm -f "${dest}"
+    if [[ -w "${dir}" ]]; then
+        mv "${src}" "${dest}"
+    else
+        sudo mv "${src}" "${dest}"
+        sudo chown "$(id -un):$(id -gn)" "${dest}"
     fi
     echo "✓ Installed ${dest}"
 }
