@@ -64,8 +64,13 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	}
 	log.Info("vpn subprocess started", "vpn", c.cfg.Name, "pid", cmd.Process.Pid)
 
+	// stderrDone is closed when runOnce() returns so watchStderr stops
+	// updating connection state after we've moved on to the reconnect cycle.
+	stderrDone := make(chan struct{})
+	defer close(stderrDone)
+
 	// Watch stderr lines for status events.
-	go c.watchStderr(stderr)
+	go c.watchStderr(stderr, stderrDone)
 
 	// done carries the cmd.Wait() error; died is closed after Wait() returns so
 	// multiple goroutines (pollPingHost, etc.) can all observe subprocess exit
@@ -78,7 +83,11 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	}()
 
 	// Kill subprocess if network disappears while it's running.
-	go c.watchUplink(ctx, cmd, died)
+	// killedByUplink is closed when watchUplink() triggers the kill, so
+	// runOnce() can unblock even if cmd.Wait() is stuck (e.g. openconnect in
+	// a different process group didn't receive the SIGKILL via the group kill).
+	killedByUplink := make(chan struct{})
+	go c.watchUplink(ctx, cmd, died, killedByUplink)
 
 	if c.cfg.PingHost != "" {
 		// Poll ping_host to detect when VPN is up and when it drops.
@@ -116,6 +125,26 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		}
 		c.runPostDisconnect()
 		return ctx.Err()
+	case <-killedByUplink:
+		// watchUplink() sent SIGKILL to the process group. If openconnect ran
+		// in a different process group (e.g. via sudo on some systems), it may
+		// not have received the kill and still holds the stderr pipe open,
+		// blocking cmd.Wait(). Give it 1 s then close the pipe — this stops
+		// watchStderr from updating state AND sends EPIPE/SIGPIPE to openconnect
+		// which should terminate it.
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			log.Warn("vpn subprocess still alive after uplink kill; closing pipe", "vpn", c.cfg.Name)
+			stderr.Close()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				log.Warn("vpn subprocess orphaned after pipe close; proceeding to reconnect", "vpn", c.cfg.Name)
+			}
+		}
+		c.runPostDisconnect()
+		return errors.New("network uplink lost")
 	}
 }
 
@@ -263,7 +292,9 @@ func (c *Connection) runPreConnect(ctx context.Context) error {
 // watchUplink polls for network connectivity and kills the subprocess when the
 // uplink disappears. This lets the Run() loop handle "waiting for network"
 // instead of letting openconnect spin on its own internal reconnect logic.
-func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
+// killedByUplink is closed after killProcGroup() so runOnce() can unblock
+// even if cmd.Wait() is stuck due to an orphaned subprocess.
+func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}, killedByUplink chan<- struct{}) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -277,6 +308,7 @@ func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan
 				log.Info("vpn: network down, stopping subprocess", "vpn", c.cfg.Name)
 				c.lastError.Store("waiting for network")
 				killProcGroup(cmd)
+				close(killedByUplink)
 				return
 			}
 		}
@@ -284,12 +316,20 @@ func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan
 }
 
 // watchStderr logs openconnect output and promotes connection events.
-func (c *Connection) watchStderr(r io.Reader) {
+// done is closed when runOnce() returns; after that we only log, never update state.
+func (c *Connection) watchStderr(r io.Reader, done <-chan struct{}) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
+		}
+		// After runOnce() has returned, only log — don't touch connection state.
+		select {
+		case <-done:
+			log.Debug("vpn (orphaned): "+line, "vpn", c.cfg.Name)
+			continue
+		default:
 		}
 		switch {
 		case strings.Contains(line, "Established DTLS connection"),
