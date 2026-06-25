@@ -53,7 +53,24 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	setProcGroup(cmd)
 
 	if pw != "" {
-		cmd.Stdin = strings.NewReader(pw + "\n")
+		// Use os.Pipe so the child stdin is an *os.File — exec then passes it
+		// directly to the subprocess without starting an internal goroutine.
+		// strings.NewReader would create a goroutine that cmd.Wait() waits for,
+		// and that goroutine blocks until all holders of the pipe read-end close
+		// it — including orphaned openconnect subprocesses — which would cause
+		// cmd.Wait() to hang indefinitely after we kill sudo.
+		stdinR, stdinW, pipeErr := os.Pipe()
+		if pipeErr != nil {
+			return fmt.Errorf("stdin pipe: %w", pipeErr)
+		}
+		if _, err := stdinW.WriteString(pw + "\n"); err != nil {
+			stdinR.Close()
+			stdinW.Close()
+			return fmt.Errorf("writing password to stdin pipe: %w", err)
+		}
+		stdinW.Close() // write end closed; child reads password then gets EOF
+		cmd.Stdin = stdinR
+		defer stdinR.Close()
 	}
 
 	// Force English output so log lines are predictable regardless of system locale.
@@ -63,7 +80,9 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
-	cmd.Stdout = io.Discard
+	// nil → exec routes child stdout to /dev/null via os.File (no goroutine).
+	// io.Discard would create a goroutine that blocks cmd.Wait() similarly.
+	cmd.Stdout = nil
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting openconnect: %w", err)
@@ -279,7 +298,17 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 					if fail >= 3 {
 						log.Warn("vpn connectivity lost, restarting", "vpn", c.cfg.Name)
 						c.setState(StateDisconnected)
-						killProcGroup(cmd)
+						// SIGTERM by name (not PGID) so openconnect can close the
+						// stderr pipe cleanly — without this, cmd.Wait() blocks
+						// indefinitely because the orphaned openconnect holds the
+						// pipe write end open.
+						terminateByName(binaryBase, c.cfg.Sudo)
+						select {
+						case <-died:
+						case <-time.After(3 * time.Second):
+							killProcGroup(cmd)
+							killOrphanedProcs(binaryBase, c.cfg.Sudo)
+						}
 						return
 					}
 				}
