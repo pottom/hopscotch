@@ -12,10 +12,12 @@ import (
 
 // Stats is a point-in-time snapshot of one VPN connection.
 type Stats struct {
-	State       State
-	Reconnects  int
-	ConnectedAt time.Time // zero if never connected
-	Server      string    // hostname extracted from server URL
+	State           State
+	Reconnects      int
+	ConnectedAt     time.Time // zero if never connected
+	Server          string    // hostname extracted from server URL
+	NextReconnectAt time.Time // non-zero only while waiting to reconnect
+	LastError       string    // last error from subprocess; empty when connected
 }
 
 // State represents the lifecycle state of a VPN connection.
@@ -60,15 +62,19 @@ type connConfig struct {
 
 // Connection manages one VPN subprocess.
 type Connection struct {
-	cfg         connConfig
-	state       atomic.Int32
-	reconnects  atomic.Int32
-	connectedAt atomic.Value // stores time.Time; zero until first connect
+	cfg             connConfig
+	state           atomic.Int32
+	reconnects      atomic.Int32
+	connectedAt     atomic.Value // stores time.Time; zero until first connect
+	nextReconnectAt atomic.Value // stores time.Time; non-zero while waiting to reconnect
+	lastError       atomic.Value // stores string; last subprocess error
 }
 
 func newConnection(cfg connConfig) *Connection {
 	c := &Connection{cfg: cfg}
 	c.connectedAt.Store(time.Time{})
+	c.nextReconnectAt.Store(time.Time{})
+	c.lastError.Store("")
 	return c
 }
 
@@ -85,16 +91,22 @@ func (c *Connection) Stats() Stats {
 		server = u.Host
 	}
 	return Stats{
-		State:       State(c.state.Load()),
-		Reconnects:  int(c.reconnects.Load()),
-		ConnectedAt: c.connectedAt.Load().(time.Time),
-		Server:      server,
+		State:           State(c.state.Load()),
+		Reconnects:      int(c.reconnects.Load()),
+		ConnectedAt:     c.connectedAt.Load().(time.Time),
+		Server:          server,
+		NextReconnectAt: c.nextReconnectAt.Load().(time.Time),
+		LastError:       c.lastError.Load().(string),
 	}
 }
 
 func (c *Connection) setState(s State) {
-	if s == StateConnected && State(c.state.Load()) != StateConnected {
-		c.connectedAt.Store(time.Now())
+	if s == StateConnected {
+		if State(c.state.Load()) != StateConnected {
+			c.connectedAt.Store(time.Now())
+		}
+		c.nextReconnectAt.Store(time.Time{})
+		c.lastError.Store("")
 	}
 	c.state.Store(int32(s))
 }
@@ -111,19 +123,23 @@ func (c *Connection) Run(ctx context.Context) error {
 		c.setState(StateConnecting)
 		if err := c.runOnce(ctx); ctx.Err() != nil {
 			c.setState(StateDisconnected)
+			c.nextReconnectAt.Store(time.Time{})
 			return nil
 		} else if err != nil {
-			_ = err // already logged in runOnce
+			c.lastError.Store(err.Error())
 		}
 		c.setState(StateDisconnected)
 		c.reconnects.Add(1)
 
 		delay := b.next()
 		log.Warn("vpn disconnected, reconnecting", "vpn", c.cfg.Name, "delay", delay)
+		c.nextReconnectAt.Store(time.Now().Add(delay))
 		select {
 		case <-ctx.Done():
+			c.nextReconnectAt.Store(time.Time{})
 			return nil
 		case <-time.After(delay):
+			c.nextReconnectAt.Store(time.Time{})
 		}
 	}
 }

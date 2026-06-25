@@ -34,6 +34,8 @@ type VPNStatusJSON struct {
 	Host          string  `json:"host"`
 	Reconnects    int     `json:"reconnects"`
 	UptimeSeconds float64 `json:"uptime_seconds"`
+	ReconnectIn   *int   `json:"reconnect_in,omitempty"`
+	LastError     string  `json:"last_error,omitempty"`
 }
 
 // StatusResponse is the full /status JSON response.
@@ -91,11 +93,21 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			if st.State != vpn.StateConnected {
 				overall = "degraded"
 			}
+				var reconnectIn *int
+			if st.State == vpn.StateConnecting && !st.NextReconnectAt.IsZero() {
+				secs := int(time.Until(st.NextReconnectAt).Seconds())
+				if secs < 0 {
+					secs = 0
+				}
+				reconnectIn = &secs
+			}
 			vpnMap[name] = VPNStatusJSON{
 				State:         st.State.String(),
 				Host:          st.Server,
 				Reconnects:    st.Reconnects,
 				UptimeSeconds: uptime,
+				ReconnectIn:   reconnectIn,
+				LastError:     st.LastError,
 			}
 		}
 	}

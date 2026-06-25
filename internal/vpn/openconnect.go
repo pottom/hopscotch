@@ -275,6 +275,9 @@ func (c *Connection) watchStderr(r io.Reader) {
 		case strings.Contains(line, "error") || strings.Contains(line, "Error") ||
 			strings.Contains(line, "failed") || strings.Contains(line, "Failed"):
 			log.Error("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
+			if c.State() != StateConnected {
+				c.lastError.Store(line)
+			}
 		case strings.Contains(line, "writing to routing socket: File exists"):
 			// normal during reconnect — routes already present, not an error
 		default:

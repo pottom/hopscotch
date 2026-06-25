@@ -7,33 +7,45 @@ import (
 	"time"
 
 	"hopscotch/internal/tunnel"
+	"hopscotch/internal/vpn"
 )
 
 // trafficEntry is the per-source payload sent over SSE each second.
 type trafficEntry struct {
-	BpsIn       uint64 `json:"bps_in"`              // bytes/s received
-	BpsOut      uint64 `json:"bps_out"`             // bytes/s sent
-	Active      int64  `json:"active"`              // current open connections
+	BpsIn       uint64 `json:"bps_in"`                 // bytes/s received
+	BpsOut      uint64 `json:"bps_out"`                // bytes/s sent
+	Active      int64  `json:"active"`                 // current open connections
 	ReconnectIn *int   `json:"reconnect_in,omitempty"` // seconds until next attempt (connecting only)
+}
+
+// vpnEntry is the per-VPN payload sent over SSE each second.
+type vpnEntry struct {
+	ReconnectIn *int `json:"reconnect_in,omitempty"` // seconds until next attempt (connecting only)
 }
 
 // trafficPayload is the full SSE message body.
 type trafficPayload struct {
 	Tunnels map[string]trafficEntry `json:"tunnels"`
+	VPNs    map[string]vpnEntry    `json:"vpns,omitempty"`
 	Direct  trafficEntry            `json:"direct"`
 }
 
 // trafficState holds the previous snapshot to compute per-second deltas.
 type trafficState struct {
 	tunnels map[string]tunnel.Stats
+	vpns    map[string]vpn.Stats
 	direct  tunnel.TrafficSnapshot
 }
 
 func (s *Server) collectState() trafficState {
-	return trafficState{
+	ts := trafficState{
 		tunnels: s.tunnels.AllStats(),
 		direct:  s.direct.DirectSnapshot(),
 	}
+	if s.vpns != nil {
+		ts.vpns = s.vpns.AllStats()
+	}
+	return ts
 }
 
 func buildPayload(prev, curr trafficState) trafficPayload {
@@ -56,6 +68,21 @@ func buildPayload(prev, curr trafficState) trafficPayload {
 			e.ReconnectIn = &secs
 		}
 		p.Tunnels[name] = e
+	}
+
+	if len(curr.vpns) > 0 {
+		p.VPNs = make(map[string]vpnEntry, len(curr.vpns))
+		for name, vs := range curr.vpns {
+			e := vpnEntry{}
+			if vs.State == vpn.StateConnecting && !vs.NextReconnectAt.IsZero() {
+				secs := int(time.Until(vs.NextReconnectAt).Seconds())
+				if secs < 0 {
+					secs = 0
+				}
+				e.ReconnectIn = &secs
+			}
+			p.VPNs[name] = e
+		}
 	}
 
 	p.Direct = trafficEntry{

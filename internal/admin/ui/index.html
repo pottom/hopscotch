@@ -72,6 +72,7 @@
             <div class="tc-header">
               <div class="tc-id">
                 <span class="tc-name" x-text="name"></span>
+                <span class="tc-host" x-text="$store.hop.vpns[name]?.host || ''"></span>
               </div>
               <div class="tc-status-group">
                 <span class="dot" :class="$store.hop.vpnVisualStatus(name)"></span>
@@ -85,8 +86,15 @@
                 <span class="tc-info-item tc-recon"
                       x-show="($store.hop.vpns[name]?.reconnects || 0) > 0"
                       x-text="'recon ' + $store.hop.vpns[name]?.reconnects"></span>
+                <span class="tc-info-item tc-reconnect-cd"
+                      x-show="$store.hop.vpns[name]?.state === 'connecting' && $store.hop.vpns[name]?.reconnect_in != null && $store.hop.vpns[name]?.reconnect_in >= 0"
+                      x-text="'next in ' + $store.hop.vpns[name]?.reconnect_in + 's'"></span>
               </div>
             </div>
+            <div class="tc-reason"
+                 x-show="$store.hop.vpns[name]?.state !== 'connected'"
+                 :class="$store.hop.vpns[name]?.last_error ? 'has-error' : 'no-error'"
+                 x-text="$store.hop.vpns[name]?.last_error || '—'"></div>
           </div>
         </template>
       </div>
