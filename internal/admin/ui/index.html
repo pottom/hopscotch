@@ -129,6 +129,10 @@
           <div class="tc-info">
             <span class="tc-info-item"
                   x-text="':' + ($store.hop.tunnels[name]?.local_port || '…')"></span>
+            <span class="tc-info-item tc-vpn-dep"
+                  x-show="$store.hop.tunnels[name]?.requires_vpn"
+                  :class="$store.hop.vpnVisualStatus($store.hop.tunnels[name]?.requires_vpn)"
+                  x-text="'via ' + $store.hop.tunnels[name]?.requires_vpn"></span>
             <span class="tc-info-item"
                   x-text="fmtUptime($store.hop.tunnels[name]?.uptime_seconds)"></span>
             <span class="tc-info-item tc-recon"

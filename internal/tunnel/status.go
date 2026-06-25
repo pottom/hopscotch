@@ -32,6 +32,7 @@ type Stats struct {
 	ReconnectCount    int
 	LocalPort         int
 	Host              string // SSH server address (host:port)
+	RequiresVPN       string // VPN name this tunnel depends on; empty if none
 	KeepaliveFailures int    // consecutive failures; resets to 0 on success or reconnect
 	LastError         string // last connection failure reason; empty when connected
 	// Traffic counters — cumulative since process start.

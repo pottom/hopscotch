@@ -50,6 +50,7 @@ var (
 
 	styleColName    = lipgloss.NewStyle().Foreground(colorBright).Width(26)
 	styleColHost    = lipgloss.NewStyle().Foreground(colorMuted).Width(22)
+	styleColVPN     = lipgloss.NewStyle().Width(14)
 	styleColPort    = lipgloss.NewStyle().Foreground(colorText).Width(7)
 	styleVPNColHost = lipgloss.NewStyle().Foreground(colorMuted).Width(29) // HOST+PORT combined so STATUS aligns with tunnel rows
 	styleColStatus = lipgloss.NewStyle().Width(16)
@@ -807,7 +808,7 @@ func (m Model) buildRoutesContent() string {
 
 // buildStatusContent renders the scrollable content for the status viewport.
 // fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
-const fixedColsWidth    = 2 + 26 + 22 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 126
+const fixedColsWidth    = 2 + 26 + 22 + 14 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 140
 const vpnFixedColsWidth = 2 + 26 + 29 + 16 + 10 + 5                    // = 88
 
 func (m Model) sectionSep() string {
@@ -902,9 +903,10 @@ func (m Model) buildStatusContent() string {
 	if reasonW >= 8 {
 		reasonHdr = hdr(styleMuted, "REASON")
 	}
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
+	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s%s\n",
 		hdr(styleColName, "TUNNEL"),
 		hdr(styleColHost, "HOST"),
+		hdr(styleColVPN, "VPN"),
 		hdr(styleColPort, "PORT"),
 		hdr(styleColStatus, "STATUS"),
 		hdr(styleColUptime, "UPTIME"),
@@ -964,9 +966,25 @@ func (m Model) buildStatusContent() string {
 		} else {
 			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
+		vpnLabel := "—"
+		vpnStyle := styleColVPN.Foreground(colorMuted)
+		if t.RequiresVPN != "" {
+			vpnLabel = t.RequiresVPN
+			if v, ok := m.status.VPNs[t.RequiresVPN]; ok {
+				switch v.State {
+				case "connected":
+					vpnStyle = styleColVPN.Foreground(colorConnected)
+				case "connecting":
+					vpnStyle = styleColVPN.Foreground(colorConnecting)
+				default:
+					vpnStyle = styleColVPN.Foreground(colorDisconnected)
+				}
+			}
+		}
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s%s\n",
 			styleColName.Render(name),
 			styleColHost.Render(t.Host),
+			vpnStyle.Render(vpnLabel),
 			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
 			styleColStatus.Render(tunnelStatusStr),
 			styleColUptime.Render(uptime),

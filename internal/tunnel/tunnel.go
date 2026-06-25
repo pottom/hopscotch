@@ -66,6 +66,7 @@ func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error, 
 // Stats returns a snapshot of the tunnel's current metrics including traffic.
 func (t *Tunnel) Stats() Stats {
 	s := t.stats.Load().(Stats)
+	s.RequiresVPN = t.cfg.RequiresVPN
 	s.BytesIn = t.bytesIn.Load()
 	s.BytesOut = t.bytesOut.Load()
 	s.ActiveConns = t.activeConns.Load()

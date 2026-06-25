@@ -25,6 +25,7 @@ type TunnelStatusJSON struct {
 	LocalPort         int     `json:"local_port"`
 	ReconnectCount    int     `json:"reconnect_count"`
 	UptimeSeconds     float64 `json:"uptime_seconds"`
+	RequiresVPN       string  `json:"requires_vpn,omitempty"`
 	KeepaliveFailures int     `json:"keepalive_failures,omitempty"`
 	LastError         string  `json:"last_error,omitempty"`
 }
@@ -73,6 +74,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			LocalPort:         st.LocalPort,
 			ReconnectCount:    st.ReconnectCount,
 			UptimeSeconds:     uptime,
+			RequiresVPN:       st.RequiresVPN,
 			KeepaliveFailures: st.KeepaliveFailures,
 			LastError:         st.LastError,
 		}

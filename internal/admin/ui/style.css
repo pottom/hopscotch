@@ -393,6 +393,10 @@ main, main.main {
   white-space: nowrap;
 }
 
+.tc-vpn-dep.connected    { color: var(--connected); }
+.tc-vpn-dep.connecting   { color: var(--connecting); }
+.tc-vpn-dep.disconnected { color: var(--disconnected); }
+
 .tc-recon {
   color: var(--connecting);
 }
