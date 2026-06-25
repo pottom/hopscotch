@@ -75,7 +75,7 @@ const (
 	numTabs   = 3
 )
 
-const headerHeight = 4 // blank · title+tabs · stats · blank
+const headerHeight = 3 // title+tabs · stats · blank
 
 const footerHeight = 2 // separator newline + hints+ports line
 
@@ -548,8 +548,8 @@ func (m Model) resizeViewports() Model {
 		}
 	}
 
-	// Routes viewport is 4 rows shorter to make room for blank + input + result + blank + headers + separator.
-	routeVPH := vpH - 4
+	// Routes header adds 5 rows beyond base headerHeight (3): blank + input + result + blank + colheader + separator.
+	routeVPH := vpH - 5
 	if routeVPH < 1 {
 		routeVPH = 1
 	}
@@ -607,7 +607,7 @@ func (m Model) renderTitleLine() string {
 	if gap < 2 {
 		gap = 2
 	}
-	return "\n" + left + strings.Repeat(" ", gap) + right + "\n"
+	return left + strings.Repeat(" ", gap) + right + "\n"
 }
 
 func (m Model) renderStatsLine() string {

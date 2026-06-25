@@ -246,7 +246,9 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	binaryBase := filepath.Base(binary)
 
 	var ok, fail int
-	ticker := time.NewTicker(3 * time.Second)
+
+	// Poll every 1s until connected for fast detection; switch to 3s for keepalive.
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	connectTimeout := time.NewTimer(30 * time.Second)
 	defer connectTimeout.Stop()
@@ -287,7 +289,9 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				ok++
 				if ok >= 2 && c.State() != StateConnected {
 					c.setState(StateConnected)
-					connectTimeout.Stop() // confirmed — no longer needed
+					connectTimeout.Stop()
+					// Switch to a slower keepalive interval to reduce load.
+					ticker.Reset(3 * time.Second)
 					log.Info("vpn connected", "vpn", c.cfg.Name, "via", host)
 				}
 			} else {
