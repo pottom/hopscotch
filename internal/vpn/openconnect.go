@@ -211,6 +211,8 @@ func (c *Connection) buildArgs(hasPassword bool) []string {
 // pollPingHost probes host:port via TCP every 3 seconds.
 // After 2 consecutive successes it marks the VPN connected.
 // After 3 consecutive failures (post-connect) it kills the subprocess.
+// If connectivity is not confirmed within 45 s it also restarts — prevents
+// the VPN from staying stuck in "connecting" indefinitely.
 func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
 	host := c.cfg.PingHost
 	if !strings.Contains(host, ":") {
@@ -220,6 +222,8 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	var ok, fail int
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
+	connectTimeout := time.NewTimer(45 * time.Second)
+	defer connectTimeout.Stop()
 
 	for {
 		select {
@@ -227,6 +231,15 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 			return
 		case <-died:
 			return
+		case <-connectTimeout.C:
+			if c.State() != StateConnected {
+				log.Warn("vpn connect timeout: ping_host unreachable, restarting",
+					"vpn", c.cfg.Name, "host", host)
+				c.lastError.Store("connect timeout: " + host + " unreachable")
+				c.setState(StateDisconnected)
+				killProcGroup(cmd)
+				return
+			}
 		case <-ticker.C:
 			conn, err := net.DialTimeout("tcp", host, 2*time.Second)
 			if err == nil {
@@ -235,6 +248,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				ok++
 				if ok >= 2 && c.State() != StateConnected {
 					c.setState(StateConnected)
+					connectTimeout.Stop() // confirmed — no longer needed
 					log.Info("vpn connected", "vpn", c.cfg.Name, "via", host)
 				}
 			} else {
