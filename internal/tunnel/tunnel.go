@@ -210,6 +210,8 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		t.client = nil
 
 		// If there's no network at all, wait for it and reset backoff.
+		// Skip the countdown after restore — waiting for the network already
+		// served as the delay.
 		if !netcheck.HasUplink() {
 			s.LastError = "waiting for network"
 			t.stats.Store(s)
@@ -222,7 +224,8 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			s.LastError = ""
 			t.stats.Store(s)
 			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
-			log.Info("network up, reconnecting tunnel", "tunnel", t.cfg.Name)
+			log.Info("network up, reconnecting tunnel immediately", "tunnel", t.cfg.Name)
+			continue
 		}
 
 		delay := backoff.next()

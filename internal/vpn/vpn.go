@@ -135,8 +135,9 @@ func (c *Connection) Run(ctx context.Context) error {
 		c.setState(StateDisconnected)
 		c.reconnects.Add(1)
 
-		// If there's no network at all, wait for it before the next attempt
-		// and reset the backoff so we don't start with a long delay when it returns.
+		// If there's no network at all, wait for it before the next attempt.
+		// Skip the backoff countdown after restore — waiting for the network
+		// already served as the delay.
 		if !netcheck.HasUplink() {
 			c.lastError.Store("waiting for network")
 			log.Info("vpn waiting for network", "vpn", c.cfg.Name)
@@ -146,7 +147,8 @@ func (c *Connection) Run(ctx context.Context) error {
 			}
 			c.lastError.Store("")
 			b.reset()
-			log.Info("network up, reconnecting vpn", "vpn", c.cfg.Name)
+			log.Info("network up, reconnecting vpn immediately", "vpn", c.cfg.Name)
+			continue
 		}
 
 		delay := b.next()
