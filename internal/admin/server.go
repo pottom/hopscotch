@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -83,14 +84,19 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.Handle("GET /", http.FileServerFS(sub))
 
 	addr := fmt.Sprintf("%s:%d", s.bind, s.port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("admin server: %w", err)
+	}
+	defer ln.Close()
+
+	log.Info("admin server listening", "addr", addr)
+
 	srv := &http.Server{
-		Addr:         addr,
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
-
-	log.Info("admin server listening", "addr", addr)
 
 	go func() {
 		<-ctx.Done()
@@ -99,7 +105,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("admin server: %w", err)
 	}
 	return nil
