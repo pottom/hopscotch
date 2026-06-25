@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -21,6 +22,16 @@ import (
 
 // runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.
 func (c *Connection) runOnce(ctx context.Context) error {
+	binary := c.cfg.Binary
+	if binary == "" {
+		binary = "openconnect"
+	}
+	binaryBase := filepath.Base(binary)
+
+	// Kill any orphaned instances left over from a previous abrupt shutdown
+	// before launching a new one — avoids route/interface conflicts.
+	killOrphanedProcs(binaryBase, c.cfg.Sudo)
+
 	if err := c.runPreConnect(ctx); err != nil {
 		return err
 	}
@@ -28,11 +39,6 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	// Resolve password once — needed both for --passwd-on-stdin flag and stdin feed.
 	pw := c.password()
 	args := c.buildArgs(pw != "")
-
-	binary := c.cfg.Binary
-	if binary == "" {
-		binary = "openconnect"
-	}
 
 	var cmd *exec.Cmd
 	if c.cfg.Sudo {
@@ -137,6 +143,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		case <-time.After(time.Second):
 			log.Warn("vpn subprocess still alive after uplink kill; closing pipe", "vpn", c.cfg.Name)
 			stderr.Close()
+			killOrphanedProcs(binaryBase, c.cfg.Sudo)
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):

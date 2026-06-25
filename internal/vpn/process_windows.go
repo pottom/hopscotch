@@ -11,3 +11,5 @@ func killProcGroup(cmd *exec.Cmd) {
 		cmd.Process.Kill() //nolint:errcheck
 	}
 }
+
+func killOrphanedProcs(name string, useSudo bool) {} // no-op on Windows
