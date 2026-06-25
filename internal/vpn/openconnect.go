@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -16,10 +17,21 @@ import (
 	"github.com/charmbracelet/log"
 
 	"hopscotch/internal/keychain"
+	"hopscotch/internal/netcheck"
 )
 
 // runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.
 func (c *Connection) runOnce(ctx context.Context) error {
+	binary := c.cfg.Binary
+	if binary == "" {
+		binary = "openconnect"
+	}
+	binaryBase := filepath.Base(binary)
+
+	// Kill any orphaned instances left over from a previous abrupt shutdown
+	// before launching a new one — avoids route/interface conflicts.
+	killOrphanedProcs(binaryBase, c.cfg.Sudo)
+
 	if err := c.runPreConnect(ctx); err != nil {
 		return err
 	}
@@ -27,11 +39,6 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	// Resolve password once — needed both for --passwd-on-stdin flag and stdin feed.
 	pw := c.password()
 	args := c.buildArgs(pw != "")
-
-	binary := c.cfg.Binary
-	if binary == "" {
-		binary = "openconnect"
-	}
 
 	var cmd *exec.Cmd
 	if c.cfg.Sudo {
@@ -46,7 +53,24 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	setProcGroup(cmd)
 
 	if pw != "" {
-		cmd.Stdin = strings.NewReader(pw + "\n")
+		// Use os.Pipe so the child stdin is an *os.File — exec then passes it
+		// directly to the subprocess without starting an internal goroutine.
+		// strings.NewReader would create a goroutine that cmd.Wait() waits for,
+		// and that goroutine blocks until all holders of the pipe read-end close
+		// it — including orphaned openconnect subprocesses — which would cause
+		// cmd.Wait() to hang indefinitely after we kill sudo.
+		stdinR, stdinW, pipeErr := os.Pipe()
+		if pipeErr != nil {
+			return fmt.Errorf("stdin pipe: %w", pipeErr)
+		}
+		if _, err := stdinW.WriteString(pw + "\n"); err != nil {
+			stdinR.Close()
+			stdinW.Close()
+			return fmt.Errorf("writing password to stdin pipe: %w", err)
+		}
+		stdinW.Close() // write end closed; child reads password then gets EOF
+		cmd.Stdin = stdinR
+		defer stdinR.Close()
 	}
 
 	// Force English output so log lines are predictable regardless of system locale.
@@ -56,15 +80,22 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
-	cmd.Stdout = io.Discard
+	// nil → exec routes child stdout to /dev/null via os.File (no goroutine).
+	// io.Discard would create a goroutine that blocks cmd.Wait() similarly.
+	cmd.Stdout = nil
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting openconnect: %w", err)
 	}
 	log.Info("vpn subprocess started", "vpn", c.cfg.Name, "pid", cmd.Process.Pid)
 
+	// stderrDone is closed when runOnce() returns so watchStderr stops
+	// updating connection state after we've moved on to the reconnect cycle.
+	stderrDone := make(chan struct{})
+	defer close(stderrDone)
+
 	// Watch stderr lines for status events.
-	go c.watchStderr(stderr)
+	go c.watchStderr(stderr, stderrDone)
 
 	// done carries the cmd.Wait() error; died is closed after Wait() returns so
 	// multiple goroutines (pollPingHost, etc.) can all observe subprocess exit
@@ -75,6 +106,13 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		done <- cmd.Wait()
 		close(died)
 	}()
+
+	// Kill subprocess if network disappears while it's running.
+	// killedByUplink is closed when watchUplink() triggers the kill, so
+	// runOnce() can unblock even if cmd.Wait() is stuck (e.g. openconnect in
+	// a different process group didn't receive the SIGKILL via the group kill).
+	killedByUplink := make(chan struct{})
+	go c.watchUplink(ctx, cmd, died, killedByUplink)
 
 	if c.cfg.PingHost != "" {
 		// Poll ping_host to detect when VPN is up and when it drops.
@@ -112,6 +150,27 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		}
 		c.runPostDisconnect()
 		return ctx.Err()
+	case <-killedByUplink:
+		// watchUplink() sent SIGKILL to the process group. If openconnect ran
+		// in a different process group (e.g. via sudo on some systems), it may
+		// not have received the kill and still holds the stderr pipe open,
+		// blocking cmd.Wait(). Give it 1 s then close the pipe — this stops
+		// watchStderr from updating state AND sends EPIPE/SIGPIPE to openconnect
+		// which should terminate it.
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			log.Warn("vpn subprocess still alive after uplink kill; closing pipe", "vpn", c.cfg.Name)
+			stderr.Close()
+			killOrphanedProcs(binaryBase, c.cfg.Sudo)
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				log.Warn("vpn subprocess orphaned after pipe close; proceeding to reconnect", "vpn", c.cfg.Name)
+			}
+		}
+		c.runPostDisconnect()
+		return errors.New("network uplink lost")
 	}
 }
 
@@ -171,15 +230,28 @@ func (c *Connection) buildArgs(hasPassword bool) []string {
 // pollPingHost probes host:port via TCP every 3 seconds.
 // After 2 consecutive successes it marks the VPN connected.
 // After 3 consecutive failures (post-connect) it kills the subprocess.
+// If connectivity is not confirmed within 30 s it restarts — but uses SIGTERM
+// first so openconnect can send a clean disconnect to the VPN server, preventing
+// stale server sessions that would block the next reconnect.
 func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
 	host := c.cfg.PingHost
 	if !strings.Contains(host, ":") {
 		host += ":443"
 	}
 
+	binary := c.cfg.Binary
+	if binary == "" {
+		binary = "openconnect"
+	}
+	binaryBase := filepath.Base(binary)
+
 	var ok, fail int
-	ticker := time.NewTicker(3 * time.Second)
+
+	// Poll every 1s until connected for fast detection; switch to 3s for keepalive.
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	connectTimeout := time.NewTimer(30 * time.Second)
+	defer connectTimeout.Stop()
 
 	for {
 		select {
@@ -187,7 +259,29 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 			return
 		case <-died:
 			return
+		case <-connectTimeout.C:
+			if c.State() != StateConnected {
+				log.Warn("vpn connect timeout: ping_host unreachable, restarting",
+					"vpn", c.cfg.Name, "host", host)
+				c.lastError.Store("connect timeout: " + host + " unreachable")
+				c.setState(StateDisconnected)
+				// SIGTERM lets openconnect send a proper goodbye to the VPN server
+				// so the server session is released immediately — without this, the
+				// stale session blocks ping_host on the next reconnect attempt too.
+				terminateByName(binaryBase, c.cfg.Sudo)
+				select {
+				case <-died:
+				case <-time.After(3 * time.Second):
+					killProcGroup(cmd)
+				}
+				killOrphanedProcs(binaryBase, c.cfg.Sudo)
+				return
+			}
 		case <-ticker.C:
+			// watchStderr may have already set StateConnected via "Established DTLS" line.
+			if c.State() == StateConnected {
+				connectTimeout.Stop()
+			}
 			conn, err := net.DialTimeout("tcp", host, 2*time.Second)
 			if err == nil {
 				conn.Close()
@@ -195,6 +289,9 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				ok++
 				if ok >= 2 && c.State() != StateConnected {
 					c.setState(StateConnected)
+					connectTimeout.Stop()
+					// Switch to a slower keepalive interval to reduce load.
+					ticker.Reset(3 * time.Second)
 					log.Info("vpn connected", "vpn", c.cfg.Name, "via", host)
 				}
 			} else {
@@ -205,7 +302,17 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 					if fail >= 3 {
 						log.Warn("vpn connectivity lost, restarting", "vpn", c.cfg.Name)
 						c.setState(StateDisconnected)
-						killProcGroup(cmd)
+						// SIGTERM by name (not PGID) so openconnect can close the
+						// stderr pipe cleanly — without this, cmd.Wait() blocks
+						// indefinitely because the orphaned openconnect holds the
+						// pipe write end open.
+						terminateByName(binaryBase, c.cfg.Sudo)
+						select {
+						case <-died:
+						case <-time.After(3 * time.Second):
+							killProcGroup(cmd)
+							killOrphanedProcs(binaryBase, c.cfg.Sudo)
+						}
 						return
 					}
 				}
@@ -256,13 +363,47 @@ func (c *Connection) runPreConnect(ctx context.Context) error {
 	return nil
 }
 
+// watchUplink polls for network connectivity and kills the subprocess when the
+// uplink disappears. This lets the Run() loop handle "waiting for network"
+// instead of letting openconnect spin on its own internal reconnect logic.
+// killedByUplink is closed after killProcGroup() so runOnce() can unblock
+// even if cmd.Wait() is stuck due to an orphaned subprocess.
+func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}, killedByUplink chan<- struct{}) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-died:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !netcheck.HasUplink() {
+				log.Info("vpn: network down, stopping subprocess", "vpn", c.cfg.Name)
+				c.lastError.Store("waiting for network")
+				killProcGroup(cmd)
+				close(killedByUplink)
+				return
+			}
+		}
+	}
+}
+
 // watchStderr logs openconnect output and promotes connection events.
-func (c *Connection) watchStderr(r io.Reader) {
+// done is closed when runOnce() returns; after that we only log, never update state.
+func (c *Connection) watchStderr(r io.Reader, done <-chan struct{}) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
+		}
+		// After runOnce() has returned, only log — don't touch connection state.
+		select {
+		case <-done:
+			log.Debug("vpn (orphaned): "+line, "vpn", c.cfg.Name)
+			continue
+		default:
 		}
 		switch {
 		case strings.Contains(line, "Established DTLS connection"),
@@ -275,6 +416,9 @@ func (c *Connection) watchStderr(r io.Reader) {
 		case strings.Contains(line, "error") || strings.Contains(line, "Error") ||
 			strings.Contains(line, "failed") || strings.Contains(line, "Failed"):
 			log.Error("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
+			if c.State() != StateConnected {
+				c.lastError.Store(line)
+			}
 		case strings.Contains(line, "writing to routing socket: File exists"):
 			// normal during reconnect — routes already present, not an error
 		default:

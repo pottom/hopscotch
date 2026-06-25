@@ -108,12 +108,20 @@ document.addEventListener('alpine:init', () => {
     },
 
     // Returns the effective visual state for a tunnel — mirrors TUI renderStatus logic.
-    // connected + keepalive_failures > 0 → 'warning' (amber, same as connecting visuals)
     visualStatus(name) {
       const t = this.tunnels[name];
       if (!t) return '';
       if (t.status === 'connected' && t.keepalive_failures > 0) return 'warning';
+      if (t.last_error?.startsWith('waiting for VPN') || t.last_error?.startsWith('waiting for network')) return 'connecting';
       return t.status;
+    },
+
+    // Returns the display text for a tunnel's status label.
+    tunnelStatusText(name) {
+      const t = this.tunnels[name];
+      if (!t) return '…';
+      if (t.last_error?.startsWith('waiting for VPN') || t.last_error?.startsWith('waiting for network')) return 'pending';
+      return t.status || '…';
     },
 
     vpnVisualStatus(name) {
@@ -151,6 +159,7 @@ async function refreshStatus() {
       proxy_port:     st.proxy_port,
       admin_port:     st.admin_port,
       status:         st.status,
+      uplink:         st.uplink ?? true,
     };
 
     // Rebuild tunnel map, preserving live bps/active values from SSE.
@@ -173,13 +182,17 @@ async function refreshStatus() {
     }
     store.tunnels = next;
 
-    // Rebuild VPN map.
+    // Rebuild VPN map, preserving live reconnect_in from SSE.
     const nextVpns = {};
     for (const [name, v] of Object.entries(st.vpns || {})) {
+      const prev = store.vpns[name] || {};
       nextVpns[name] = {
         state:          v.state,
+        host:           v.host || '',
         reconnects:     v.reconnects || 0,
         uptime_seconds: v.uptime_seconds || 0,
+        last_error:     v.last_error || '',
+        reconnect_in:   prev.reconnect_in ?? null,
       };
     }
     store.vpns = nextVpns;
@@ -214,6 +227,12 @@ function connectSSE() {
         store.tunnels[name].reconnect_in = t.reconnect_in ?? null;
       }
       pushChart(name, t.bps_in, t.bps_out);
+    }
+
+    for (const [name, v] of Object.entries(d.vpns || {})) {
+      if (store.vpns[name]) {
+        store.vpns[name].reconnect_in = v.reconnect_in ?? null;
+      }
     }
 
     store.direct = {

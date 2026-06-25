@@ -20,6 +20,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"hopscotch/internal/config"
+	"hopscotch/internal/netcheck"
 )
 
 // Clock abstracts time to allow synctest-based testing of reconnect logic.
@@ -35,12 +36,13 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 
 // Tunnel manages a single SSH connection that exposes a local SOCKS5 port.
 type Tunnel struct {
-	cfg        config.TunnelConfig
-	clock      Clock
-	vpnGate    func(ctx context.Context) error // non-nil when requires_vpn is set
-	stats      atomic.Value // holds Stats (without traffic counters)
-	client     *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
-	ptySession *ssh.Session // held open when force_pty is set; closed after keepalive exits
+	cfg            config.TunnelConfig
+	clock          Clock
+	vpnGate        func(ctx context.Context) error // non-nil when requires_vpn is set
+	vpnIsConnected func() bool                     // non-nil when requires_vpn is set; instant state check
+	stats          atomic.Value // holds Stats (without traffic counters)
+	client         *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
+	ptySession     *ssh.Session // held open when force_pty is set; closed after keepalive exits
 	// Traffic counters — always-incrementing, read by Stats().
 	bytesIn     atomic.Uint64
 	bytesOut    atomic.Uint64
@@ -49,13 +51,14 @@ type Tunnel struct {
 
 // New creates a Tunnel with a real system clock.
 func New(cfg config.TunnelConfig) *Tunnel {
-	return NewWithGate(cfg, nil)
+	return NewWithGate(cfg, nil, nil)
 }
 
 // NewWithGate creates a Tunnel whose reconnect loop waits for gate before each dial.
 // gate is called at the start of every connect attempt; a non-nil return aborts the tunnel.
-func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error) *Tunnel {
-	t := &Tunnel{cfg: cfg, clock: realClock{}, vpnGate: gate}
+// isConnected is polled while the tunnel is connected to detect gate loss immediately.
+func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error, isConnected func() bool) *Tunnel {
+	t := &Tunnel{cfg: cfg, clock: realClock{}, vpnGate: gate, vpnIsConnected: isConnected}
 	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
 	return t
 }
@@ -148,6 +151,7 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		if t.vpnGate != nil {
 			s := t.Stats()
 			s.LastError = "waiting for VPN: " + t.cfg.RequiresVPN
+			s.NextReconnectAt = time.Time{} // clear stale countdown from previous delay
 			t.stats.Store(s)
 
 			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN)
@@ -204,6 +208,25 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		s.ConnectedAt = time.Time{}
 		t.stats.Store(s)
 		t.client = nil
+
+		// If there's no network at all, wait for it and reset backoff.
+		// Skip the countdown after restore — waiting for the network already
+		// served as the delay.
+		if !netcheck.HasUplink() {
+			s.LastError = "waiting for network"
+			t.stats.Store(s)
+			log.Info("tunnel waiting for network", "tunnel", t.cfg.Name)
+			if err := netcheck.WaitForUplink(ctx); err != nil {
+				t.setStatus(StatusDisconnected)
+				return nil
+			}
+			s = t.Stats()
+			s.LastError = ""
+			t.stats.Store(s)
+			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
+			log.Info("network up, reconnecting tunnel immediately", "tunnel", t.cfg.Name)
+			continue
+		}
 
 		delay := backoff.next()
 		s.NextReconnectAt = t.clock.Now().Add(delay)
@@ -315,9 +338,24 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 	probeTimeout := time.Duration(t.cfg.DialTimeout) * time.Second
 	fails := 0
 
+	// depLost receives a reason string when network or VPN dependency is lost.
+	// Buffered so watchDeps can send without blocking even if keepalive already exited.
+	depLost := make(chan string, 1)
+	go t.watchDeps(ctx, depLost)
+
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case reason := <-depLost:
+			log.Info("tunnel dependency lost, reconnecting",
+				"tunnel", t.cfg.Name,
+				"reason", reason,
+			)
+			s := t.stats.Load().(Stats)
+			s.LastError = reason
+			t.stats.Store(s)
+			t.client.Close()
 			return
 		case <-t.clock.After(interval):
 		}
@@ -347,6 +385,36 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 			t.stats.Store(s)
 		}
 		fails = 0
+	}
+}
+
+// watchDeps polls network and VPN prerequisites every 2 s while the tunnel is
+// connected. When a dependency is lost it sends a human-readable reason to lost
+// (non-blocking) so keepalive() can close the client and trigger an immediate
+// reconnect rather than waiting for keepalive timeouts.
+func (t *Tunnel) watchDeps(ctx context.Context, lost chan<- string) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !netcheck.HasUplink() {
+				select {
+				case lost <- "waiting for network":
+				default:
+				}
+				return
+			}
+			if t.vpnIsConnected != nil && !t.vpnIsConnected() {
+				select {
+				case lost <- "waiting for VPN: " + t.cfg.RequiresVPN:
+				default:
+				}
+				return
+			}
+		}
 	}
 }
 

@@ -42,6 +42,9 @@
     <span x-text="'PID ' + $store.hop.meta.pid"></span>
     <span class="header-sep">·</span>
     <span x-text="'up ' + $store.hop.meta.uptime"></span>
+    <span class="header-sep">·</span>
+    <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
+          x-text="$store.hop.meta.uplink ? '● link' : '○ no link'"></span>
   </div>
 </header>
 
@@ -72,6 +75,7 @@
             <div class="tc-header">
               <div class="tc-id">
                 <span class="tc-name" x-text="name"></span>
+                <span class="tc-host" x-text="$store.hop.vpns[name]?.host || ''"></span>
               </div>
               <div class="tc-status-group">
                 <span class="dot" :class="$store.hop.vpnVisualStatus(name)"></span>
@@ -85,8 +89,15 @@
                 <span class="tc-info-item tc-recon"
                       x-show="($store.hop.vpns[name]?.reconnects || 0) > 0"
                       x-text="'recon ' + $store.hop.vpns[name]?.reconnects"></span>
+                <span class="tc-info-item tc-reconnect-cd"
+                      x-show="$store.hop.vpns[name]?.reconnect_in != null && $store.hop.vpns[name]?.reconnect_in >= 0"
+                      x-text="'next in ' + $store.hop.vpns[name]?.reconnect_in + 's'"></span>
               </div>
             </div>
+            <div class="tc-reason"
+                 x-show="$store.hop.vpns[name]?.state !== 'connected'"
+                 :class="$store.hop.vpns[name]?.last_error ? 'has-error' : 'no-error'"
+                 x-text="$store.hop.vpns[name]?.last_error || '—'"></div>
           </div>
         </template>
       </div>
@@ -109,7 +120,7 @@
             <span class="dot" :class="$store.hop.visualStatus(name)"></span>
             <span class="status-label"
                   :class="$store.hop.visualStatus(name)"
-                  x-text="$store.hop.tunnels[name]?.status || '…'"></span>
+                  x-text="$store.hop.tunnelStatusText(name)"></span>
             <span class="tc-ka-warn"
                   x-show="$store.hop.tunnels[name]?.keepalive_failures > 0"
                   x-text="'⚠ ' + $store.hop.tunnels[name]?.keepalive_failures"></span>

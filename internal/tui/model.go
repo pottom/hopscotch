@@ -75,7 +75,7 @@ const (
 	numTabs   = 3
 )
 
-const headerHeight = 4 // blank · title+tabs · stats · blank
+const headerHeight = 3 // title+tabs · stats · blank
 
 const footerHeight = 2 // separator newline + hints+ports line
 
@@ -266,8 +266,13 @@ type sseTrafficEntry struct {
 	ReconnectIn *int   `json:"reconnect_in,omitempty"`
 }
 
+type sseVPNEntry struct {
+	ReconnectIn *int `json:"reconnect_in,omitempty"`
+}
+
 type ssePayload struct {
 	Tunnels map[string]sseTrafficEntry `json:"tunnels"`
+	VPNs    map[string]sseVPNEntry    `json:"vpns,omitempty"`
 	Direct  sseTrafficEntry            `json:"direct"`
 }
 
@@ -462,6 +467,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.traffic[name].active = t.Active
 			m.traffic[name].reconnectIn = t.ReconnectIn
 		}
+		for name, v := range msg.VPNs {
+			if m.traffic[name] == nil {
+				m.traffic[name] = &trafficWindow{}
+			}
+			m.traffic[name].reconnectIn = v.ReconnectIn
+		}
 		if m.traffic["direct"] == nil {
 			m.traffic["direct"] = &trafficWindow{}
 		}
@@ -537,8 +548,8 @@ func (m Model) resizeViewports() Model {
 		}
 	}
 
-	// Routes viewport is 4 rows shorter to make room for blank + input + result + blank + headers + separator.
-	routeVPH := vpH - 4
+	// Routes header adds 5 rows beyond base headerHeight (3): blank + input + result + blank + colheader + separator.
+	routeVPH := vpH - 5
 	if routeVPH < 1 {
 		routeVPH = 1
 	}
@@ -580,9 +591,14 @@ func (m Model) renderTitleLine() string {
 	if v := m.status.LatestVersion; v != "" {
 		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
-	left := fmt.Sprintf("  %s  %s  %s  %s",
+	uplinkStr := styleMuted.Render("○ no link")
+	if m.status.Uplink {
+		uplinkStr = styleConnected.Render("● link")
+	}
+	left := fmt.Sprintf("  %s  %s  %s  %s  %s",
 		styleHeader.Render("hopscotch "+versionStr),
 		renderBadge(m.status.Status),
+		uplinkStr,
 		styleMuted.Render(fmt.Sprintf("PID %d", m.status.PID)),
 		styleMuted.Render("up "+m.status.Uptime),
 	)
@@ -591,7 +607,7 @@ func (m Model) renderTitleLine() string {
 	if gap < 2 {
 		gap = 2
 	}
-	return "\n" + left + strings.Repeat(" ", gap) + right + "\n"
+	return left + strings.Repeat(" ", gap) + right + "\n"
 }
 
 func (m Model) renderStatsLine() string {
@@ -791,7 +807,8 @@ func (m Model) buildRoutesContent() string {
 
 // buildStatusContent renders the scrollable content for the status viewport.
 // fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
-const fixedColsWidth = 2 + 26 + 22 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 126
+const fixedColsWidth    = 2 + 26 + 22 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 126
+const vpnFixedColsWidth = 2 + 26 + 29 + 16 + 10 + 5                    // = 88
 
 func (m Model) sectionSep() string {
 	return "  " + styleMuted.Render(strings.Repeat("─", max(m.width-4, 10))) + "\n"
@@ -817,12 +834,21 @@ func (m Model) buildStatusContent() string {
 
 	// ── VPN section ───────────────────────────────────────────────────────────
 	if len(m.status.VPNs) > 0 {
-		fmt.Fprintf(&b, "  %s%s%s%s%s\n",
+		vpnReasonW := m.width - vpnFixedColsWidth - 2
+		if vpnReasonW < 8 {
+			vpnReasonW = 0
+		}
+		vpnReasonHdr := ""
+		if vpnReasonW >= 8 {
+			vpnReasonHdr = hdr(styleMuted, "REASON")
+		}
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s\n",
 			hdr(styleColName, "VPN"),
 			hdr(styleVPNColHost, "HOST"),
 			hdr(styleColStatus, "STATUS"),
 			hdr(styleColUptime, "UPTIME"),
 			hdr(styleColRecon, "RC"),
+			vpnReasonHdr,
 		)
 		b.WriteString(m.sectionSep())
 
@@ -834,29 +860,38 @@ func (m Model) buildStatusContent() string {
 
 		for _, name := range vpnNames {
 			v := m.status.VPNs[name]
+			w := m.traffic[name]
 
-			var stateStyle lipgloss.Style
-			switch v.State {
-			case "connected":
-				stateStyle = styleConnected
-			case "connecting":
-				stateStyle = styleConnecting
-			default:
-				stateStyle = styleDisconnected
+			var reconnectIn *int
+			if w != nil {
+				reconnectIn = w.reconnectIn
 			}
-			statusStr := stateStyle.Render("● " + v.State)
 
 			uptime := "—"
 			if v.UptimeSeconds > 0 {
 				uptime = fmtDuration(time.Duration(v.UptimeSeconds) * time.Second)
 			}
 
-			fmt.Fprintf(&b, "  %s%s%s%s%s\n",
+			vpnReasonStr := ""
+			if vpnReasonW > 0 {
+				reason := "—"
+				var reasonStyle lipgloss.Style
+				if v.LastError != "" && v.State != "connected" {
+					reason = v.LastError
+					reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
+				} else {
+					reasonStyle = styleMuted
+				}
+				vpnReasonStr = renderReason(reason, reasonStyle, vpnReasonW, vpnFixedColsWidth+2)
+			}
+
+			fmt.Fprintf(&b, "  %s%s%s%s%s%s\n",
 				styleColName.Render(name),
 				styleVPNColHost.Render(v.Host),
-				styleColStatus.Render(statusStr),
+				styleColStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)),
 				styleColUptime.Render(uptime),
 				styleColRecon.Render(fmt.Sprintf("%d", v.Reconnects)),
+				vpnReasonStr,
 			)
 		}
 		b.WriteString("\n")
@@ -923,11 +958,17 @@ func (m Model) buildStatusContent() string {
 			// fixedColsWidth+4 = 2 (row indent) + columns + 2 (separator before reason)
 			reasonStr = renderReason(reason, reasonStyle, reasonW, fixedColsWidth+2)
 		}
+		var tunnelStatusStr string
+		if strings.HasPrefix(t.LastError, "waiting for VPN") || strings.HasPrefix(t.LastError, "waiting for network") {
+			tunnelStatusStr = styleConnecting.Render("◌ pending")
+		} else {
+			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
+		}
 		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
 			styleColName.Render(name),
 			styleColHost.Render(t.Host),
 			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
-			styleColStatus.Render(renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)),
+			styleColStatus.Render(tunnelStatusStr),
 			styleColUptime.Render(uptime),
 			styleColRecon.Render(fmt.Sprintf("%d", t.ReconnectCount)),
 			styleColBpsIn.Render("↓ "+fmtBytes(bpsIn)),
@@ -1058,6 +1099,9 @@ func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int)
 		}
 		return styleConnecting.Render(dot + " connecting")
 	case "disconnected":
+		if reconnectIn != nil && *reconnectIn >= 0 {
+			return styleConnecting.Render(fmt.Sprintf("○ %ds", *reconnectIn))
+		}
 		return styleDisconnected.Render("○ disconnected")
 	default:
 		return styleMuted.Render("? " + status)
