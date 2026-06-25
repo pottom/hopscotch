@@ -30,3 +30,17 @@ func killOrphanedProcs(name string, useSudo bool) {
 	}
 	_ = cmd.Run() // exit code 1 = no match — not an error
 }
+
+// terminateByName sends SIGTERM to all processes named name.
+// Unlike killProcGroup (which targets sudo's PGID), this reaches openconnect
+// even if it created its own process group — giving it a chance to send a
+// proper disconnect packet to the VPN server before we force-kill it.
+func terminateByName(name string, useSudo bool) {
+	var cmd *exec.Cmd
+	if useSudo {
+		cmd = exec.Command("sudo", "pkill", "-TERM", "-x", name)
+	} else {
+		cmd = exec.Command("pkill", "-TERM", "-x", name)
+	}
+	_ = cmd.Run()
+}

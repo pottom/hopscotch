@@ -125,6 +125,7 @@ func (c *Connection) Run(ctx context.Context) error {
 
 	for {
 		c.setState(StateConnecting)
+		beforeRun := time.Now()
 		if err := c.runOnce(ctx); ctx.Err() != nil {
 			c.setState(StateDisconnected)
 			c.nextReconnectAt.Store(time.Time{})
@@ -134,6 +135,13 @@ func (c *Connection) Run(ctx context.Context) error {
 		}
 		c.setState(StateDisconnected)
 		c.reconnects.Add(1)
+
+		// If the VPN reached StateConnected during this run, reset the backoff —
+		// only runs that never connected (e.g. auth failures, bad routes) should
+		// accumulate reconnect delay.
+		if c.connectedAt.Load().(time.Time).After(beforeRun) {
+			b.reset()
+		}
 
 		// If there's no network at all, wait for it before the next attempt.
 		// Skip the backoff countdown after restore — waiting for the network

@@ -211,18 +211,25 @@ func (c *Connection) buildArgs(hasPassword bool) []string {
 // pollPingHost probes host:port via TCP every 3 seconds.
 // After 2 consecutive successes it marks the VPN connected.
 // After 3 consecutive failures (post-connect) it kills the subprocess.
-// If connectivity is not confirmed within 45 s it also restarts — prevents
-// the VPN from staying stuck in "connecting" indefinitely.
+// If connectivity is not confirmed within 30 s it restarts — but uses SIGTERM
+// first so openconnect can send a clean disconnect to the VPN server, preventing
+// stale server sessions that would block the next reconnect.
 func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
 	host := c.cfg.PingHost
 	if !strings.Contains(host, ":") {
 		host += ":443"
 	}
 
+	binary := c.cfg.Binary
+	if binary == "" {
+		binary = "openconnect"
+	}
+	binaryBase := filepath.Base(binary)
+
 	var ok, fail int
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
-	connectTimeout := time.NewTimer(45 * time.Second)
+	connectTimeout := time.NewTimer(30 * time.Second)
 	defer connectTimeout.Stop()
 
 	for {
@@ -237,10 +244,23 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 					"vpn", c.cfg.Name, "host", host)
 				c.lastError.Store("connect timeout: " + host + " unreachable")
 				c.setState(StateDisconnected)
-				killProcGroup(cmd)
+				// SIGTERM lets openconnect send a proper goodbye to the VPN server
+				// so the server session is released immediately — without this, the
+				// stale session blocks ping_host on the next reconnect attempt too.
+				terminateByName(binaryBase, c.cfg.Sudo)
+				select {
+				case <-died:
+				case <-time.After(3 * time.Second):
+					killProcGroup(cmd)
+				}
+				killOrphanedProcs(binaryBase, c.cfg.Sudo)
 				return
 			}
 		case <-ticker.C:
+			// watchStderr may have already set StateConnected via "Established DTLS" line.
+			if c.State() == StateConnected {
+				connectTimeout.Stop()
+			}
 			conn, err := net.DialTimeout("tcp", host, 2*time.Second)
 			if err == nil {
 				conn.Close()
