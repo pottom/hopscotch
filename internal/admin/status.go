@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"hopscotch/internal/netcheck"
 	"hopscotch/internal/tunnel"
 	"hopscotch/internal/version"
 	"hopscotch/internal/vpn"
@@ -47,6 +48,7 @@ type StatusResponse struct {
 	PID           int                         `json:"pid"`
 	ProxyPort     int                         `json:"proxy_port"`
 	AdminPort     int                         `json:"admin_port"`
+	Uplink        bool                        `json:"uplink"`
 	Tunnels       map[string]TunnelStatusJSON `json:"tunnels"`
 	VPNs          map[string]VPNStatusJSON    `json:"vpns,omitempty"`
 	Routes        []RouteJSON                 `json:"routes"`
@@ -126,6 +128,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		PID:           s.pid,
 		ProxyPort:     s.proxyPort,
 		AdminPort:     s.port,
+		Uplink:        netcheck.HasUplink(),
 		Tunnels:       tunnels,
 		VPNs:          vpnMap,
 		Routes:        routes,

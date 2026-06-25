@@ -149,6 +149,7 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		if t.vpnGate != nil {
 			s := t.Stats()
 			s.LastError = "waiting for VPN: " + t.cfg.RequiresVPN
+			s.NextReconnectAt = time.Time{} // clear stale countdown from previous delay
 			t.stats.Store(s)
 
 			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN)

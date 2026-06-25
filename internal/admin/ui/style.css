@@ -90,6 +90,13 @@ body {
   font-size: 0.72rem;
 }
 
+.uplink-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+}
+.uplink-badge.up   { color: var(--connected); }
+.uplink-badge.down { color: var(--disconnected); }
+
 /* ── TAB BAR ──────────────────────────────── */
 .tab-bar {
   display: flex;

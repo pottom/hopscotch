@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/log"
 
 	"hopscotch/internal/keychain"
+	"hopscotch/internal/netcheck"
 )
 
 // runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.
@@ -75,6 +76,9 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		done <- cmd.Wait()
 		close(died)
 	}()
+
+	// Kill subprocess if network disappears while it's running.
+	go c.watchUplink(ctx, cmd, died)
 
 	if c.cfg.PingHost != "" {
 		// Poll ping_host to detect when VPN is up and when it drops.
@@ -254,6 +258,29 @@ func (c *Connection) runPreConnect(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// watchUplink polls for network connectivity and kills the subprocess when the
+// uplink disappears. This lets the Run() loop handle "waiting for network"
+// instead of letting openconnect spin on its own internal reconnect logic.
+func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-died:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !netcheck.HasUplink() {
+				log.Info("vpn: network down, stopping subprocess", "vpn", c.cfg.Name)
+				c.lastError.Store("waiting for network")
+				killProcGroup(cmd)
+				return
+			}
+		}
+	}
 }
 
 // watchStderr logs openconnect output and promotes connection events.

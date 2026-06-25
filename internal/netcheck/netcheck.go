@@ -1,5 +1,6 @@
-// Package netcheck provides a simple cross-platform uplink detector.
-// It uses only stdlib net.Interfaces — no CGO, no platform-specific syscalls.
+// Package netcheck provides a cross-platform uplink detector.
+// It uses a TCP dial to a well-known host rather than interface enumeration,
+// which avoids false positives from tunnel interfaces (utun, VPN tun, VM bridges).
 package netcheck
 
 import (
@@ -8,35 +9,16 @@ import (
 	"time"
 )
 
-// HasUplink reports whether at least one non-loopback, non-link-local
-// interface is up and has a routable IP address.
+// HasUplink reports whether the machine has an active internet path by
+// attempting a short TCP connection to 1.1.1.1:53. Returns true on error
+// from the dial setup itself (not a connection refusal) to avoid blocking.
 func HasUplink() bool {
-	ifaces, err := net.Interfaces()
+	conn, err := net.DialTimeout("tcp4", "1.1.1.1:53", 500*time.Millisecond)
 	if err != nil {
-		return true // don't block on transient error
+		return false
 	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip != nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
-				return true
-			}
-		}
-	}
-	return false
+	conn.Close()
+	return true
 }
 
 // WaitForUplink blocks until HasUplink returns true or ctx is cancelled.

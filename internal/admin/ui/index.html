@@ -42,6 +42,9 @@
     <span x-text="'PID ' + $store.hop.meta.pid"></span>
     <span class="header-sep">·</span>
     <span x-text="'up ' + $store.hop.meta.uptime"></span>
+    <span class="header-sep">·</span>
+    <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
+          x-text="$store.hop.meta.uplink ? '● link' : '○ no link'"></span>
   </div>
 </header>
 
@@ -117,7 +120,7 @@
             <span class="dot" :class="$store.hop.visualStatus(name)"></span>
             <span class="status-label"
                   :class="$store.hop.visualStatus(name)"
-                  x-text="$store.hop.tunnels[name]?.status || '…'"></span>
+                  x-text="$store.hop.tunnelStatusText(name)"></span>
             <span class="tc-ka-warn"
                   x-show="$store.hop.tunnels[name]?.keepalive_failures > 0"
                   x-text="'⚠ ' + $store.hop.tunnels[name]?.keepalive_failures"></span>

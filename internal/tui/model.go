@@ -591,9 +591,14 @@ func (m Model) renderTitleLine() string {
 	if v := m.status.LatestVersion; v != "" {
 		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
-	left := fmt.Sprintf("  %s  %s  %s  %s",
+	uplinkStr := styleMuted.Render("○ no link")
+	if m.status.Uplink {
+		uplinkStr = styleConnected.Render("● link")
+	}
+	left := fmt.Sprintf("  %s  %s  %s  %s  %s",
 		styleHeader.Render("hopscotch "+versionStr),
 		renderBadge(m.status.Status),
+		uplinkStr,
 		styleMuted.Render(fmt.Sprintf("PID %d", m.status.PID)),
 		styleMuted.Render("up "+m.status.Uptime),
 	)
@@ -953,11 +958,17 @@ func (m Model) buildStatusContent() string {
 			// fixedColsWidth+4 = 2 (row indent) + columns + 2 (separator before reason)
 			reasonStr = renderReason(reason, reasonStyle, reasonW, fixedColsWidth+2)
 		}
+		var tunnelStatusStr string
+		if strings.HasPrefix(t.LastError, "waiting for VPN") || strings.HasPrefix(t.LastError, "waiting for network") {
+			tunnelStatusStr = styleConnecting.Render("◌ pending")
+		} else {
+			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
+		}
 		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
 			styleColName.Render(name),
 			styleColHost.Render(t.Host),
 			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
-			styleColStatus.Render(renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)),
+			styleColStatus.Render(tunnelStatusStr),
 			styleColUptime.Render(uptime),
 			styleColRecon.Render(fmt.Sprintf("%d", t.ReconnectCount)),
 			styleColBpsIn.Render("↓ "+fmtBytes(bpsIn)),

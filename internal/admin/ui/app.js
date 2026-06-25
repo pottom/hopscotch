@@ -108,12 +108,20 @@ document.addEventListener('alpine:init', () => {
     },
 
     // Returns the effective visual state for a tunnel — mirrors TUI renderStatus logic.
-    // connected + keepalive_failures > 0 → 'warning' (amber, same as connecting visuals)
     visualStatus(name) {
       const t = this.tunnels[name];
       if (!t) return '';
       if (t.status === 'connected' && t.keepalive_failures > 0) return 'warning';
+      if (t.last_error?.startsWith('waiting for VPN') || t.last_error?.startsWith('waiting for network')) return 'connecting';
       return t.status;
+    },
+
+    // Returns the display text for a tunnel's status label.
+    tunnelStatusText(name) {
+      const t = this.tunnels[name];
+      if (!t) return '…';
+      if (t.last_error?.startsWith('waiting for VPN') || t.last_error?.startsWith('waiting for network')) return 'pending';
+      return t.status || '…';
     },
 
     vpnVisualStatus(name) {
@@ -151,6 +159,7 @@ async function refreshStatus() {
       proxy_port:     st.proxy_port,
       admin_port:     st.admin_port,
       status:         st.status,
+      uplink:         st.uplink ?? true,
     };
 
     // Rebuild tunnel map, preserving live bps/active values from SSE.
