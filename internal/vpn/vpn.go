@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+
+	"hopscotch/internal/netcheck"
 )
 
 // Stats is a point-in-time snapshot of one VPN connection.
@@ -114,8 +116,10 @@ func (c *Connection) setState(s State) {
 // Run manages the VPN subprocess lifecycle with exponential backoff reconnects.
 // Blocks until ctx is cancelled.
 func (c *Connection) Run(ctx context.Context) error {
+	initial := time.Duration(c.cfg.ReconnectDelay) * time.Second
 	b := &backoff{
-		current: time.Duration(c.cfg.ReconnectDelay) * time.Second,
+		initial: initial,
+		current: initial,
 		max:     time.Duration(c.cfg.ReconnectMaxDelay) * time.Second,
 	}
 
@@ -131,6 +135,20 @@ func (c *Connection) Run(ctx context.Context) error {
 		c.setState(StateDisconnected)
 		c.reconnects.Add(1)
 
+		// If there's no network at all, wait for it before the next attempt
+		// and reset the backoff so we don't start with a long delay when it returns.
+		if !netcheck.HasUplink() {
+			c.lastError.Store("waiting for network")
+			log.Info("vpn waiting for network", "vpn", c.cfg.Name)
+			if err := netcheck.WaitForUplink(ctx); err != nil {
+				c.nextReconnectAt.Store(time.Time{})
+				return nil
+			}
+			c.lastError.Store("")
+			b.reset()
+			log.Info("network up, reconnecting vpn", "vpn", c.cfg.Name)
+		}
+
 		delay := b.next()
 		log.Warn("vpn disconnected, reconnecting", "vpn", c.cfg.Name, "delay", delay)
 		c.nextReconnectAt.Store(time.Now().Add(delay))
@@ -145,6 +163,7 @@ func (c *Connection) Run(ctx context.Context) error {
 }
 
 type backoff struct {
+	initial time.Duration
 	current time.Duration
 	max     time.Duration
 }
@@ -153,4 +172,8 @@ func (b *backoff) next() time.Duration {
 	d := b.current
 	b.current = min(b.current*2, b.max)
 	return d
+}
+
+func (b *backoff) reset() {
+	b.current = b.initial
 }

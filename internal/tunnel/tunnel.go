@@ -20,6 +20,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"hopscotch/internal/config"
+	"hopscotch/internal/netcheck"
 )
 
 // Clock abstracts time to allow synctest-based testing of reconnect logic.
@@ -204,6 +205,22 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		s.ConnectedAt = time.Time{}
 		t.stats.Store(s)
 		t.client = nil
+
+		// If there's no network at all, wait for it and reset backoff.
+		if !netcheck.HasUplink() {
+			s.LastError = "waiting for network"
+			t.stats.Store(s)
+			log.Info("tunnel waiting for network", "tunnel", t.cfg.Name)
+			if err := netcheck.WaitForUplink(ctx); err != nil {
+				t.setStatus(StatusDisconnected)
+				return nil
+			}
+			s = t.Stats()
+			s.LastError = ""
+			t.stats.Store(s)
+			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
+			log.Info("network up, reconnecting tunnel", "tunnel", t.cfg.Name)
+		}
 
 		delay := backoff.next()
 		s.NextReconnectAt = t.clock.Now().Add(delay)
