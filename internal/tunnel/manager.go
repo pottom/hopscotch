@@ -16,6 +16,7 @@ import (
 // to avoid an import cycle between the tunnel and vpn packages.
 type VPNGater interface {
 	WaitConnected(ctx context.Context, name string) error
+	IsConnected(name string) bool
 }
 
 // Manager owns all tunnels and exposes status and dialing.
@@ -42,7 +43,10 @@ func (m *Manager) newTunnel(cfg config.TunnelConfig) *Tunnel {
 		gate := func(ctx context.Context) error {
 			return m.vpn.WaitConnected(ctx, name)
 		}
-		return NewWithGate(cfg, gate)
+		isConnected := func() bool {
+			return m.vpn.IsConnected(name)
+		}
+		return NewWithGate(cfg, gate, isConnected)
 	}
 	return New(cfg)
 }

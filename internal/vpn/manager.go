@@ -55,6 +55,15 @@ func (m *Manager) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
+// IsConnected reports whether the named VPN is currently in StateConnected.
+func (m *Manager) IsConnected(name string) bool {
+	conn, ok := m.connections[name]
+	if !ok {
+		return false
+	}
+	return conn.State() == StateConnected
+}
+
 // WaitConnected blocks until the named VPN reaches StateConnected or ctx is cancelled.
 // Returns fmt.Errorf if the VPN name is not configured (config validation should catch this first).
 func (m *Manager) WaitConnected(ctx context.Context, name string) error {
