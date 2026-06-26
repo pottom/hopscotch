@@ -112,3 +112,186 @@ func TestLoad_NoConfigFile(t *testing.T) {
 		t.Fatal("expected error for missing file, got nil")
 	}
 }
+
+func TestLoad_MissingUser(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    local_port: 1080
+proxy:
+  port: 8080
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for missing user, got nil")
+	}
+}
+
+func TestLoad_MissingName(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - host: jump.example.com
+    user: myuser
+    local_port: 1080
+proxy:
+  port: 8080
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for missing name, got nil")
+	}
+}
+
+func TestLoad_MissingLocalPort(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+proxy:
+  port: 8080
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for missing local_port, got nil")
+	}
+}
+
+func TestLoad_ProxyAdminPortConflict(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+    local_port: 1080
+proxy:
+  port: 9090
+admin:
+  port: 9090
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for proxy/admin port conflict, got nil")
+	}
+}
+
+func TestLoad_RuleEmptyPattern(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+    local_port: 1080
+proxy:
+  port: 8080
+  rules:
+    - pattern: ""
+      tunnel: prod
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for empty pattern, got nil")
+	}
+}
+
+func TestLoad_RuleNoTunnelOrVia(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+    local_port: 1080
+proxy:
+  port: 8080
+  rules:
+    - pattern: "*.example.com"
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for rule with no tunnel or via, got nil")
+	}
+}
+
+func TestLoad_UnknownVPNReference(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+    local_port: 1080
+    requires_vpn: nonexistent-vpn
+proxy:
+  port: 8080
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for unknown requires_vpn reference, got nil")
+	}
+}
+
+func TestLoad_VPNUnsupportedType(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+    local_port: 1080
+vpn:
+  - name: myvpn
+    type: wireguard
+    server: vpn.example.com
+proxy:
+  port: 8080
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for unsupported VPN type, got nil")
+	}
+}
+
+func TestLoad_VPNExtraArgsManagedFlag(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+    local_port: 1080
+vpn:
+  - name: myvpn
+    type: openconnect
+    server: vpn.example.com
+    user: vpnuser
+    extra_args:
+      - "--user=other"
+proxy:
+  port: 8080
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for managed flag in extra_args, got nil")
+	}
+}
+
+func TestLoad_VPNDuplicateName(t *testing.T) {
+	path := writeConfig(t, `
+tunnels:
+  - name: prod
+    host: jump.example.com
+    user: myuser
+    local_port: 1080
+vpn:
+  - name: myvpn
+    type: openconnect
+    server: vpn1.example.com
+  - name: myvpn
+    type: openconnect
+    server: vpn2.example.com
+proxy:
+  port: 8080
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for duplicate VPN name, got nil")
+	}
+}
