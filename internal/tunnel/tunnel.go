@@ -66,6 +66,7 @@ func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error, 
 // Stats returns a snapshot of the tunnel's current metrics including traffic.
 func (t *Tunnel) Stats() Stats {
 	s := t.stats.Load().(Stats)
+	s.RequiresVPN = t.cfg.RequiresVPN
 	s.BytesIn = t.bytesIn.Load()
 	s.BytesOut = t.bytesOut.Load()
 	s.ActiveConns = t.activeConns.Load()
@@ -147,8 +148,9 @@ func (t *Tunnel) Run(ctx context.Context) error {
 	)
 
 	for {
-		// Wait for VPN if this tunnel has a dependency.
-		if t.vpnGate != nil {
+		// Wait for VPN if this tunnel has a dependency, but only if the VPN
+		// isn't already connected (e.g. after an SSH auth failure the VPN stays up).
+		if t.vpnGate != nil && (t.vpnIsConnected == nil || !t.vpnIsConnected()) {
 			s := t.Stats()
 			s.LastError = "waiting for VPN: " + t.cfg.RequiresVPN
 			s.NextReconnectAt = time.Time{} // clear stale countdown from previous delay
@@ -238,10 +240,19 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			"reconnects", s.ReconnectCount,
 		)
 
+		// If this was an SSH auth failure, watch for new agent keys (e.g. YubiKey
+		// insertion) so we can retry immediately instead of waiting out the backoff.
+		var agentChanged <-chan struct{}
+		if isAuthError(s.LastError) {
+			agentChanged = watchAgentKeys(ctx)
+		}
+
 		select {
 		case <-ctx.Done():
 			t.setStatus(StatusDisconnected)
 			return nil
+		case <-agentChanged:
+			log.Info("SSH agent keys changed, retrying immediately", "tunnel", t.cfg.Name)
 		case <-t.clock.After(delay):
 		}
 	}

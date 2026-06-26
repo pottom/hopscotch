@@ -63,8 +63,8 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 | **Dead connection detection** | Keepalive probes every few seconds — not TCP's minutes-long timeout. Reconnect starts in under 10 seconds. |
 | **Shell integration** | `hopscotch enable` / `disable` like Python venv — sets and restores `HTTP_PROXY` without touching other shells. |
 | **SSH ProxyCommand** | `ssh`, `scp`, `rsync`, VSCode Remote, Ansible — all route through tunnels transparently, zero extra flags. |
-| **TUI dashboard** | Live tunnel cards with dual-channel traffic graphs, reconnect countdowns, URL tester, log streaming. |
-| **Web UI** | Same data, in your browser at `localhost:9090`, live SSE updates, no page refresh needed. |
+| **TUI dashboard** | Live tunnel cards with dual-channel traffic graphs, reconnect countdowns, URL tester, log streaming with level filter. |
+| **Web UI** | Same data, in your browser at `localhost:9090`, live SSE updates, log level filter, tab and level persisted across reloads. |
 | **VPN integration** | Manages openconnect as a subprocess; tunnels wait for VPN before connecting, show reason in UI. |
 | **Hot reload** | Config reloads on `SIGHUP` or file change, tunnels re-configured in place, no restart. |
 | **Self-update** | `hopscotch update` atomically replaces the binary. Container-aware — prints a notice instead of updating inside Docker. |
@@ -88,7 +88,7 @@ Each tunnel card shows: connection status, host, local port, uptime, reconnect c
 | `↑` `↓` / `j` `k` | Scroll |
 | `/` | Focus URL tester (Patterns tab) |
 | `Esc` | Unfocus tester |
-| `f` | Toggle graphs on/off (compact mode) |
+| `f` | **Status tab:** toggle graphs on/off (compact mode) · **Logs tab:** cycle log level filter (ALL → INFO+ → WARN+ → ERR) |
 | `g` | Toggle mirror graph (dual-channel ↔ download only) |
 | `q` / `Ctrl+C` | Quit |
 
@@ -176,6 +176,8 @@ The generated file stays in sync: hopscotch refreshes it automatically on every 
 ## Web admin UI
 
 `http://localhost:9090` — mirrors the TUI with tunnel cards, live traffic graphs, a Patterns tab with interactive URL tester, VPN status, and a Logs tab with real-time structured output. Pure SSE, no polling.
+
+The **Logs tab** has level filter buttons (ALL / INFO / WARN / ERR) that reconnect the SSE stream so only matching lines are sent from the server. The active tab and selected log level are saved in `localStorage` and restored on reload.
 
 ![Admin web UI](docs/ui-preview.svg)
 
@@ -300,7 +302,7 @@ admin:
 | `host` | — | SSH server hostname or IP |
 | `port` | `22` | SSH server port |
 | `user` | — | SSH username |
-| `identity_file` | — | Path to private key; omit to use SSH agent (YubiKey, gpg-agent, ssh-agent) |
+| `identity_file` | — | Path to private key; omit to use SSH agent (YubiKey, gpg-agent, ssh-agent). On auth failure, hopscotch watches the agent for new keys and retries immediately when one appears — no need to wait for the backoff timer after inserting a YubiKey. |
 | `local_port` | — | Local SOCKS5 port for this tunnel |
 | `requires_vpn` | — | Name of a `vpn` entry; tunnel waits for VPN before connecting |
 | `pre_connect` | — | Shell commands to run before each dial attempt |
@@ -324,8 +326,6 @@ vpn:
     user: alice
     sudo: true                    # run openconnect via sudo
     ping_host: "10.0.0.1:22"     # TCP probe to confirm VPN is actually up
-    pre_connect:
-      - "sudo networksetup -setdnsservers Wi-Fi Empty"
     reconnect_delay: 15
     reconnect_max_delay: 120
 
@@ -336,7 +336,13 @@ tunnels:
     ...
 ```
 
-hopscotch validates that `sudo` can run openconnect before daemonizing, and kills the entire openconnect process group on shutdown.
+hopscotch validates that `sudo` can run openconnect before daemonizing, and kills orphaned openconnect processes on startup and shutdown — using SIGTERM first so the VPN server receives a clean disconnect before SIGKILL, avoiding the 30-second session hold that some VPN servers impose after an abrupt drop.
+
+**DNS resolution:** before starting openconnect, hopscotch resolves the VPN server hostname using a public DNS server (default: `1.1.1.1:53`), bypassing the system resolver. This prevents connect failures when the system DNS is left pointing at VPN-internal servers from a previous session — a common issue when vpnc-script sets DNS on connect but doesn't restore it after an abrupt disconnect. The resolved IP is forwarded to openconnect via `--resolve` so TLS certificate validation still uses the original hostname. Override with `dns_resolver: "8.8.8.8:53"` if needed.
+
+**Route cleanup:** on disconnect, hopscotch automatically removes any routes left on the VPN tunnel interface (`utun*` on macOS, `tun*` on Linux). No `post_disconnect` cleanup scripts needed for this.
+
+**Progress visibility:** the TUI MESSAGE column shows each connecting phase in real time — `resolving vpn.corp.com`, `openconnect starting`, `waiting for VPN tunnel`, `probing 10.0.0.1:22` — so you can see exactly where a slow or failed connect is stuck. The IFACE column shows the detected tunnel interface (e.g. `utun4`) once connected.
 
 #### VPN password
 
@@ -362,16 +368,17 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 |-------|---------|-------------|
 | `name` | — | Unique VPN name (referenced by `requires_vpn`) |
 | `type` | — | `openconnect` (only supported type) |
-| `server` | — | VPN server URL |
+| `server` | — | VPN server URL (hostname preferred; hopscotch resolves it via `dns_resolver`) |
 | `user` | — | VPN username |
 | `authgroup` | — | Authentication group / realm |
 | `sudo` | `false` | Run openconnect via `sudo` |
 | `binary` | `openconnect` | Path to openconnect binary |
+| `dns_resolver` | `1.1.1.1:53` | DNS server used for pre-connect hostname resolution; bypasses system DNS |
 | `password_env` | — | Environment variable name containing the password |
 | `password_cmd` | — | Shell command whose stdout is the password |
 | `ping_host` | — | `host:port` TCP probe to confirm VPN is up |
 | `pre_connect` | — | Shell commands to run before each connection attempt |
-| `post_disconnect` | — | Shell commands to run after each VPN disconnect (runs even on shutdown) |
+| `post_disconnect` | — | Shell commands to run after each VPN disconnect; route cleanup is automatic, rarely needed |
 | `extra_args` | — | Additional openconnect flags |
 | `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |
@@ -381,7 +388,7 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 ```
 hopscotch start                    # start daemon (detaches from terminal)
 hopscotch start --foreground       # stay in foreground (for Docker, systemd)
-hopscotch start --restart          # replace running instance without prompting
+hopscotch start --restart          # replace running instance; finds stale processes by admin port if PID file is missing
 hopscotch stop                     # stop the daemon
 hopscotch status                   # open interactive TUI (plain text when piped)
 hopscotch status --plain           # force plain text (useful for scripts, watch)

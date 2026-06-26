@@ -1,0 +1,86 @@
+<svg width="860" height="300" viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sd-lg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ══ WINDOW CHROME ══════════════════════════════════════════════════ -->
+  <rect width="860" height="36" rx="12" fill="#161f2e"/>
+  <rect y="24" width="860" height="12" fill="#161f2e"/>
+  <circle cx="22" cy="18" r="6" fill="#ff5f56"/>
+  <circle cx="44" cy="18" r="6" fill="#ffbd2e"/>
+  <circle cx="66" cy="18" r="6" fill="#27c93f"/>
+  <text x="430" y="23" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="12" fill="#475569" text-anchor="middle">zsh — ~</text>
+
+  <!-- ══ TERMINAL BACKGROUND ════════════════════════════════════════════ -->
+  <rect y="36" width="860" height="264" fill="#080c14"/>
+
+  <!-- ══ TERMINAL CONTENT ═══════════════════════════════════════════════ -->
+
+  <!-- Line 1 y=66: comment -->
+  <text x="28" y="66" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#334155"># add once to ~/.zshrc</text>
+
+  <!-- Line 2 y=88: eval shell-init -->
+  <text x="28" y="88" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569">eval "$(</text>
+  <text x="94" y="88" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#38bdf8">hopscotch shell-init</text>
+  <text x="266" y="88" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569">)"</text>
+
+  <!-- Gap -->
+
+  <!-- Line 3 y=122: hopscotch enable -->
+  <text x="28" y="122" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569">~ $</text>
+  <text x="60" y="122" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#38bdf8" font-weight="600">  hopscotch enable</text>
+
+  <!-- Line 4 y=144: proxy enabled output -->
+  <text x="28" y="144" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#34d399">⇢  proxy enabled</text>
+  <text x="183" y="144" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569">   socks5h://127.0.0.1:8080</text>
+
+  <!-- Gap -->
+
+  <!-- Line 5 y=178: curl command -->
+  <text x="28" y="178" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#38bdf8" opacity=".65">⇢</text>
+  <text x="44" y="178" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#e2e8f0"> ~</text>
+  <text x="62" y="178" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569"> $</text>
+  <text x="80" y="178" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#e2e8f0">  curl -sf https://api.prod.internal/health</text>
+
+  <!-- Line 6 y=200: JSON output -->
+  <text x="28" y="200" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569">{"status":"ok","service":"api","version":"2.1.4"}</text>
+
+  <!-- Gap -->
+
+  <!-- Line 7 y=234: hopscotch disable -->
+  <text x="28" y="234" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#38bdf8" opacity=".65">⇢</text>
+  <text x="44" y="234" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#e2e8f0"> ~</text>
+  <text x="62" y="234" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569"> $</text>
+  <text x="80" y="234" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#38bdf8" font-weight="600">  hopscotch disable</text>
+
+  <!-- Line 8 y=256: proxy disabled -->
+  <text x="28" y="256" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569">   proxy disabled</text>
+
+  <!-- Line 9 y=278: shell prompt + cursor -->
+  <text x="28" y="278" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#475569">~ $  </text>
+  <text x="76" y="278" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="13" fill="#38bdf8"><animate attributeName="opacity" values="1;0;1" dur="1.1s" repeatCount="indefinite"/>_</text>
+</svg>

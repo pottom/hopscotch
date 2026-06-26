@@ -142,14 +142,42 @@ body {
   min-height: 0;
 }
 
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
 .log-label {
   font-size: 0.65rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
-  flex-shrink: 0;
 }
+
+.log-level-chips {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.log-chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.log-chip:hover { color: var(--text); border-color: var(--accent); }
+.log-chip.active { background: var(--accent); color: #0f172a; border-color: var(--accent); }
 
 .log-scroll {
   flex: 1;
@@ -393,6 +421,16 @@ main, main.main {
   white-space: nowrap;
 }
 
+.tc-vpn-dep.connected    { color: var(--connected); }
+.tc-vpn-dep.connecting   { color: var(--connecting); }
+.tc-vpn-dep.disconnected { color: var(--disconnected); }
+
+.tc-iface {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+}
+
 .tc-recon {
   color: var(--connecting);
 }
@@ -570,4 +608,196 @@ main, main.main {
   .docs-body           { padding: 1.25rem 1rem; }
   .header-meta         { display: none; }
   .tc-info             { display: none; }
+}
+
+/* ── STATUS TABLE LAYOUT ─────────────────── */
+
+.status-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
+.stats-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.graph-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  padding: 0.28em 0.65em;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.graph-btn:hover { color: var(--text); border-color: #253549; }
+.graph-btn.active { color: var(--accent); border-color: rgba(56,189,248,.35); background: rgba(56,189,248,.07); }
+
+.status-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  min-height: 0;
+  padding: 0.75rem 1.75rem 1.5rem;
+}
+
+.sh-label-row td {
+  padding: 0.75rem 0.55rem 0.2rem;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: none;
+}
+.sh-label-row:first-child td { padding-top: 0.4rem; }
+#vpn-tbody + tbody .sh-label-row td { padding-top: 1.75rem; }
+
+.sh-head-row th {
+  text-align: left;
+  padding: 0.3rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.61rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ── STATUS TABLES ───────────────────────── */
+
+.status-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.74rem;
+  table-layout: fixed;
+  min-width: 700px;
+}
+
+.status-table thead th {
+  text-align: left;
+  padding: 0.3rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.61rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.status-table tbody td {
+  padding: 0.33rem 0.55rem;
+  border-bottom: 1px solid rgba(255,255,255,.025);
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.status-table tr.data-row { cursor: pointer; }
+.status-table tr.data-row:hover td { background: rgba(255,255,255,.025); }
+
+/* Column widths via <col> elements */
+col.col-name   { width: 180px; }
+col.col-host   { width: 160px; }
+col.col-iface  { width: 80px;  }
+col.col-vpn    { width: 130px; }
+col.col-port   { width: 54px;  }
+col.col-status { width: 130px; }
+col.col-uptime { width: 78px;  }
+col.col-rc     { width: 40px;  }
+col.col-bps    { width: 90px;  }
+col.col-conn   { width: 48px;  }
+col.col-msg    { /* auto */ }
+
+/* Status span states */
+.st-connected    { color: var(--connected); }
+.st-connecting   { color: var(--connecting); }
+.st-disconnected { color: var(--disconnected); }
+.st-warning      { color: var(--connecting); }
+.st-muted        { color: var(--muted); }
+.st-loading      { color: var(--muted); padding: 0.5rem 0.6rem; font-size: 0.72rem; }
+
+/* BPS cells */
+.bps-in  { color: var(--accent); }
+.bps-out { color: var(--accent2); }
+td[data-col="active"] { color: var(--muted); }
+
+/* VPN dependency badge */
+.vdep { font-size: 0.72rem; }
+.vdep-connected    { color: var(--connected); }
+.vdep-connecting   { color: var(--connecting); }
+.vdep-disconnected { color: var(--disconnected); }
+
+/* Message cells — wraps when needed */
+.status-table td[data-col="msg"] {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
+  vertical-align: top;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+.msg-progress { color: var(--connecting); }
+.msg-error    { color: var(--disconnected); }
+
+/* Direct row */
+.direct-row td[data-col="name"] { color: var(--muted); }
+
+/* Row expand icon — shows ▶ that rotates ▼ when row is expanded */
+.row-expand {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 0.62rem;
+  margin-right: 0.45em;
+  vertical-align: middle;
+  transition: transform .18s ease;
+  transform: rotate(0deg);
+  opacity: 0.55;
+  user-select: none;
+}
+.data-row.expanded .row-expand {
+  transform: rotate(90deg);
+  opacity: 1;
+  color: var(--accent);
+}
+.data-row:hover .row-expand { opacity: 1; }
+
+/* Graph rows — hidden by default, shown per-row via .expanded class */
+.graph-row { display: none !important; }
+.data-row.expanded + .graph-row { display: table-row !important; }
+
+.graph-cell {
+  height: 68px;
+  padding: 0.1rem 0.3rem 0.25rem;
+  position: relative;
+}
+.graph-cell canvas {
+  display: block;
+  width:  100% !important;
+  height: 100% !important;
 }

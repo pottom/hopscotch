@@ -25,6 +25,7 @@ type TunnelStatusJSON struct {
 	LocalPort         int     `json:"local_port"`
 	ReconnectCount    int     `json:"reconnect_count"`
 	UptimeSeconds     float64 `json:"uptime_seconds"`
+	RequiresVPN       string  `json:"requires_vpn,omitempty"`
 	KeepaliveFailures int     `json:"keepalive_failures,omitempty"`
 	LastError         string  `json:"last_error,omitempty"`
 }
@@ -35,7 +36,8 @@ type VPNStatusJSON struct {
 	Host          string  `json:"host"`
 	Reconnects    int     `json:"reconnects"`
 	UptimeSeconds float64 `json:"uptime_seconds"`
-	ReconnectIn   *int   `json:"reconnect_in,omitempty"`
+	TunIface      string  `json:"tun_iface,omitempty"`
+	ReconnectIn   *int    `json:"reconnect_in,omitempty"`
 	LastError     string  `json:"last_error,omitempty"`
 }
 
@@ -49,6 +51,7 @@ type StatusResponse struct {
 	ProxyPort     int                         `json:"proxy_port"`
 	AdminPort     int                         `json:"admin_port"`
 	Uplink        bool                        `json:"uplink"`
+	UplinkIface   string                      `json:"uplink_iface,omitempty"`
 	Tunnels       map[string]TunnelStatusJSON `json:"tunnels"`
 	VPNs          map[string]VPNStatusJSON    `json:"vpns,omitempty"`
 	Routes        []RouteJSON                 `json:"routes"`
@@ -73,6 +76,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			LocalPort:         st.LocalPort,
 			ReconnectCount:    st.ReconnectCount,
 			UptimeSeconds:     uptime,
+			RequiresVPN:       st.RequiresVPN,
 			KeepaliveFailures: st.KeepaliveFailures,
 			LastError:         st.LastError,
 		}
@@ -108,6 +112,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 				Host:          st.Server,
 				Reconnects:    st.Reconnects,
 				UptimeSeconds: uptime,
+				TunIface:      st.TunIface,
 				ReconnectIn:   reconnectIn,
 				LastError:     st.LastError,
 			}
@@ -129,6 +134,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ProxyPort:     s.proxyPort,
 		AdminPort:     s.port,
 		Uplink:        netcheck.HasUplink(),
+		UplinkIface:   netcheck.UplinkInterface(),
 		Tunnels:       tunnels,
 		VPNs:          vpnMap,
 		Routes:        routes,

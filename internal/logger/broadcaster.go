@@ -1,9 +1,14 @@
 package logger
 
 import (
+	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/charmbracelet/log"
 )
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 const maxBufLines = 300
 
@@ -59,11 +64,33 @@ func (b *Broadcaster) Unsubscribe(ch chan string) {
 	close(ch)
 }
 
-// Backlog returns a snapshot of the most recent log lines.
-func (b *Broadcaster) Backlog() []string {
+// Backlog returns a snapshot of the most recent log lines at or above minLevel.
+func (b *Broadcaster) Backlog(minLevel log.Level) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]string, len(b.buf))
-	copy(out, b.buf)
+	out := make([]string, 0, len(b.buf))
+	for _, line := range b.buf {
+		if LineLevel(line) >= minLevel {
+			out = append(out, line)
+		}
+	}
 	return out
+}
+
+// LineLevel extracts the log level from a formatted log line (with or without
+// ANSI escape codes). Returns InfoLevel for unrecognised lines.
+func LineLevel(line string) log.Level {
+	s := ansiRe.ReplaceAllString(line, "")
+	switch {
+	case strings.Contains(s, " DEBU "):
+		return log.DebugLevel
+	case strings.Contains(s, " INFO "):
+		return log.InfoLevel
+	case strings.Contains(s, " WARN "):
+		return log.WarnLevel
+	case strings.Contains(s, " ERRO "), strings.Contains(s, " ERROR "):
+		return log.ErrorLevel
+	default:
+		return log.InfoLevel
+	}
 }

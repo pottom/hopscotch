@@ -5,6 +5,7 @@ package vpn
 import (
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 func setProcGroup(cmd *exec.Cmd) {
@@ -17,18 +18,27 @@ func killProcGroup(cmd *exec.Cmd) {
 	}
 }
 
-// killOrphanedProcs kills any processes named name that have been reparented to
-// PID 1 (init/launchd), i.e. orphaned when their parent (sudo) was SIGKILLed.
-// useSudo should be true when the subprocess was originally launched via sudo —
-// the orphan runs as root and requires elevated privileges to kill.
+// killOrphanedProcs terminates any running instances of name left over from a
+// previous abrupt shutdown. We use SIGTERM (not SIGKILL) so openconnect has a
+// chance to send a clean disconnect to the VPN server — without this the
+// server keeps the session open and blocks the next reconnect attempt.
+//
+// We intentionally do NOT restrict to -P 1 (children of init): when launched
+// via sudo the process tree is launchd→sudo→openconnect, so openconnect's
+// direct parent is sudo, not PID 1, and -P 1 would silently miss it.
 func killOrphanedProcs(name string, useSudo bool) {
-	var cmd *exec.Cmd
+	var term, kill *exec.Cmd
 	if useSudo {
-		cmd = exec.Command("sudo", "pkill", "-9", "-P", "1", "-x", name)
+		term = exec.Command("sudo", "pkill", "-TERM", "-x", name)
+		kill = exec.Command("sudo", "pkill", "-9", "-x", name)
 	} else {
-		cmd = exec.Command("pkill", "-9", "-P", "1", "-x", name)
+		term = exec.Command("pkill", "-TERM", "-x", name)
+		kill = exec.Command("pkill", "-9", "-x", name)
 	}
-	_ = cmd.Run() // exit code 1 = no match — not an error
+	_ = term.Run() // exit code 1 = no match — not an error
+	// Brief pause to let openconnect send its goodbye packet before force-kill.
+	time.Sleep(300 * time.Millisecond)
+	_ = kill.Run()
 }
 
 // terminateByName sends SIGTERM to all processes named name.

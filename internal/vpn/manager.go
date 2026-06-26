@@ -35,6 +35,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			PreConnect:        cfg.PreConnect,
 			PostDisconnect:    cfg.PostDisconnect,
 			Sudo:              cfg.Sudo,
+			DNSResolver:       cfg.DNSResolver,
 			ReconnectDelay:    cfg.ReconnectDelay,
 			ReconnectMaxDelay: cfg.ReconnectMaxDelay,
 		})
