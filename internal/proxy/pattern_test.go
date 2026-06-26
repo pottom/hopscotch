@@ -19,6 +19,13 @@ func TestMatchPattern(t *testing.T) {
 		{"10.0.1.*", "10.0.2.1", false},
 		{"exact.host.com", "exact.host.com", true},
 		{"exact.host.com", "other.host.com", false},
+		// Generic suffix wildcard (*b.example.com)
+		{"*b.tdjsz.local", "ocp4-test-b.tdjsz.local", true},
+		{"*b.tdjsz.local", "oauth-openshift.apps.ocp4-test-b.tdjsz.local", true},
+		{"*a.tdjsz.local", "ocp4-test-b.tdjsz.local", false},
+		{"*a.tdjsz.local", "ocp4-test-a.tdjsz.local", true},
+		{"*b.pdjsz.local", "server-b.pdjsz.local", true},
+		{"*b.pdjsz.local", "server-a.pdjsz.local", false},
 		// CIDR
 		{"10.0.1.0/24", "10.0.1.1", true},
 		{"10.0.1.0/24", "10.0.1.254", true},

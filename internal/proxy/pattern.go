@@ -46,5 +46,11 @@ func matchPattern(pattern, host string) bool {
 		return strings.HasSuffix(host, suffix) || host == pattern[2:]
 	}
 
+	// Generic suffix wildcard: "*b.example.com", "*-prod.internal"
+	// The * anchors to the start; anything before the literal suffix matches.
+	if strings.HasPrefix(pattern, "*") {
+		return strings.HasSuffix(host, pattern[1:])
+	}
+
 	return pattern == host
 }
