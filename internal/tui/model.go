@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,8 @@ import (
 	"hopscotch/internal/admin"
 	"hopscotch/internal/proxy"
 )
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 var (
 	colorBpsIn  = lipgloss.Color("#38bdf8")
@@ -52,8 +55,9 @@ var (
 	styleColHost    = lipgloss.NewStyle().Foreground(colorMuted).Width(22)
 	styleColVPN     = lipgloss.NewStyle().Width(14)
 	styleColPort    = lipgloss.NewStyle().Foreground(colorText).Width(7)
-	styleVPNColHost = lipgloss.NewStyle().Foreground(colorMuted).Width(29) // HOST+PORT combined so STATUS aligns with tunnel rows
-	styleColStatus = lipgloss.NewStyle().Width(16)
+	styleVPNColHost  = lipgloss.NewStyle().Foreground(colorMuted).Width(22) // HOST — same as TUNNEL HOST
+	styleVPNColIface = lipgloss.NewStyle().Foreground(colorMuted).Width(14) // IFACE — same width as TUNNEL VPN col
+	styleColStatus = lipgloss.NewStyle().Width(20)
 	styleColUptime = lipgloss.NewStyle().Foreground(colorText).Width(10)
 	styleColRecon  = lipgloss.NewStyle().Foreground(colorMuted).Width(5)
 	styleColBpsIn  = lipgloss.NewStyle().Foreground(colorBpsIn).Width(15)
@@ -301,6 +305,7 @@ type Model struct {
 
 	activeTab    int
 	logLines     []string
+	logLevel     int // 0=DEBUG 1=INFO 2=WARN 3=ERROR
 	logVP        viewport.Model
 	logVPReady   bool
 	routeVP      viewport.Model
@@ -412,6 +417,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.vpReady {
 					m.vp.SetContent(m.buildStatusContent())
 				}
+			} else if m.activeTab == tabLogs {
+				m.logLevel = (m.logLevel + 1) % 4
+				m.rebuildLogVP()
 			}
 			return m, nil
 
@@ -489,9 +497,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.logLines) > maxLogLines {
 			m.logLines = m.logLines[1:]
 		}
-		if m.logVPReady {
+		if m.logVPReady && m.logLevelMatches(string(msg)) {
 			atBottom := m.logVP.AtBottom()
-			m.logVP.SetContent("  " + strings.Join(m.logLines, "\n  "))
+			m.logVP.SetContent("  " + strings.Join(m.filteredLogLines(), "\n  "))
 			if atBottom {
 				m.logVP.GotoBottom()
 			}
@@ -543,7 +551,7 @@ func (m Model) resizeViewports() Model {
 	}
 	if len(m.logLines) > 0 {
 		atBottom := m.logVP.AtBottom()
-		m.logVP.SetContent("  " + strings.Join(m.logLines, "\n  "))
+		m.logVP.SetContent("  " + strings.Join(m.filteredLogLines(), "\n  "))
 		if atBottom {
 			m.logVP.GotoBottom()
 		}
@@ -594,7 +602,11 @@ func (m Model) renderTitleLine() string {
 	}
 	uplinkStr := styleMuted.Render("○ no link")
 	if m.status.Uplink {
-		uplinkStr = styleConnected.Render("● link")
+		uplinkLabel := m.status.UplinkIface
+		if uplinkLabel == "" {
+			uplinkLabel = "link"
+		}
+		uplinkStr = styleConnected.Render("● " + uplinkLabel)
 	}
 	left := fmt.Sprintf("  %s  %s  %s  %s  %s",
 		styleHeader.Render("hopscotch "+versionStr),
@@ -687,8 +699,9 @@ func (m Model) renderHeader() string {
 		)
 		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 	default:
+		levelLabel := logLevelLabels[m.logLevel]
 		fmt.Fprintf(&b, "\n")
-		fmt.Fprintf(&b, "  %s\n", styleMuted.Render("LOGS"))
+		fmt.Fprintf(&b, "  %s  %s\n", styleMuted.Render("LOGS"), styleTabActive.Render(levelLabel))
 		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 	}
 	return b.String()
@@ -703,6 +716,9 @@ func (m Model) renderFooter() string {
 		} else {
 			hints += "  / test URL"
 		}
+	}
+	if m.activeTab == tabLogs {
+		hints += "  f level"
 	}
 	if m.activeTab == tabStatus {
 		hints += "  f format"
@@ -808,8 +824,8 @@ func (m Model) buildRoutesContent() string {
 
 // buildStatusContent renders the scrollable content for the status viewport.
 // fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
-const fixedColsWidth    = 2 + 26 + 22 + 14 + 7 + 16 + 10 + 5 + 15 + 15 + 8 // = 140
-const vpnFixedColsWidth = 2 + 26 + 29 + 16 + 10 + 5                    // = 88
+const fixedColsWidth    = 2 + 26 + 22 + 14 + 7 + 20 + 10 + 5 + 15 + 15 + 8 // = 144
+const vpnFixedColsWidth = 2 + 26 + 29 + 14 + 20 + 10 + 5              // = 106
 
 func (m Model) sectionSep() string {
 	return "  " + styleMuted.Render(strings.Repeat("─", max(m.width-4, 10))) + "\n"
@@ -841,11 +857,13 @@ func (m Model) buildStatusContent() string {
 		}
 		vpnReasonHdr := ""
 		if vpnReasonW >= 8 {
-			vpnReasonHdr = hdr(styleMuted, "REASON")
+			vpnReasonHdr = hdr(styleMuted, "MESSAGE")
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s\n",
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
 			hdr(styleColName, "VPN"),
 			hdr(styleVPNColHost, "HOST"),
+			hdr(styleVPNColIface, "IFACE"),
+			hdr(styleColPort, ""),
 			hdr(styleColStatus, "STATUS"),
 			hdr(styleColUptime, "UPTIME"),
 			hdr(styleColRecon, "RC"),
@@ -877,18 +895,28 @@ func (m Model) buildStatusContent() string {
 			if vpnReasonW > 0 {
 				reason := "—"
 				var reasonStyle lipgloss.Style
-				if v.LastError != "" && v.State != "connected" {
+				if v.LastError != "" && (v.State != "connected" || isVPNProgressMsg(v.LastError)) {
 					reason = v.LastError
-					reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
+					if isVPNProgressMsg(v.LastError) {
+						reasonStyle = styleConnecting
+					} else {
+						reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
+					}
 				} else {
 					reasonStyle = styleMuted
 				}
 				vpnReasonStr = renderReason(reason, reasonStyle, vpnReasonW, vpnFixedColsWidth+2)
 			}
 
-			fmt.Fprintf(&b, "  %s%s%s%s%s%s\n",
+			iface := v.TunIface
+			if iface == "" {
+				iface = "—"
+			}
+			fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
 				styleColName.Render(name),
 				styleVPNColHost.Render(v.Host),
+				styleVPNColIface.Render(iface),
+				styleColPort.Render(""),
 				styleColStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)),
 				styleColUptime.Render(uptime),
 				styleColRecon.Render(fmt.Sprintf("%d", v.Reconnects)),
@@ -901,7 +929,7 @@ func (m Model) buildStatusContent() string {
 	// ── Tunnel section ────────────────────────────────────────────────────────
 	reasonHdr := ""
 	if reasonW >= 8 {
-		reasonHdr = hdr(styleMuted, "REASON")
+		reasonHdr = hdr(styleMuted, "MESSAGE")
 	}
 	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s%s\n",
 		hdr(styleColName, "TUNNEL"),
@@ -949,7 +977,8 @@ func (m Model) buildStatusContent() string {
 			var reasonStyle lipgloss.Style
 			if t.LastError != "" && t.Status != "connected" {
 				reason = t.LastError
-				if strings.HasPrefix(t.LastError, "waiting for VPN") {
+				if strings.HasPrefix(t.LastError, "waiting for VPN") ||
+					t.LastError == "waiting for network" {
 					reasonStyle = styleConnecting // amber — informational, not an error
 				} else {
 					reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
@@ -1011,9 +1040,10 @@ func (m Model) buildStatusContent() string {
 		dBpsOut = dw.bpsOut
 		dActive = dw.active
 	}
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s\n",
+	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
 		styleColName.Foreground(colorMuted).Render("direct"),
 		styleColHost.Render(""),
+		styleColVPN.Render(""),
 		styleColPort.Render(""),
 		styleColStatus.Render(""),
 		styleColUptime.Render(""),
@@ -1139,6 +1169,19 @@ func fmtBytes(n uint64) string {
 	}
 }
 
+// isVPNProgressMsg returns true for informational VPN connecting-phase messages
+// that should be shown in amber (not red). These are set by hopscotch itself
+// during connect steps, as opposed to errors coming from the subprocess.
+func isVPNProgressMsg(msg string) bool {
+	return strings.HasPrefix(msg, "resolving ") ||
+		strings.HasPrefix(msg, "DNS retry: ") ||
+		strings.HasPrefix(msg, "pre_connect: ") ||
+		strings.HasPrefix(msg, "probing ") ||
+		msg == "openconnect starting" ||
+		msg == "waiting for VPN tunnel" ||
+		msg == "waiting for network"
+}
+
 func fmtDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	h := int(d.Hours())
@@ -1151,6 +1194,49 @@ func fmtDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm%ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
+}
+
+// ── Log level filter ──────────────────────────────────────────────────────────
+
+var logLevelLabels = []string{"ALL", "INFO+", "WARN+", "ERR"}
+var logLevelTokens = []string{"", " INFO ", " WARN ", " ERRO "}
+
+func (m Model) logLevelMatches(line string) bool {
+	if m.logLevel == 0 {
+		return true
+	}
+	// Strip ANSI and check for level tokens at or above current filter.
+	stripped := ansiRe.ReplaceAllString(line, "")
+	for i := m.logLevel; i < len(logLevelTokens); i++ {
+		if logLevelTokens[i] != "" && strings.Contains(stripped, logLevelTokens[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) filteredLogLines() []string {
+	if m.logLevel == 0 {
+		return m.logLines
+	}
+	out := make([]string, 0, len(m.logLines))
+	for _, l := range m.logLines {
+		if m.logLevelMatches(l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func (m *Model) rebuildLogVP() {
+	if !m.logVPReady {
+		return
+	}
+	atBottom := m.logVP.AtBottom()
+	m.logVP.SetContent("  " + strings.Join(m.filteredLogLines(), "\n  "))
+	if atBottom {
+		m.logVP.GotoBottom()
+	}
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────

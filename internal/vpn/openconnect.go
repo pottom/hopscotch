@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,19 +33,64 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	// before launching a new one — avoids route/interface conflicts.
 	killOrphanedProcs(binaryBase, c.cfg.Sudo)
 
+	// Reset tunnel interface and snapshot existing tun interfaces before openconnect starts.
+	// After connect we diff against this to identify the new VPN interface (macOS utun* detection).
+	c.tunIface.Store("")
+	before := map[string]bool{}
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if strings.HasPrefix(iface.Name, "utun") || strings.HasPrefix(iface.Name, "tun") {
+				before[iface.Name] = true
+			}
+		}
+	}
+	c.tunIfacesBefore.Store(before)
+
 	if err := c.runPreConnect(ctx); err != nil {
 		return err
 	}
 
+	// Resolve the VPN server hostname before starting openconnect.
+	// We pass the resolved IP via --resolve so openconnect doesn't need to do
+	// its own DNS lookup — this avoids failures when system DNS is temporarily
+	// unavailable (e.g. right after a network change or post_disconnect cleanup).
+	resolveArg, err := c.resolveServer(ctx)
+	if err != nil {
+		return err
+	}
+
+	// On macOS, openconnect adds a host route for the VPN server IP to prevent
+	// routing server traffic through the VPN tunnel. After an abrupt disconnect
+	// (vpnc-script didn't run), this route remains and may point to a stale
+	// gateway — causing TCP connect to fail immediately on the next attempt.
+	if resolveArg != "" && runtime.GOOS == "darwin" {
+		if colon := strings.LastIndex(resolveArg, ":"); colon != -1 {
+			if ip := resolveArg[colon+1:]; net.ParseIP(ip) != nil {
+				c.deleteStaleServerRouteDarwin(ctx, ip)
+			}
+		}
+	}
+
 	// Resolve password once — needed both for --passwd-on-stdin flag and stdin feed.
 	pw := c.password()
-	args := c.buildArgs(pw != "")
+	args := c.buildArgs(pw != "", resolveArg)
 
 	var cmd *exec.Cmd
 	if c.cfg.Sudo {
 		cmd = exec.CommandContext(ctx, "sudo", append([]string{binary}, args...)...)
 	} else {
 		cmd = exec.CommandContext(ctx, binary, args...)
+	}
+
+	// Log full command at debug level (mask password via --passwd-on-stdin).
+	{
+		fullArgs := make([]string, 0, len(args)+2)
+		if c.cfg.Sudo {
+			fullArgs = append(fullArgs, "sudo")
+		}
+		fullArgs = append(fullArgs, binary)
+		fullArgs = append(fullArgs, args...)
+		log.Debug("vpn: launching subprocess", "vpn", c.cfg.Name, "cmd", strings.Join(fullArgs, " "))
 	}
 
 	// New process group so we can kill sudo + its children (e.g. openconnect)
@@ -88,6 +134,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		return fmt.Errorf("starting openconnect: %w", err)
 	}
 	log.Info("vpn subprocess started", "vpn", c.cfg.Name, "pid", cmd.Process.Pid)
+	c.lastError.Store("openconnect starting")
 
 	// stderrDone is closed when runOnce() returns so watchStderr stops
 	// updating connection state after we've moved on to the reconnect cycle.
@@ -140,15 +187,29 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		c.runPostDisconnect()
 		return err
 	case <-ctx.Done():
-		// Kill entire process group (sudo + openconnect child) so the pipe
-		// write-end closes on both sides and cmd.Wait() can return promptly.
-		killProcGroup(cmd)
+		// SIGTERM first so vpnc-script can run and clean up routes/DNS.
+		// This avoids leaving 50+ routes that flushTunRoutesDarwin would have
+		// to delete one by one via sudo, which slows down shutdown significantly.
+		log.Info("vpn: shutting down, sending SIGTERM to subprocess", "vpn", c.cfg.Name)
+		terminateByName(binaryBase, c.cfg.Sudo)
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
-			log.Warn("vpn subprocess did not exit after kill", "vpn", c.cfg.Name)
+			// Exited cleanly — vpnc-script ran, routes cleaned up.
+			log.Info("vpn: subprocess exited cleanly on SIGTERM", "vpn", c.cfg.Name)
+		case <-time.After(4 * time.Second):
+			// Didn't exit on SIGTERM; force-kill the whole process group.
+			log.Warn("vpn: subprocess did not exit on SIGTERM, sending SIGKILL", "vpn", c.cfg.Name)
+			killProcGroup(cmd)
+			select {
+			case <-done:
+				log.Info("vpn: subprocess exited after SIGKILL", "vpn", c.cfg.Name)
+			case <-time.After(2 * time.Second):
+				log.Warn("vpn subprocess did not exit after kill", "vpn", c.cfg.Name)
+			}
 		}
+		log.Info("vpn: running post-disconnect cleanup", "vpn", c.cfg.Name)
 		c.runPostDisconnect()
+		log.Info("vpn: shutdown complete", "vpn", c.cfg.Name)
 		return ctx.Err()
 	case <-killedByUplink:
 		// watchUplink() sent SIGKILL to the process group. If openconnect ran
@@ -205,7 +266,7 @@ func (c *Connection) password() string {
 	return pw
 }
 
-func (c *Connection) buildArgs(hasPassword bool) []string {
+func (c *Connection) buildArgs(hasPassword bool, resolveArg string) []string {
 	var args []string
 	if c.cfg.AuthGroup != "" {
 		args = append(args, "--authgroup", c.cfg.AuthGroup)
@@ -222,9 +283,69 @@ func (c *Connection) buildArgs(hasPassword bool) []string {
 	if c.cfg.Key != "" {
 		args = append(args, "--sslkey", c.cfg.Key)
 	}
+	if resolveArg != "" {
+		args = append(args, "--resolve", resolveArg)
+	}
 	args = append(args, c.cfg.ExtraArgs...)
 	args = append(args, c.cfg.Server)
 	return args
+}
+
+// resolveServer resolves the VPN server hostname to an IP address, retrying
+// until ctx is cancelled or a 30-second deadline is reached.
+// Returns a "hostname:ip" string suitable for openconnect's --resolve flag,
+// or empty if the server is already an IP address.
+// Progress is stored in lastError so it appears in the TUI MESSAGE column.
+func (c *Connection) resolveServer(ctx context.Context) (string, error) {
+	u, err := url.Parse(c.cfg.Server)
+	if err != nil || u.Hostname() == "" {
+		return "", nil
+	}
+	hostname := u.Hostname()
+
+	// Server is already an IP — no resolution needed.
+	if net.ParseIP(hostname) != nil {
+		return "", nil
+	}
+
+	// Use a public DNS resolver directly — the system DNS may still point to
+	// VPN-internal servers after an abrupt disconnect (vpnc-script didn't restore it).
+	dnsAddr := c.cfg.DNSResolver
+	if dnsAddr == "" {
+		dnsAddr = "1.1.1.1:53"
+	}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "udp", dnsAddr)
+		},
+	}
+
+	c.lastError.Store("resolving " + hostname)
+	log.Info("vpn: resolving server", "vpn", c.cfg.Name, "hostname", hostname, "via", dnsAddr)
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		ips, err := resolver.LookupHost(ctx, hostname)
+		if err == nil && len(ips) > 0 {
+			ip := ips[0]
+			log.Info("vpn: DNS resolved", "vpn", c.cfg.Name, "hostname", hostname, "ip", ip)
+			c.lastError.Store("")
+			return hostname + ":" + ip, nil
+		}
+
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("DNS resolution timed out for %s: %w", hostname, err)
+		}
+		log.Warn("vpn: DNS resolution failed, retrying", "vpn", c.cfg.Name, "hostname", hostname, "err", err)
+		c.lastError.Store("DNS retry: " + hostname)
+
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // pollPingHost probes host:port via TCP every 3 seconds.
@@ -247,6 +368,9 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 
 	var ok, fail int
 
+	c.lastError.Store("waiting for VPN tunnel")
+	log.Info("vpn: waiting for VPN tunnel", "vpn", c.cfg.Name, "host", host)
+
 	// Poll every 1s until connected for fast detection; switch to 3s for keepalive.
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -261,8 +385,38 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 			return
 		case <-connectTimeout.C:
 			if c.State() != StateConnected {
-				log.Warn("vpn connect timeout: ping_host unreachable, restarting",
-					"vpn", c.cfg.Name, "host", host)
+				// Diagnose: is the subprocess still alive?
+				procAlive := true
+				select {
+				case <-died:
+					procAlive = false
+				default:
+				}
+
+				// Did a new tun interface appear even though ping_host is unreachable?
+				var newIface string
+				before, _ := c.tunIfacesBefore.Load().(map[string]bool)
+				if ifaces, err := net.Interfaces(); err == nil {
+					for _, iface := range ifaces {
+						if (strings.HasPrefix(iface.Name, "utun") || strings.HasPrefix(iface.Name, "tun")) && !before[iface.Name] {
+							newIface = iface.Name
+							break
+						}
+					}
+				}
+
+				switch {
+				case !procAlive:
+					log.Warn("vpn connect timeout: subprocess exited before tunnel was ready, restarting",
+						"vpn", c.cfg.Name, "host", host)
+				case newIface != "":
+					log.Warn("vpn connect timeout: interface appeared but ping_host still unreachable, restarting",
+						"vpn", c.cfg.Name, "host", host, "iface", newIface)
+				default:
+					log.Warn("vpn connect timeout: subprocess alive but no interface appeared, restarting",
+						"vpn", c.cfg.Name, "host", host)
+				}
+
 				c.lastError.Store("connect timeout: " + host + " unreachable")
 				c.setState(StateDisconnected)
 				// SIGTERM lets openconnect send a proper goodbye to the VPN server
@@ -287,8 +441,14 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				conn.Close()
 				fail = 0
 				ok++
+				log.Debug("vpn: ping_host reachable", "vpn", c.cfg.Name, "host", host, "consecutive", ok)
+				if ok == 1 {
+					c.lastError.Store("probing " + host)
+					log.Info("vpn: probing tunnel connectivity", "vpn", c.cfg.Name, "host", host)
+				}
 				if ok >= 2 && c.State() != StateConnected {
 					c.setState(StateConnected)
+					c.detectTunIface()
 					connectTimeout.Stop()
 					// Switch to a slower keepalive interval to reduce load.
 					ticker.Reset(3 * time.Second)
@@ -296,6 +456,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				}
 			} else {
 				ok = 0
+				log.Debug("vpn: ping_host unreachable", "vpn", c.cfg.Name, "host", host, "err", err, "state", c.State())
 				if c.State() == StateConnected {
 					fail++
 					log.Debug("vpn ping failed", "vpn", c.cfg.Name, "host", host, "consecutive", fail)
@@ -321,13 +482,11 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	}
 }
 
-// runPostDisconnect executes each post_disconnect command after the VPN subprocess exits.
+// runPostDisconnect executes each post_disconnect command after the VPN subprocess exits,
+// then flushes any routes left on the tunnel interface.
 // Uses a fresh background context so commands run even during shutdown.
 // Errors are logged but not returned — cleanup should not block reconnect or exit.
 func (c *Connection) runPostDisconnect() {
-	if len(c.cfg.PostDisconnect) == 0 {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	for _, cmdStr := range c.cfg.PostDisconnect {
@@ -342,12 +501,108 @@ func (c *Connection) runPostDisconnect() {
 			log.Error("vpn post_disconnect failed", "vpn", c.cfg.Name, "cmd", cmdStr, "err", err, "output", strings.TrimSpace(string(out)))
 		}
 	}
+	// On macOS, vpnc-script sets the DNS servers to VPN-internal resolvers on connect.
+	// If openconnect was killed abruptly (vpnc-script disconnect phase didn't run),
+	// the system DNS is left pointing at VPN servers that are now unreachable.
+	// Reset all network services to DHCP-assigned DNS so the system resolver works again.
+	if runtime.GOOS == "darwin" {
+		c.restoreSystemDNSDarwin(ctx)
+	}
+	c.flushTunRoutes(ctx)
+}
+
+// flushTunRoutes removes any routes still attached to the tunnel interface after disconnect.
+// This cleans up stale routes that openconnect leaves behind when killed abruptly,
+// preventing them from interfering with the next connection attempt.
+func (c *Connection) flushTunRoutes(ctx context.Context) {
+	iface, _ := c.tunIface.Load().(string)
+	if iface == "" {
+		return
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		c.flushTunRoutesDarwin(ctx, iface)
+	case "linux":
+		args := []string{"ip", "route", "flush", "dev", iface}
+		if c.cfg.Sudo {
+			args = append([]string{"sudo"}, args...)
+		}
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Warn("vpn route flush failed", "vpn", c.cfg.Name, "iface", iface, "err", err, "output", strings.TrimSpace(string(out)))
+		} else {
+			log.Info("vpn routes flushed", "vpn", c.cfg.Name, "iface", iface)
+		}
+	}
+}
+
+// flushTunRoutesDarwin deletes routes for the given interface on macOS.
+// macOS route(8) has no -ifp flag; we enumerate routes via netstat and delete each
+// one. Deletions run in parallel so flushing 50+ routes takes ~1s instead of ~25s.
+func (c *Connection) flushTunRoutesDarwin(ctx context.Context, iface string) {
+	out, err := exec.CommandContext(ctx, "netstat", "-rn", "-f", "inet").Output()
+	if err != nil {
+		log.Warn("vpn route flush: netstat failed", "vpn", c.cfg.Name, "err", err)
+		return
+	}
+
+	var dests []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		// netstat -rn inet columns: Destination Gateway Flags Netif [Expire]
+		if len(fields) >= 4 && fields[3] == iface {
+			dests = append(dests, fields[0])
+		}
+	}
+	if len(dests) == 0 {
+		return
+	}
+	log.Info("vpn route flush: deleting routes", "vpn", c.cfg.Name, "iface", iface, "count", len(dests))
+
+	type result struct {
+		dest string
+		ok   bool
+		err  error
+	}
+	results := make(chan result, len(dests))
+	for _, dest := range dests {
+		dest := dest
+		log.Debug("vpn route flush: queuing delete", "vpn", c.cfg.Name, "iface", iface, "dest", dest)
+		go func() {
+			args := []string{"route", "delete", dest}
+			if c.cfg.Sudo {
+				args = append([]string{"sudo"}, args...)
+			}
+			// Per-route timeout: when Wi-Fi is completely down, route delete can
+			// hang indefinitely waiting for a dead interface. 5 s is enough for a
+			// normal delete; if it hangs we skip it rather than block the cleanup.
+			routeCtx, routeCancel := context.WithTimeout(ctx, 5*time.Second)
+			defer routeCancel()
+			err := exec.CommandContext(routeCtx, args[0], args[1:]...).Run()
+			results <- result{dest: dest, ok: err == nil, err: err}
+		}()
+	}
+
+	var deleted int
+	for range dests {
+		r := <-results
+		if r.ok {
+			deleted++
+			log.Debug("vpn route flush: deleted", "vpn", c.cfg.Name, "iface", iface, "dest", r.dest)
+		} else {
+			log.Debug("vpn route flush: delete failed", "vpn", c.cfg.Name, "iface", iface, "dest", r.dest, "err", r.err)
+		}
+	}
+	if deleted > 0 {
+		log.Info("vpn routes flushed", "vpn", c.cfg.Name, "iface", iface, "routes", deleted)
+	}
 }
 
 // runPreConnect executes each pre_connect command in order before connecting.
 // On failure it logs and returns an error so the reconnect loop retries.
 func (c *Connection) runPreConnect(ctx context.Context) error {
 	for _, cmdStr := range c.cfg.PreConnect {
+		c.lastError.Store("pre_connect: " + cmdStr)
 		log.Info("vpn pre_connect", "vpn", c.cfg.Name, "cmd", cmdStr)
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
@@ -378,7 +633,9 @@ func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !netcheck.HasUplink() {
+			up := netcheck.HasUplink()
+			log.Debug("vpn: uplink check", "vpn", c.cfg.Name, "up", up)
+			if !up {
 				log.Info("vpn: network down, stopping subprocess", "vpn", c.cfg.Name)
 				c.lastError.Store("waiting for network")
 				killProcGroup(cmd)
@@ -386,6 +643,97 @@ func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan
 				return
 			}
 		}
+	}
+}
+
+// restoreSystemDNSDarwin resets DNS to DHCP for every active network service.
+// vpnc-script sets DNS to VPN-internal resolvers on connect; if openconnect is
+// killed abruptly (vpnc-script disconnect didn't run), those resolvers remain
+// and break all hostname resolution until the network interface is restarted.
+// networksetup -setdnsservers <service> Empty instructs macOS to use DHCP-
+// assigned DNS, which is safe to call even when DNS is already correct.
+func (c *Connection) restoreSystemDNSDarwin(ctx context.Context) {
+	out, err := exec.CommandContext(ctx, "networksetup", "-listallnetworkservices").Output()
+	if err != nil {
+		log.Warn("vpn: DNS restore: could not list network services", "vpn", c.cfg.Name, "err", err)
+		return
+	}
+	var reset int
+	for _, svc := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		svc = strings.TrimSpace(svc)
+		if svc == "" || strings.HasPrefix(svc, "An asterisk") {
+			continue
+		}
+
+		// Log current DNS before resetting so the debug log shows what vpnc-script set.
+		if cur, err := exec.CommandContext(ctx, "networksetup", "-getdnsservers", svc).Output(); err == nil {
+			current := strings.TrimSpace(string(cur))
+			if current != "" && current != "There aren't any DNS Servers set on "+svc+"." {
+				log.Debug("vpn: DNS restore: found custom DNS", "vpn", c.cfg.Name, "service", svc, "servers", strings.ReplaceAll(current, "\n", ","))
+			} else {
+				log.Debug("vpn: DNS restore: already DHCP", "vpn", c.cfg.Name, "service", svc)
+			}
+		}
+
+		args := []string{"networksetup", "-setdnsservers", svc, "Empty"}
+		if c.cfg.Sudo {
+			args = append([]string{"sudo"}, args...)
+		}
+		if err := exec.CommandContext(ctx, args[0], args[1:]...).Run(); err != nil {
+			log.Debug("vpn: DNS restore: reset failed", "vpn", c.cfg.Name, "service", svc, "err", err)
+		} else {
+			log.Debug("vpn: DNS restore: reset to DHCP", "vpn", c.cfg.Name, "service", svc)
+			reset++
+		}
+	}
+	if reset > 0 {
+		log.Info("vpn: DNS restored to DHCP", "vpn", c.cfg.Name, "services", reset)
+	}
+}
+
+// deleteStaleServerRouteDarwin removes any host route for the VPN server IP that
+// was left over from a previous connection. openconnect adds this route to ensure
+// VPN server traffic bypasses the tunnel; after an abrupt disconnect (vpnc-script
+// didn't run), it may point to an unreachable gateway and cause TCP connect to the
+// server to fail immediately on the next reconnect attempt.
+func (c *Connection) deleteStaleServerRouteDarwin(ctx context.Context, ip string) {
+	// Check if a host route exists before attempting to delete it.
+	if out, err := exec.CommandContext(ctx, "netstat", "-rn", "-f", "inet").Output(); err == nil {
+		found := false
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && fields[0] == ip {
+				log.Debug("vpn: found stale server host route", "vpn", c.cfg.Name, "ip", ip, "gateway", fields[1], "flags", func() string {
+					if len(fields) >= 3 {
+						return fields[2]
+					}
+					return ""
+				}(), "iface", func() string {
+					if len(fields) >= 4 {
+						return fields[3]
+					}
+					return ""
+				}())
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Debug("vpn: no stale server host route found", "vpn", c.cfg.Name, "ip", ip)
+			return
+		}
+	}
+
+	args := []string{"route", "delete", "-host", ip}
+	if c.cfg.Sudo {
+		args = append([]string{"sudo"}, args...)
+	}
+	routeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(routeCtx, args[0], args[1:]...).Run(); err == nil {
+		log.Info("vpn: cleared stale server host route", "vpn", c.cfg.Name, "ip", ip)
+	} else {
+		log.Warn("vpn: failed to clear stale server host route", "vpn", c.cfg.Name, "ip", ip, "err", err)
 	}
 }
 
@@ -412,6 +760,13 @@ func (c *Connection) watchStderr(r io.Reader, done <-chan struct{}) {
 			log.Info("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
 			if c.State() != StateConnected {
 				c.setState(StateConnected)
+				c.detectTunIface()
+			}
+		case strings.HasPrefix(line, "Set up tun device "):
+			// Extract interface name (e.g. "Set up tun device utun2" → "utun2").
+			if fields := strings.Fields(line); len(fields) >= 5 {
+				c.tunIface.Store(fields[4])
+				log.Info("vpn: "+line, "vpn", c.cfg.Name)
 			}
 		case strings.Contains(line, "error") || strings.Contains(line, "Error") ||
 			strings.Contains(line, "failed") || strings.Contains(line, "Failed"):

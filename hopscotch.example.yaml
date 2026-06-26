@@ -6,6 +6,16 @@
 # Optional. hopscotch manages the VPN subprocess and restarts it on failure.
 # Tunnels with requires_vpn wait until the VPN is connected before dialing.
 #
+# hopscotch resolves the VPN server hostname using a public DNS (default: 1.1.1.1)
+# before starting openconnect. This bypasses any stale system DNS left by a previous
+# VPN session (vpnc-script sometimes sets internal DNS and does not restore it on
+# abrupt disconnect). The resolved IP is passed to openconnect via --resolve so TLS
+# certificate validation still uses the original hostname.
+#
+# On disconnect, hopscotch automatically flushes routes left on the VPN tunnel
+# interface (utun* on macOS, tun* on Linux) — no post_disconnect cleanup needed.
+# The tunnel interface name (e.g. utun4) is shown in the IFACE column of the TUI.
+#
 # vpn:
 #   - name: corp-vpn
 #     type: openconnect              # only supported type
@@ -14,6 +24,7 @@
 #     authgroup: "Engineering"       # --authgroup (Cisco AnyConnect)
 #     sudo: true                     # run openconnect via sudo
 #     # binary: /usr/local/bin/openconnect  # custom path; default: openconnect in PATH
+#     # dns_resolver: "1.1.1.1:53"   # DNS used for pre-connect hostname resolution; default: 1.1.1.1:53
 #     # Password source — priority: password_env > password_cmd > OS keychain
 #     # password_env: CORP_VPN_PASS         # read from environment variable
 #     # password_cmd: "pass vpn/corp"       # stdout of any shell command
@@ -22,11 +33,10 @@
 #     # certificate: ~/.certs/client.pem   # client certificate for cert-based auth
 #     # key: ~/.certs/client.key           # private key for cert-based auth
 #     ping_host: "10.0.0.1:22"      # TCP probe to confirm VPN is up
-#     pre_connect:                   # commands before each VPN connection attempt
-#       - "sudo networksetup -setdnsservers Wi-Fi Empty"   # macOS: reset DNS
-#       - "sudo route delete 79.120.196.68 2>/dev/null || true"  # remove stale route
-#     post_disconnect:               # commands after each VPN disconnect (runs even on shutdown)
-#       - "sudo networksetup -setdnsservers Wi-Fi Empty"   # macOS: restore DNS
+#     # pre_connect:                 # commands before each VPN connection attempt (rarely needed)
+#     #   - "some-custom-setup.sh"
+#     # post_disconnect:             # commands after each VPN disconnect (rarely needed)
+#     #   - "some-custom-teardown.sh"
 #     # extra_args:                  # extra openconnect flags (managed flags like --user rejected)
 #     #   - "--no-dtls"
 #     reconnect_delay: 15

@@ -21,6 +21,38 @@ func HasUplink() bool {
 	return true
 }
 
+// UplinkInterface returns the name of the network interface that would be used
+// to reach the internet (e.g. "en0", "eth0"). Returns empty string on failure.
+// Uses a UDP "connection" — no packet is sent, the kernel just resolves routing.
+func UplinkInterface() string {
+	conn, err := net.Dial("udp4", "1.1.1.1:53")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	localIP := conn.LocalAddr().(*net.UDPAddr).IP
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip.Equal(localIP) {
+				return iface.Name
+			}
+		}
+	}
+	return ""
+}
+
 // WaitForUplink blocks until HasUplink returns true or ctx is cancelled.
 // Returns nil when uplink is detected, ctx.Err() if cancelled.
 func WaitForUplink(ctx context.Context) error {

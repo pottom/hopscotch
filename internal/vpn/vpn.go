@@ -3,7 +3,9 @@ package vpn
 
 import (
 	"context"
+	"net"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +22,7 @@ type Stats struct {
 	Server          string    // hostname extracted from server URL
 	NextReconnectAt time.Time // non-zero only while waiting to reconnect
 	LastError       string    // last error from subprocess; empty when connected
+	TunIface        string    // tunnel interface name (e.g. utun2, tun0); empty until detected
 }
 
 // State represents the lifecycle state of a VPN connection.
@@ -58,18 +61,21 @@ type connConfig struct {
 	PreConnect        []string // commands to run before each connection attempt
 	PostDisconnect    []string // commands to run after each VPN disconnect
 	Sudo              bool
+	DNSResolver       string // host:port; default "1.1.1.1:53"
 	ReconnectDelay    int
 	ReconnectMaxDelay int
 }
 
 // Connection manages one VPN subprocess.
 type Connection struct {
-	cfg             connConfig
-	state           atomic.Int32
-	reconnects      atomic.Int32
-	connectedAt     atomic.Value // stores time.Time; zero until first connect
-	nextReconnectAt atomic.Value // stores time.Time; non-zero while waiting to reconnect
-	lastError       atomic.Value // stores string; last subprocess error
+	cfg              connConfig
+	state            atomic.Int32
+	reconnects       atomic.Int32
+	connectedAt      atomic.Value // stores time.Time; zero until first connect
+	nextReconnectAt  atomic.Value // stores time.Time; non-zero while waiting to reconnect
+	lastError        atomic.Value // stores string; last subprocess error
+	tunIface         atomic.Value // stores string; tunnel interface name
+	tunIfacesBefore  atomic.Value // stores map[string]bool; tun interfaces before this runOnce
 }
 
 func newConnection(cfg connConfig) *Connection {
@@ -77,7 +83,31 @@ func newConnection(cfg connConfig) *Connection {
 	c.connectedAt.Store(time.Time{})
 	c.nextReconnectAt.Store(time.Time{})
 	c.lastError.Store("")
+	c.tunIface.Store("")
+	c.tunIfacesBefore.Store(map[string]bool{})
 	return c
+}
+
+// detectTunIface finds the tunnel interface created by openconnect by comparing
+// current network interfaces against the snapshot taken before the connection attempt.
+// No-op if tunIface is already known (e.g. detected from stderr on Linux).
+func (c *Connection) detectTunIface() {
+	if c.tunIface.Load().(string) != "" {
+		return
+	}
+	before := c.tunIfacesBefore.Load().(map[string]bool)
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return
+	}
+	for _, iface := range ifaces {
+		name := iface.Name
+		if (strings.HasPrefix(name, "utun") || strings.HasPrefix(name, "tun")) && !before[name] {
+			c.tunIface.Store(name)
+			log.Info("vpn tunnel interface detected", "vpn", c.cfg.Name, "iface", name)
+			return
+		}
+	}
 }
 
 // State returns the current VPN connection state.
@@ -99,6 +129,7 @@ func (c *Connection) Stats() Stats {
 		Server:          server,
 		NextReconnectAt: c.nextReconnectAt.Load().(time.Time),
 		LastError:       c.lastError.Load().(string),
+		TunIface:        c.tunIface.Load().(string),
 	}
 }
 
@@ -131,7 +162,10 @@ func (c *Connection) Run(ctx context.Context) error {
 			c.nextReconnectAt.Store(time.Time{})
 			return nil
 		} else if err != nil {
-			c.lastError.Store(err.Error())
+			// Don't overwrite a more specific error already captured from stderr.
+			if c.lastError.Load().(string) == "" {
+				c.lastError.Store(err.Error())
+			}
 		}
 		c.setState(StateDisconnected)
 		c.reconnects.Add(1)

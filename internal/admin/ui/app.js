@@ -1,5 +1,23 @@
 // ── Helpers (global so Alpine templates can call them) ───────────────────────
 
+// Mirrors isVPNProgressMsg in tui/model.go — informational connecting-phase messages.
+window.isVPNProgressMsg = function(msg) {
+  if (!msg) return false;
+  return msg.startsWith('resolving ') ||
+    msg.startsWith('DNS retry: ') ||
+    msg.startsWith('pre_connect: ') ||
+    msg.startsWith('probing ') ||
+    msg === 'openconnect starting' ||
+    msg === 'waiting for VPN tunnel' ||
+    msg === 'waiting for network';
+};
+
+// For tunnel messages — waiting for VPN or network is informational, not an error.
+window.isTunnelProgressMsg = function(msg) {
+  if (!msg) return false;
+  return msg.startsWith('waiting for VPN') || msg === 'waiting for network';
+};
+
 window.fmtBytes = function(n) {
   if (!n) return '0 B';
   if (n < 1024)    return n + ' B';
@@ -20,9 +38,8 @@ window.fmtUptime = function(sec) {
 const WINDOW_SIZE = 60;
 const charts = {};
 
-window.initChart = function(name, el) {
+window.initChart = function(name, canvas) {
   if (charts[name]) return;
-  const canvas = el.querySelector('.tc-canvas');
   if (!canvas) return;
 
   charts[name] = new Chart(canvas, {
@@ -88,6 +105,214 @@ function pushChart(name, bpsIn, bpsOut) {
   c.data.datasets[1].data.shift();
   c.update('none');
 }
+
+// ── Table rendering ───────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return !s ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function vpnStatusHtml(state, reconnectIn) {
+  if (state === 'connected') return '<span class="st-connected">● connected</span>';
+  if (state === 'connecting' || state === 'disconnected') {
+    if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next: ${reconnectIn}s</span>`;
+    if (state === 'connecting') return '<span class="st-connecting">connecting</span>';
+    return '<span class="st-disconnected">disconnected</span>';
+  }
+  return `<span class="st-muted">${escHtml(state || '…')}</span>`;
+}
+
+function tunnelStatusHtml(t) {
+  if (!t) return '<span class="st-muted">—</span>';
+  if (t.last_error?.startsWith('waiting for VPN') || t.last_error === 'waiting for network') {
+    return '<span class="st-connecting">◌ pending</span>';
+  }
+  const s = t.status, ri = t.reconnect_in;
+  if (s === 'connected') {
+    return t.keepalive_failures > 0
+      ? `<span class="st-warning">⚠ connected (${t.keepalive_failures})</span>`
+      : '<span class="st-connected">● connected</span>';
+  }
+  if (s === 'connecting' || s === 'disconnected') {
+    if (ri != null && ri >= 0) return `<span class="st-connecting">○ next: ${ri}s</span>`;
+    return s === 'connecting'
+      ? '<span class="st-connecting">connecting</span>'
+      : '<span class="st-disconnected">disconnected</span>';
+  }
+  return `<span class="st-muted">${escHtml(s || '…')}</span>`;
+}
+
+function vpnDepHtml(vpn, state) {
+  if (!vpn) return '<span class="st-muted">—</span>';
+  const cls = state === 'connected' ? 'vdep-connected' : state === 'connecting' ? 'vdep-connecting' : 'vdep-disconnected';
+  return `<span class="vdep ${cls}">${state === 'connected' ? '●' : '○'} ${escHtml(vpn)}</span>`;
+}
+
+function vpnMsgHtml(v) {
+  const m = v.last_error || '';
+  if (!m) return '<span class="st-muted">—</span>';
+  if (isVPNProgressMsg(m)) return `<span class="msg-progress">${escHtml(m)}</span>`;
+  if (v.state !== 'connected') return `<span class="msg-error">${escHtml(m)}</span>`;
+  return `<span class="st-muted">${escHtml(m)}</span>`;
+}
+
+function tunnelMsgHtml(t) {
+  const m = t.last_error || '';
+  if (!m) return '<span class="st-muted">—</span>';
+  if (isTunnelProgressMsg(m)) return `<span class="msg-progress">${escHtml(m)}</span>`;
+  return `<span class="msg-error">${escHtml(m)}</span>`;
+}
+
+function chartId(name) {
+  return 'chart-' + name.replace(/[^a-z0-9]/gi, '_');
+}
+
+function setCell(row, col, val, asHtml) {
+  const td = row.querySelector(`[data-col="${col}"]`);
+  if (!td) return;
+  if (asHtml) td.innerHTML = val; else td.textContent = val;
+}
+
+function findTunnelRow(name) {
+  const tb = document.getElementById('tunnel-tbody');
+  return tb ? tb.querySelector(`tr.data-row[data-name="${CSS.escape(name)}"]`) : null;
+}
+
+function findVPNRow(name) {
+  const tb = document.getElementById('vpn-tbody');
+  return tb ? tb.querySelector(`tr.data-row[data-name="${CSS.escape(name)}"]`) : null;
+}
+
+function renderVPNTable() {
+  const store = Alpine.store('hop');
+  const section = document.getElementById('vpn-section');
+  const tbody = document.getElementById('vpn-tbody');
+  if (!section || !tbody) return;
+  const names = Object.keys(store.vpns).sort();
+  if (!names.length) { section.style.display = 'none'; tbody.innerHTML = ''; return; }
+  section.style.display = '';
+  tbody.innerHTML = '';
+  for (const name of names) {
+    const v = store.vpns[name];
+    const tr = document.createElement('tr');
+    tr.className = 'data-row'; tr.dataset.name = name;
+    tr.innerHTML =
+      `<td data-col="name">${escHtml(name)}</td>` +
+      `<td data-col="host">${escHtml(v.host || '—')}</td>` +
+      `<td data-col="iface">${escHtml(v.tun_iface || '—')}</td>` +
+      `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
+      `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
+      `<td data-col="rc">${v.reconnects || 0}</td>` +
+      `<td data-col="msg">${vpnMsgHtml(v)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+let _tunnelKey = null;
+
+function syncTunnelTable() {
+  const store = Alpine.store('hop');
+  const names = [...Object.keys(store.tunnels).sort(), 'direct'];
+  const key = names.join('\x00');
+  if (_tunnelKey !== key) { buildTunnelRows(names); _tunnelKey = key; }
+  else updateTunnelRows();
+}
+
+function buildTunnelRows(names) {
+  const tbody = document.getElementById('tunnel-tbody');
+  if (!tbody) return;
+  for (const name of Object.keys(charts)) { try { charts[name].destroy(); } catch(_){} delete charts[name]; }
+  tbody.innerHTML = '';
+  const store = Alpine.store('hop');
+  for (const name of names) {
+    const isDirect = name === 'direct';
+    const tr = document.createElement('tr');
+    tr.className = isDirect ? 'data-row direct-row' : 'data-row';
+    tr.dataset.name = name;
+    tr.setAttribute('onclick', 'toggleRowGraph(this)');
+    if (isDirect) {
+      const d = store.direct;
+      tr.innerHTML =
+        `<td data-col="name"><span class="row-expand">▶</span>direct</td>` +
+        `<td data-col="host"><span class="st-muted">—</span></td>` +
+        `<td data-col="vpn"><span class="st-muted">—</span></td>` +
+        `<td data-col="port"><span class="st-muted">—</span></td>` +
+        `<td data-col="status"><span class="st-muted">—</span></td>` +
+        `<td data-col="uptime"><span class="st-muted">—</span></td>` +
+        `<td data-col="rc"><span class="st-muted">—</span></td>` +
+        `<td class="bps-in"  data-col="bps-in">${fmtBytes(d.bps_in  || 0) + '/s'}</td>` +
+        `<td class="bps-out" data-col="bps-out">${fmtBytes(d.bps_out || 0) + '/s'}</td>` +
+        `<td data-col="active">${d.active || 0}</td>` +
+        `<td data-col="msg"><span class="st-muted">—</span></td>`;
+    } else {
+      const t = store.tunnels[name];
+      if (!t) continue;
+      const vpnState = t.requires_vpn && store.vpns[t.requires_vpn] ? store.vpns[t.requires_vpn].state : '';
+      tr.innerHTML =
+        `<td data-col="name"><span class="row-expand">▶</span>${escHtml(name)}</td>` +
+        `<td data-col="host">${escHtml(t.host || '—')}</td>` +
+        `<td data-col="vpn">${vpnDepHtml(t.requires_vpn, vpnState)}</td>` +
+        `<td data-col="port">${t.local_port || '—'}</td>` +
+        `<td data-col="status">${tunnelStatusHtml(t)}</td>` +
+        `<td data-col="uptime">${fmtUptime(t.uptime_seconds)}</td>` +
+        `<td data-col="rc">${t.reconnect_count || 0}</td>` +
+        `<td class="bps-in"  data-col="bps-in">${fmtBytes(t.bps_in  || 0) + '/s'}</td>` +
+        `<td class="bps-out" data-col="bps-out">${fmtBytes(t.bps_out || 0) + '/s'}</td>` +
+        `<td data-col="active">${t.active || 0}</td>` +
+        `<td data-col="msg">${tunnelMsgHtml(t)}</td>`;
+    }
+    tbody.appendChild(tr);
+    const gtr = document.createElement('tr');
+    gtr.className = 'graph-row'; gtr.dataset.name = name;
+    gtr.innerHTML = `<td colspan="11"><div class="graph-cell"><canvas id="${chartId(name)}"></canvas></div></td>`;
+    tbody.appendChild(gtr);
+  }
+  if (document.body.classList.contains('graphs-on')) requestAnimationFrame(initAllCharts);
+}
+
+function updateTunnelRows() {
+  const store = Alpine.store('hop');
+  const tbody = document.getElementById('tunnel-tbody');
+  if (!tbody) return;
+  for (const row of tbody.querySelectorAll('tr.data-row')) {
+    const name = row.dataset.name;
+    if (name === 'direct') {
+      const d = store.direct;
+      setCell(row, 'bps-in',  fmtBytes(d.bps_in  || 0) + '/s');
+      setCell(row, 'bps-out', fmtBytes(d.bps_out || 0) + '/s');
+      setCell(row, 'active', d.active || 0);
+      continue;
+    }
+    const t = store.tunnels[name];
+    if (!t) continue;
+    const vpnState = t.requires_vpn && store.vpns[t.requires_vpn] ? store.vpns[t.requires_vpn].state : '';
+    setCell(row, 'vpn', vpnDepHtml(t.requires_vpn, vpnState), true);
+    setCell(row, 'status', tunnelStatusHtml(t), true);
+    setCell(row, 'uptime', fmtUptime(t.uptime_seconds));
+    setCell(row, 'rc', t.reconnect_count || 0);
+    setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0) + '/s');
+    setCell(row, 'bps-out', fmtBytes(t.bps_out || 0) + '/s');
+    setCell(row, 'active', t.active || 0);
+    setCell(row, 'msg', tunnelMsgHtml(t), true);
+  }
+}
+
+function renderStatusTables() {
+  renderVPNTable();
+  syncTunnelTable();
+}
+
+window.toggleRowGraph = function(row) {
+  const expanded = row.classList.toggle('expanded');
+  if (expanded) {
+    const name = row.dataset.name;
+    const gRow = row.nextElementSibling;
+    if (gRow && gRow.classList.contains('graph-row') && !charts[name]) {
+      const canvas = gRow.querySelector('canvas');
+      if (canvas) window.initChart(name, canvas);
+    }
+  }
+};
 
 // ── Alpine store ─────────────────────────────────────────────────────────────
 
@@ -160,6 +385,7 @@ async function refreshStatus() {
       admin_port:     st.admin_port,
       status:         st.status,
       uplink:         st.uplink ?? true,
+      uplink_iface:   st.uplink_iface || '',
     };
 
     // Rebuild tunnel map, preserving live bps/active values from SSE.
@@ -170,6 +396,7 @@ async function refreshStatus() {
         status:             t.status,
         host:               t.host,
         local_port:         t.local_port,
+        requires_vpn:       t.requires_vpn || '',
         uptime_seconds:     t.uptime_seconds,
         reconnect_count:    t.reconnect_count,
         keepalive_failures: t.keepalive_failures || 0,
@@ -189,6 +416,7 @@ async function refreshStatus() {
       nextVpns[name] = {
         state:          v.state,
         host:           v.host || '',
+        tun_iface:      v.tun_iface || '',
         reconnects:     v.reconnects || 0,
         uptime_seconds: v.uptime_seconds || 0,
         last_error:     v.last_error || '',
@@ -204,6 +432,7 @@ async function refreshStatus() {
       renderRoutesTable(testerVal ? findMatchIdx(testerVal) : undefined);
     }
 
+    renderStatusTables();
     document.title = `hopscotch ${st.version}`;
   } catch {
     Alpine.store('hop').meta.status = 'offline';
@@ -227,11 +456,20 @@ function connectSSE() {
         store.tunnels[name].reconnect_in = t.reconnect_in ?? null;
       }
       pushChart(name, t.bps_in, t.bps_out);
+      const row = findTunnelRow(name);
+      if (row) {
+        setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0) + '/s');
+        setCell(row, 'bps-out', fmtBytes(t.bps_out || 0) + '/s');
+        setCell(row, 'active', t.active || 0);
+        if (store.tunnels[name]) setCell(row, 'status', tunnelStatusHtml(store.tunnels[name]), true);
+      }
     }
 
     for (const [name, v] of Object.entries(d.vpns || {})) {
       if (store.vpns[name]) {
         store.vpns[name].reconnect_in = v.reconnect_in ?? null;
+        const row = findVPNRow(name);
+        if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in), true);
       }
     }
 
@@ -241,6 +479,13 @@ function connectSSE() {
       active:  d.direct?.active  ?? 0,
     };
     pushChart('direct', d.direct?.bps_in ?? 0, d.direct?.bps_out ?? 0);
+    const directRow = findTunnelRow('direct');
+    if (directRow) {
+      const dr = store.direct;
+      setCell(directRow, 'bps-in',  fmtBytes(dr.bps_in  || 0) + '/s');
+      setCell(directRow, 'bps-out', fmtBytes(dr.bps_out || 0) + '/s');
+      setCell(directRow, 'active', dr.active || 0);
+    }
   };
 
   es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
@@ -285,6 +530,10 @@ window.switchTab = function(name) {
 const MAX_LOG_LINES = 500;
 let logLineCount = 0;
 let ansiUp = null;
+let currentLogLevel = 'INFO';
+let activeLogEs = null;
+
+const LOG_LEVEL_ORDER = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 
 function getAnsiUp() {
   if (!ansiUp && window.AnsiUp) {
@@ -294,12 +543,25 @@ function getAnsiUp() {
   return ansiUp;
 }
 
+function logLineLevel(raw) {
+  const s = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  if (s.includes(' DEBU ')) return 'DEBUG';
+  if (s.includes(' INFO ')) return 'INFO';
+  if (s.includes(' WARN ')) return 'WARN';
+  if (s.includes(' ERRO ') || s.includes(' ERROR ')) return 'ERROR';
+  return 'INFO';
+}
+
 function appendLogLine(scroll, raw) {
+  const level = logLineLevel(raw);
+  if (LOG_LEVEL_ORDER[level] < LOG_LEVEL_ORDER[currentLogLevel]) return;
+
   const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
   const au = getAnsiUp();
   const html = au ? au.ansi_to_html(raw) : raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const div = document.createElement('div');
   div.className = 'log-line';
+  div.dataset.level = level;
   div.innerHTML = html;
   scroll.appendChild(div);
   logLineCount++;
@@ -310,21 +572,37 @@ function appendLogLine(scroll, raw) {
   if (atBottom) scroll.scrollTop = scroll.scrollHeight;
 }
 
+window.setLogLevel = function(level) {
+  currentLogLevel = level;
+  document.querySelectorAll('.log-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.level === level);
+  });
+  // Reconnect SSE with the new level so the server filters the backlog too.
+  initLogStream();
+};
+
 function initLogStream() {
   const scroll = document.getElementById('log-scroll');
   if (!scroll) return;
 
+  if (activeLogEs) { activeLogEs.close(); activeLogEs = null; }
+  scroll.innerHTML = '';
+  logLineCount = 0;
+
   const cursor = document.createElement('div');
   cursor.innerHTML = '<span class="log-cursor">▌</span>';
 
-  const es = new EventSource('/logs/stream');
+  const es = new EventSource('/logs/stream?level=' + currentLogLevel);
+  activeLogEs = es;
   es.onmessage = e => {
     cursor.remove();
     appendLogLine(scroll, e.data);
     scroll.appendChild(cursor);
-    scroll.scrollTop = scroll.scrollHeight;
   };
-  es.onerror = () => { es.close(); setTimeout(initLogStream, 3000); };
+  es.onerror = () => {
+    es.close();
+    if (activeLogEs === es) { activeLogEs = null; setTimeout(initLogStream, 3000); }
+  };
 
   scroll.appendChild(cursor);
 }

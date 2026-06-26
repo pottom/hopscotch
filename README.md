@@ -324,8 +324,6 @@ vpn:
     user: alice
     sudo: true                    # run openconnect via sudo
     ping_host: "10.0.0.1:22"     # TCP probe to confirm VPN is actually up
-    pre_connect:
-      - "sudo networksetup -setdnsservers Wi-Fi Empty"
     reconnect_delay: 15
     reconnect_max_delay: 120
 
@@ -337,6 +335,12 @@ tunnels:
 ```
 
 hopscotch validates that `sudo` can run openconnect before daemonizing, and kills the entire openconnect process group on shutdown.
+
+**DNS resolution:** before starting openconnect, hopscotch resolves the VPN server hostname using a public DNS server (default: `1.1.1.1:53`), bypassing the system resolver. This prevents connect failures when the system DNS is left pointing at VPN-internal servers from a previous session — a common issue when vpnc-script sets DNS on connect but doesn't restore it after an abrupt disconnect. The resolved IP is forwarded to openconnect via `--resolve` so TLS certificate validation still uses the original hostname. Override with `dns_resolver: "8.8.8.8:53"` if needed.
+
+**Route cleanup:** on disconnect, hopscotch automatically removes any routes left on the VPN tunnel interface (`utun*` on macOS, `tun*` on Linux). No `post_disconnect` cleanup scripts needed for this.
+
+**Progress visibility:** the TUI MESSAGE column shows each connecting phase in real time — `resolving vpn.corp.com`, `openconnect starting`, `waiting for VPN tunnel`, `probing 10.0.0.1:22` — so you can see exactly where a slow or failed connect is stuck. The IFACE column shows the detected tunnel interface (e.g. `utun4`) once connected.
 
 #### VPN password
 
@@ -362,16 +366,17 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 |-------|---------|-------------|
 | `name` | — | Unique VPN name (referenced by `requires_vpn`) |
 | `type` | — | `openconnect` (only supported type) |
-| `server` | — | VPN server URL |
+| `server` | — | VPN server URL (hostname preferred; hopscotch resolves it via `dns_resolver`) |
 | `user` | — | VPN username |
 | `authgroup` | — | Authentication group / realm |
 | `sudo` | `false` | Run openconnect via `sudo` |
 | `binary` | `openconnect` | Path to openconnect binary |
+| `dns_resolver` | `1.1.1.1:53` | DNS server used for pre-connect hostname resolution; bypasses system DNS |
 | `password_env` | — | Environment variable name containing the password |
 | `password_cmd` | — | Shell command whose stdout is the password |
 | `ping_host` | — | `host:port` TCP probe to confirm VPN is up |
 | `pre_connect` | — | Shell commands to run before each connection attempt |
-| `post_disconnect` | — | Shell commands to run after each VPN disconnect (runs even on shutdown) |
+| `post_disconnect` | — | Shell commands to run after each VPN disconnect; route cleanup is automatic, rarely needed |
 | `extra_args` | — | Additional openconnect flags |
 | `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |

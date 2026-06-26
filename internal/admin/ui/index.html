@@ -44,7 +44,7 @@
     <span x-text="'up ' + $store.hop.meta.uptime"></span>
     <span class="header-sep">·</span>
     <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
-          x-text="$store.hop.meta.uplink ? '● link' : '○ no link'"></span>
+          x-text="$store.hop.meta.uplink ? '● ' + ($store.hop.meta.uplink_iface || 'link') : '○ no link'"></span>
   </div>
 </header>
 
@@ -66,133 +66,63 @@
     <span class="stats-conn" x-text="$store.hop.totalStats().active + ' conn total'"></span>
   </div>
 
-  <main class="main">
-    <template x-if="$store.hop.vpnList().length > 0">
-      <div>
-        <div class="section-label">VPN</div>
-        <template x-for="name in $store.hop.vpnList()" :key="name">
-          <div class="tc-card" :class="$store.hop.vpnVisualStatus(name)">
-            <div class="tc-header">
-              <div class="tc-id">
-                <span class="tc-name" x-text="name"></span>
-                <span class="tc-host" x-text="$store.hop.vpns[name]?.host || ''"></span>
-              </div>
-              <div class="tc-status-group">
-                <span class="dot" :class="$store.hop.vpnVisualStatus(name)"></span>
-                <span class="status-label"
-                      :class="$store.hop.vpnVisualStatus(name)"
-                      x-text="$store.hop.vpns[name]?.state || '…'"></span>
-              </div>
-              <div class="tc-info">
-                <span class="tc-info-item"
-                      x-text="fmtUptime($store.hop.vpns[name]?.uptime_seconds)"></span>
-                <span class="tc-info-item tc-recon"
-                      x-show="($store.hop.vpns[name]?.reconnects || 0) > 0"
-                      x-text="'recon ' + $store.hop.vpns[name]?.reconnects"></span>
-                <span class="tc-info-item tc-reconnect-cd"
-                      x-show="$store.hop.vpns[name]?.reconnect_in != null && $store.hop.vpns[name]?.reconnect_in >= 0"
-                      x-text="'next in ' + $store.hop.vpns[name]?.reconnect_in + 's'"></span>
-              </div>
-            </div>
-            <div class="tc-reason"
-                 x-show="$store.hop.vpns[name]?.state !== 'connected'"
-                 :class="$store.hop.vpns[name]?.last_error ? 'has-error' : 'no-error'"
-                 x-text="$store.hop.vpns[name]?.last_error || '—'"></div>
-          </div>
-        </template>
-      </div>
-    </template>
+  <div class="status-scroll">
 
-    <div class="section-label">Tunnels</div>
-
-    <template x-for="name in $store.hop.tunnelList()" :key="name">
-      <div class="tc-card"
-           :class="$store.hop.visualStatus(name)"
-           x-init="$nextTick(() => initChart(name, $el))">
-
-        <div class="tc-header">
-          <div class="tc-id">
-            <span class="tc-name" x-text="name"></span>
-            <span class="tc-host" x-text="$store.hop.tunnels[name]?.host"></span>
-          </div>
-
-          <div class="tc-status-group">
-            <span class="dot" :class="$store.hop.visualStatus(name)"></span>
-            <span class="status-label"
-                  :class="$store.hop.visualStatus(name)"
-                  x-text="$store.hop.tunnelStatusText(name)"></span>
-            <span class="tc-ka-warn"
-                  x-show="$store.hop.tunnels[name]?.keepalive_failures > 0"
-                  x-text="'⚠ ' + $store.hop.tunnels[name]?.keepalive_failures"></span>
-          </div>
-
-          <div class="tc-info">
-            <span class="tc-info-item"
-                  x-text="':' + ($store.hop.tunnels[name]?.local_port || '…')"></span>
-            <span class="tc-info-item tc-vpn-dep"
-                  x-show="$store.hop.tunnels[name]?.requires_vpn"
-                  :class="$store.hop.vpnVisualStatus($store.hop.tunnels[name]?.requires_vpn)"
-                  x-text="'via ' + $store.hop.tunnels[name]?.requires_vpn"></span>
-            <span class="tc-info-item"
-                  x-text="fmtUptime($store.hop.tunnels[name]?.uptime_seconds)"></span>
-            <span class="tc-info-item tc-recon"
-                  x-show="$store.hop.tunnels[name]?.reconnect_count > 0"
-                  x-text="'recon ' + $store.hop.tunnels[name]?.reconnect_count"></span>
-            <span class="tc-info-item tc-reconnect-cd"
-                  x-show="$store.hop.tunnels[name]?.status === 'connecting' && $store.hop.tunnels[name]?.reconnect_in != null && $store.hop.tunnels[name]?.reconnect_in >= 0"
-                  x-text="'next in ' + $store.hop.tunnels[name]?.reconnect_in + 's'"></span>
-          </div>
-
-          <div class="tc-bps">
-            <span class="tc-bps-in"
-                  x-text="'↓ ' + fmtBytes($store.hop.tunnels[name]?.bps_in) + '/s'"></span>
-            <span class="tc-bps-out"
-                  x-text="'↑ ' + fmtBytes($store.hop.tunnels[name]?.bps_out) + '/s'"></span>
-            <span class="tc-active"
-                  x-text="($store.hop.tunnels[name]?.active || 0) + ' conn'"></span>
-          </div>
-        </div>
-
-        <div class="tc-reason"
-             :class="$store.hop.tunnels[name]?.last_error?.startsWith('waiting for VPN') ? 'waiting' : ($store.hop.tunnels[name]?.last_error ? 'has-error' : 'no-error')"
-             x-text="$store.hop.tunnels[name]?.last_error || '—'"></div>
-
-        <div class="tc-chart-wrap">
-          <canvas class="tc-canvas"></canvas>
-        </div>
-      </div>
-    </template>
-
-    <div class="empty" x-show="$store.hop.tunnelList().length === 0">loading…</div>
-
-    <div class="tc-card tc-direct"
-         x-init="$nextTick(() => initChart('direct', $el))">
-      <div class="tc-header">
-        <div class="tc-id">
-          <span class="tc-name">direct</span>
-        </div>
-        <div class="tc-bps">
-          <span class="tc-bps-in"
-                x-text="'↓ ' + fmtBytes($store.hop.direct.bps_in) + '/s'"></span>
-          <span class="tc-bps-out"
-                x-text="'↑ ' + fmtBytes($store.hop.direct.bps_out) + '/s'"></span>
-          <span class="tc-active"
-                x-text="$store.hop.direct.active + ' conn'"></span>
-        </div>
-      </div>
-      <div class="tc-reason no-error">—</div>
-      <div class="tc-chart-wrap">
-        <canvas class="tc-canvas"></canvas>
-      </div>
+    <div id="vpn-section" style="display:none">
+      <div class="section-label">VPN</div>
+      <table class="status-table">
+        <colgroup>
+          <col class="col-name"><col class="col-host"><col class="col-iface">
+          <col class="col-status"><col class="col-uptime"><col class="col-rc">
+          <col class="col-msg">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Name</th><th>Host</th><th>Iface</th>
+            <th>Status</th><th>Uptime</th><th>RC</th><th>Message</th>
+          </tr>
+        </thead>
+        <tbody id="vpn-tbody"></tbody>
+      </table>
     </div>
-  </main>
 
+    <div id="tunnel-section">
+      <div class="section-label">Tunnels</div>
+      <table class="status-table">
+        <colgroup>
+          <col class="col-name"><col class="col-host"><col class="col-vpn">
+          <col class="col-port"><col class="col-status"><col class="col-uptime">
+          <col class="col-rc"><col class="col-bps"><col class="col-bps">
+          <col class="col-conn"><col class="col-msg">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Name</th><th>Host</th><th>VPN</th><th>Port</th>
+            <th>Status</th><th>Uptime</th><th>RC</th>
+            <th>↓</th><th>↑</th><th>Conn</th><th>Message</th>
+          </tr>
+        </thead>
+        <tbody id="tunnel-tbody">
+          <tr><td colspan="11" class="st-loading">loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
 </div>
 
 <!-- ── LOGS TAB ───────────────────────────────────────────────────────────── -->
 <div id="panel-logs" class="tab-panel">
   <div class="log-wrap">
-    <div class="log-label">Live log stream</div>
+    <div class="log-header">
+      <span class="log-label">Live log stream</span>
+      <div class="log-level-chips">
+        <button class="log-chip" data-level="DEBUG" onclick="setLogLevel('DEBUG')">DEBU</button>
+        <button class="log-chip active" data-level="INFO"  onclick="setLogLevel('INFO')">INFO</button>
+        <button class="log-chip" data-level="WARN"  onclick="setLogLevel('WARN')">WARN</button>
+        <button class="log-chip" data-level="ERROR" onclick="setLogLevel('ERROR')">ERR</button>
+      </div>
+    </div>
     <div class="log-scroll" id="log-scroll"></div>
   </div>
 </div>

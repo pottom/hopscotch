@@ -57,6 +57,7 @@ type VPNConfig struct {
 	PreConnect        []string `yaml:"pre_connect"`    // commands to run before each connection attempt
 	PostDisconnect    []string `yaml:"post_disconnect"` // commands to run after each VPN disconnect
 	Sudo              bool     `yaml:"sudo"`           // prepend sudo (needed on most platforms)
+	DNSResolver       string   `yaml:"dns_resolver"`   // DNS server for pre-connect hostname resolution; default: 1.1.1.1:53
 	ReconnectDelay    int      `yaml:"reconnect_delay"`
 	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
 }
