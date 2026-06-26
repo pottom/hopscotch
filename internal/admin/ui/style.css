@@ -569,6 +569,7 @@ main, main.main {
 .routes-table tr.routes-match td { background: rgba(56,189,248,.07); }
 .routes-table tr.routes-match .routes-pattern { color: var(--accent); }
 
+.routes-arrow      { color: var(--accent); width: 1.2rem; font-size: .75rem; }
 .routes-num        { color: var(--muted); width: 2.5rem; }
 .routes-pattern    { color: #e2e8f0; }
 .routes-via-tunnel { color: var(--accent); }

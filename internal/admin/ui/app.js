@@ -713,7 +713,8 @@ function renderRoutesTable(highlightIdx) {
 
     const tr = document.createElement('tr');
     if (highlightIdx === i) tr.className = 'routes-match';
-    tr.innerHTML = `<td class="routes-num">${i + 1}</td><td class="routes-pattern">${r.pattern}</td><td>${viaHtml}</td><td>${statusHtml}</td>`;
+    const arrow = (highlightIdx === i) ? '▶' : '';
+    tr.innerHTML = `<td class="routes-arrow">${arrow}</td><td class="routes-num">${i + 1}</td><td class="routes-pattern">${r.pattern}</td><td>${viaHtml}</td><td>${statusHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
