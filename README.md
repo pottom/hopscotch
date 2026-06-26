@@ -72,6 +72,12 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 
 One binary. Zero services. Zero background daemons beyond itself.
 
+## How it works
+
+![Architecture overview](docs/arch-overview.svg)
+
+hopscotch sits between your tools and your jump hosts. Apps connect to a single local SOCKS5 port; the rule engine walks the pattern list (first match wins) and dispatches each connection to the right SSH tunnel. The tunnel pool stays connected in the background — reconnecting automatically when a link drops.
+
 ## TUI dashboard
 
 `hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Patterns**, **Logs**, **Docs**.
@@ -109,6 +115,8 @@ Rules evaluate top-to-bottom; first match wins. Patterns support:
 | Catch-all | `*` | everything |
 
 `via: direct` bypasses all tunnels. Put it last as the fallback.
+
+![Connection flow](docs/flow-connection.svg)
 
 CIDR patterns are precise and composable — `10.0.0.0/8` covers an entire private range where `10.*.*.*` would need four octets. They can be mixed freely with glob patterns in the same rule list.
 

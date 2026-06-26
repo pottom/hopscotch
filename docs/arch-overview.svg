@@ -1,0 +1,170 @@
+<svg width="960" height="500" viewBox="0 0 960 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ao-lg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+    <marker id="ao-ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#38bdf8"/>
+    </marker>
+    <marker id="ao-ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#34d399"/>
+    </marker>
+    <marker id="ao-as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="500" fill="#080c14"/>
+
+  <!-- Title bar -->
+  <rect width="960" height="40" fill="#161f2e"/>
+  <circle cx="20" cy="20" r="5" fill="#ff5f56"/>
+  <circle cx="40" cy="20" r="5" fill="#ffbd2e"/>
+  <circle cx="60" cy="20" r="5" fill="#27c93f"/>
+  <text x="480" y="25" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="12" fill="#475569" text-anchor="middle">hopscotch — architecture overview</text>
+  <line x1="0" y1="40" x2="960" y2="40" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ LEFT: APPS ════════════════════════════════════════════════════════ -->
+  <text x="110" y="62" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="9.5" font-weight="600" fill="#334155" letter-spacing="1.5" text-anchor="middle">YOUR APPS</text>
+
+  <!-- Browser box -->
+  <rect x="16" y="70" width="188" height="46" rx="7" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="16" y="70" width="3" height="46" rx="1.5" fill="#38bdf8"/>
+  <text x="32" y="97" font-family="'Space Grotesk',system-ui,sans-serif" font-size="13" font-weight="500" fill="#e2e8f0">Browser</text>
+  <text x="32" y="109" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#475569">SOCKS5 proxy setting</text>
+
+  <!-- curl box -->
+  <rect x="16" y="128" width="188" height="46" rx="7" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="16" y="128" width="3" height="46" rx="1.5" fill="#38bdf8"/>
+  <text x="32" y="155" font-family="'Space Grotesk',system-ui,sans-serif" font-size="13" font-weight="500" fill="#e2e8f0">curl / wget</text>
+  <text x="32" y="167" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#475569">ALL_PROXY=socks5h://...</text>
+
+  <!-- App box -->
+  <rect x="16" y="186" width="188" height="46" rx="7" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="16" y="186" width="3" height="46" rx="1.5" fill="#818cf8"/>
+  <text x="32" y="213" font-family="'Space Grotesk',system-ui,sans-serif" font-size="13" font-weight="500" fill="#e2e8f0">Application</text>
+  <text x="32" y="225" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#475569">SOCKS5 library / SDK</text>
+
+  <!-- SSH box -->
+  <rect x="16" y="244" width="188" height="46" rx="7" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="16" y="244" width="3" height="46" rx="1.5" fill="#fbbf24"/>
+  <text x="32" y="271" font-family="'Space Grotesk',system-ui,sans-serif" font-size="13" font-weight="500" fill="#e2e8f0">ssh user@host</text>
+  <text x="32" y="283" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#475569">ProxyCommand hopscotch ...</text>
+
+  <!-- Arrows to hopscotch -->
+  <line x1="204" y1="93"  x2="268" y2="215" stroke="#38bdf8" stroke-width="1.3" stroke-dasharray="5,3" opacity=".65" marker-end="url(#ao-ab)"/>
+  <line x1="204" y1="151" x2="268" y2="218" stroke="#38bdf8" stroke-width="1.3" stroke-dasharray="5,3" opacity=".65" marker-end="url(#ao-ab)"/>
+  <line x1="204" y1="209" x2="268" y2="221" stroke="#818cf8" stroke-width="1.3" stroke-dasharray="5,3" opacity=".65" marker-end="url(#ao-ab)"/>
+  <line x1="204" y1="267" x2="268" y2="224" stroke="#fbbf24" stroke-width="1.3" stroke-dasharray="5,3" opacity=".65" marker-end="url(#ao-ab)"/>
+  <text x="228" y="207" font-family="'JetBrains Mono','Courier New',monospace" font-size="9" fill="#38bdf8" opacity=".9" text-anchor="middle">:1080</text>
+
+  <!-- ══ CENTER: HOPSCOTCH ═════════════════════════════════════════════════ -->
+  <rect x="272" y="70" width="268" height="340" rx="12" fill="#0f1623" stroke="#283548" stroke-width="1.5"/>
+  <rect x="272" y="70" width="268" height="4" rx="2" fill="url(#ao-lg)"/>
+
+  <!-- Logo -->
+  <circle cx="298" cy="102" r="4" fill="#38bdf8" opacity=".9"/>
+  <circle cx="317" cy="102" r="4" fill="#818cf8" opacity=".9"/>
+  <path d="M302 102 Q309 91 313 102" stroke="url(#ao-lg)" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <circle cx="308" cy="93" r="2.3" fill="#38bdf8" opacity=".85"/>
+  <text x="328" y="108" font-family="'Space Grotesk',system-ui,sans-serif"
+        font-size="16" font-weight="600" fill="#e2e8f0" letter-spacing="-0.5">hopscotch</text>
+
+  <line x1="288" y1="120" x2="528" y2="120" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- SOCKS5 block -->
+  <rect x="288" y="130" width="236" height="52" rx="6" fill="#080c14" stroke="#1a2535" stroke-width="1"/>
+  <text x="300" y="148" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" font-weight="600" fill="#334155" letter-spacing="1.2">SOCKS5 PROXY</text>
+  <text x="300" y="170" font-family="'JetBrains Mono','Courier New',monospace" font-size="13" fill="#38bdf8">0.0.0.0:1080</text>
+  <text x="432" y="170" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">← listens</text>
+
+  <!-- Rule engine block -->
+  <rect x="288" y="194" width="236" height="100" rx="6" fill="#080c14" stroke="#1a2535" stroke-width="1"/>
+  <text x="300" y="212" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" font-weight="600" fill="#334155" letter-spacing="1.2">RULE ENGINE</text>
+  <line x1="296" y1="220" x2="516" y2="220" stroke="#1a2535" stroke-width=".7"/>
+  <text x="302" y="236" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#38bdf8">›</text>
+  <text x="314" y="236" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#e2e8f0">10.215.11.0/24</text>
+  <text x="444" y="236" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#34d399">go-a-pre</text>
+  <text x="302" y="253" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#e2e8f0" opacity=".55"> 10.215.0.0/20</text>
+  <text x="444" y="253" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#34d399" opacity=".55">go-a-scb</text>
+  <text x="302" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#e2e8f0" opacity=".55"> *.prod.internal</text>
+  <text x="444" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#34d399" opacity=".55">prod</text>
+  <text x="302" y="287" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569"> *</text>
+  <text x="444" y="287" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">direct</text>
+  <text x="518" y="290" font-family="'JetBrains Mono','Courier New',monospace" font-size="8.5" fill="#1e3a4a" text-anchor="end">first match wins</text>
+
+  <!-- Tunnel pool block -->
+  <rect x="288" y="306" width="236" height="74" rx="6" fill="#080c14" stroke="#1a2535" stroke-width="1"/>
+  <text x="300" y="324" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" font-weight="600" fill="#334155" letter-spacing="1.2">SSH TUNNEL POOL</text>
+  <line x1="296" y1="330" x2="516" y2="330" stroke="#1a2535" stroke-width=".7"/>
+  <circle cx="304" cy="346" r="3.5" fill="#34d399"/>
+  <text x="314" y="350" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">go-a-scb</text>
+  <circle cx="396" cy="346" r="3.5" fill="#34d399"/>
+  <text x="406" y="350" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">go-b-scb</text>
+  <circle cx="304" cy="366" r="3.5" fill="#34d399"/>
+  <text x="314" y="370" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">go-a-preprod</text>
+  <circle cx="416" cy="366" r="3.5" fill="#fbbf24">
+    <animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite"/>
+  </circle>
+  <text x="426" y="370" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#475569">go-b-preprod</text>
+
+  <!-- Admin label -->
+  <text x="406" y="400" font-family="'JetBrains Mono','Courier New',monospace" font-size="9" fill="#283548" text-anchor="end">TUI   ·   admin :9090</text>
+
+  <!-- ══ ARROWS hopscotch → destinations ══════════════════════════════════ -->
+  <path d="M540,195 C566,195 578,148 602,148" stroke="#34d399" stroke-width="1.8" fill="none" marker-end="url(#ao-ag)"/>
+  <path d="M540,255 L602,280" stroke="#34d399" stroke-width="1.8" fill="none" marker-end="url(#ao-ag)"/>
+  <path d="M540,350 C566,350 578,400 602,400" stroke="#475569" stroke-width="1.4" stroke-dasharray="5,3" fill="none" marker-end="url(#ao-as)"/>
+  <text x="562" y="137" font-family="'JetBrains Mono','Courier New',monospace" font-size="9" fill="#38bdf8">SSH</text>
+  <text x="562" y="263" font-family="'JetBrains Mono','Courier New',monospace" font-size="9" fill="#38bdf8">SSH</text>
+
+  <!-- ══ RIGHT: DESTINATIONS ═══════════════════════════════════════════════ -->
+  <text x="780" y="62" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="9.5" font-weight="600" fill="#334155" letter-spacing="1.5" text-anchor="middle">DESTINATIONS</text>
+
+  <!-- Site A -->
+  <rect x="604" y="70" width="336" height="130" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="604" y="70" width="3" height="130" rx="1.5" fill="#34d399"/>
+  <text x="622" y="93" font-family="'Space Grotesk',system-ui,sans-serif" font-size="13" font-weight="600" fill="#e2e8f0">go-a-scb  /  go-a-preprod-jump</text>
+  <rect x="814" y="76" width="116" height="20" rx="10" fill="rgba(52,211,153,.08)" stroke="rgba(52,211,153,.2)" stroke-width="1"/>
+  <circle cx="828" cy="86" r="3" fill="#34d399"/>
+  <text x="840" y="90" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#34d399">connected</text>
+  <line x1="618" y1="102" x2="932" y2="102" stroke="#1a2535" stroke-width=".7"/>
+  <text x="622" y="118" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.215.0.0/20   · *.gslb.example.com</text>
+  <text x="622" y="134" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.210.0.0/20   · *a.example.local</text>
+  <text x="622" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.211.0.0/20   · *a.test.local</text>
+  <text x="622" y="166" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.215.11.0/24  (preprod exception)</text>
+  <text x="622" y="192" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#283548">SSH jump host → private network</text>
+
+  <!-- Site B -->
+  <rect x="604" y="214" width="336" height="130" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="604" y="214" width="3" height="130" rx="1.5" fill="#34d399"/>
+  <text x="622" y="237" font-family="'Space Grotesk',system-ui,sans-serif" font-size="13" font-weight="600" fill="#e2e8f0">go-b-scb  /  go-b-preprod-jump</text>
+  <rect x="814" y="220" width="116" height="20" rx="10" fill="rgba(52,211,153,.08)" stroke="rgba(52,211,153,.2)" stroke-width="1"/>
+  <circle cx="828" cy="230" r="3" fill="#34d399"/>
+  <text x="840" y="234" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#34d399">connected</text>
+  <line x1="618" y1="246" x2="932" y2="246" stroke="#1a2535" stroke-width=".7"/>
+  <text x="622" y="262" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.215.16.0/20  · *b.example.local</text>
+  <text x="622" y="278" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.210.16.0/20  · *b.test.local</text>
+  <text x="622" y="294" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.211.16.0/20  · *.tgslb.example.com</text>
+  <text x="622" y="310" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">10.215.27.0/24  (preprod exception)</text>
+  <text x="622" y="336" font-family="'JetBrains Mono','Courier New',monospace" font-size="9.5" fill="#283548">SSH jump host → private network</text>
+
+  <!-- Direct -->
+  <rect x="604" y="358" width="336" height="82" rx="9" fill="#0f1623" stroke="#1a2535" stroke-width="1"/>
+  <rect x="604" y="358" width="3" height="82" rx="1.5" fill="#475569"/>
+  <text x="622" y="381" font-family="'Space Grotesk',system-ui,sans-serif" font-size="13" font-weight="600" fill="#475569">direct</text>
+  <line x1="618" y1="390" x2="932" y2="390" stroke="#1a2535" stroke-width=".7"/>
+  <text x="622" y="406" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">*  (everything else)</text>
+  <text x="622" y="422" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#475569">internet, localhost, LAN</text>
+
+  <!-- Footer -->
+  <line x1="0" y1="458" x2="960" y2="458" stroke="#1a2535" stroke-width="1"/>
+  <text x="480" y="478" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" text-anchor="middle">
+    Apps connect via SOCKS5 · hopscotch rule engine decides which SSH tunnel handles each request
+  </text>
+</svg>
