@@ -429,7 +429,7 @@ async function refreshStatus() {
 
     store.routes = st.routes || [];
 
-    if (TAB_INIT['patterns']) {
+    if (TAB_INIT['patterns'] && !rulesEditMode) {
       const testerVal = document.getElementById('routes-tester-input')?.value || '';
       renderRoutesTable(testerVal ? findMatchIdx(testerVal) : undefined);
     }
@@ -686,6 +686,18 @@ function tunnelVisualStatus(t) {
   return t.status;
 }
 
+function resetRoutesHead() {
+  const thead = document.getElementById('routes-thead');
+  if (!thead) return;
+  thead.innerHTML = `<tr>
+    <th style="width:1.2rem"></th>
+    <th class="routes-num-h">#</th>
+    <th>Pattern</th>
+    <th>Via</th>
+    <th>Status</th>
+  </tr>`;
+}
+
 function renderRoutesTable(highlightIdx) {
   const tbody = document.getElementById('routes-tbody');
   if (!tbody) return;
@@ -693,7 +705,7 @@ function renderRoutesTable(highlightIdx) {
   const tunnels = Alpine.store('hop').tunnels || {};
 
   if (routes.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="routes-empty">No routing rules configured.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="routes-empty">No routing rules configured.</td></tr>';
     return;
   }
 
@@ -723,7 +735,308 @@ function renderRoutesTable(highlightIdx) {
 }
 
 function initRoutes() {
+  resetRoutesHead();
   renderRoutesTable();
+  const tester = document.getElementById('routes-tester-input');
+  if (tester && !tester._ctrlNAttached) {
+    tester._ctrlNAttached = true;
+    tester.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key === 'n') {
+        e.preventDefault();
+        tester.value = '';
+        routesTesterUpdate('');
+      }
+    });
+  }
+}
+
+// ── Rules editing ─────────────────────────────────────────────────────────────
+
+let rulesEditMode = false;
+let rulesEditData = [];
+const _validateTimers = {};
+
+function rulesStartEdit() {
+  rulesEditMode = true;
+  rulesEditData = (Alpine.store('hop').routes || []).map(r => ({...r, _new: false, _deleted: false}));
+  document.getElementById('routes-edit-btn').style.display   = 'none';
+  document.getElementById('routes-save-btn').style.display   = '';
+  document.getElementById('routes-cancel-btn').style.display = '';
+  document.getElementById('routes-save-status').textContent  = '';
+  document.querySelector('.routes-tester').style.display     = 'none';
+  renderEditTable();
+}
+
+function rulesCancel() {
+  rulesEditMode = false;
+  document.getElementById('routes-edit-btn').style.display   = '';
+  document.getElementById('routes-save-btn').style.display   = 'none';
+  document.getElementById('routes-cancel-btn').style.display = 'none';
+  document.getElementById('routes-save-status').textContent  = '';
+  document.querySelector('.routes-tester').style.display     = '';
+  resetRoutesHead();
+  renderRoutesTable();
+}
+
+function rulesInsertAfter(i) {
+  rulesCollectFromDOM();
+  rulesEditData.splice(i + 1, 0, {pattern: '', tunnel: '', via: 'direct', _new: true, _deleted: false});
+  renderEditTable(i + 1);
+  const rows = document.querySelectorAll('#routes-tbody tr[data-idx]');
+  if (rows[i + 1]) rows[i + 1].querySelector('.rules-edit-pattern')?.focus();
+}
+
+function rulesDeleteRow(i) {
+  rulesCollectFromDOM();
+  const r = rulesEditData[i];
+  if (r._new) {
+    // New (unsaved) row — remove it immediately, no red highlight needed
+    rulesEditData.splice(i, 1);
+  } else if (r._deleted) {
+    // Already marked for deletion — toggle back
+    rulesEditData[i]._deleted = false;
+  } else {
+    // Original row — soft-delete (keep in list, mark red)
+    rulesEditData[i]._deleted = true;
+  }
+  renderEditTable();
+}
+
+function rulesMoveUp(i) {
+  rulesCollectFromDOM();
+  if (i <= 0) return;
+  [rulesEditData[i-1], rulesEditData[i]] = [rulesEditData[i], rulesEditData[i-1]];
+  renderEditTable();
+}
+
+function rulesMoveDown(i) {
+  rulesCollectFromDOM();
+  if (i >= rulesEditData.length - 1) return;
+  [rulesEditData[i], rulesEditData[i+1]] = [rulesEditData[i+1], rulesEditData[i]];
+  renderEditTable();
+}
+
+function rulesCollectFromDOM() {
+  document.querySelectorAll('#routes-tbody tr[data-idx]').forEach(tr => {
+    const idx = parseInt(tr.dataset.idx);
+    if (rulesEditData[idx]?._deleted) return; // deleted rows keep their original data
+    const pattern = tr.querySelector('.rules-edit-pattern')?.value || '';
+    const via     = tr.querySelector('.rules-via-picker')?.dataset.value || 'direct';
+    rulesEditData[idx] = {
+      ...rulesEditData[idx],
+      pattern,
+      tunnel: via === 'direct' ? '' : via,
+      via:    via === 'direct' ? 'direct' : '',
+    };
+  });
+}
+
+// ── Custom via picker ──────────────────────────────────────────────────────────
+
+window.rulesPickerToggle = function(el, event) {
+  event.stopPropagation();
+  const isOpen = el.classList.contains('open');
+  document.querySelectorAll('.rules-via-picker.open').forEach(p => p.classList.remove('open'));
+  if (!isOpen) el.classList.add('open');
+};
+
+window.rulesPickerSelect = function(rowIdx, value, event) {
+  event.stopPropagation();
+  rulesCollectFromDOM();
+  if (rowIdx < rulesEditData.length) {
+    rulesEditData[rowIdx].tunnel = value === 'direct' ? '' : value;
+    rulesEditData[rowIdx].via    = value === 'direct' ? 'direct' : '';
+    rulesEditData[rowIdx]._pickerValue = value;
+  }
+  document.querySelectorAll('.rules-via-picker.open').forEach(p => p.classList.remove('open'));
+  // Update just the picker label without full re-render
+  const picker = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"] .rules-via-picker`);
+  if (picker) {
+    picker.dataset.value = value;
+    picker.querySelector('.rules-via-picker-label').textContent = value;
+    picker.querySelectorAll('.rules-via-opt').forEach(li => {
+      li.classList.toggle('selected', li.dataset.value === value);
+    });
+  }
+};
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.rules-via-picker.open').forEach(p => p.classList.remove('open'));
+});
+
+function buildViaPicker(rowIdx, currentVia, tunnelNames) {
+  const options = ['direct', ...tunnelNames];
+  const items = options.map(v =>
+    `<li class="rules-via-opt${v === currentVia ? ' selected' : ''}" data-value="${escHtml(v)}"
+        onclick="rulesPickerSelect(${rowIdx}, '${escHtml(v)}', event)">${escHtml(v)}</li>`
+  ).join('');
+  return `<div class="rules-via-picker" data-value="${escHtml(currentVia)}" tabindex="0"
+               onclick="rulesPickerToggle(this, event)">
+    <span class="rules-via-picker-label">${escHtml(currentVia)}</span>
+    <span class="rules-via-picker-arrow">▾</span>
+    <ul class="rules-via-picker-list">${items}</ul>
+  </div>`;
+}
+
+// ── Pattern validation ─────────────────────────────────────────────────────────
+
+window.debounceValidate = function(rowIdx, pattern) {
+  clearTimeout(_validateTimers[rowIdx]);
+  _validateTimers[rowIdx] = setTimeout(() => _doValidate(rowIdx, pattern), 300);
+};
+
+async function _doValidate(rowIdx, pattern) {
+  if (!pattern) { _clearValidationError(rowIdx); return; }
+  try {
+    const res  = await fetch('/api/validate-pattern?p=' + encodeURIComponent(pattern));
+    const data = await res.json();
+    if (data.valid) {
+      _clearValidationError(rowIdx);
+    } else {
+      _showValidationError(rowIdx, data.error);
+    }
+  } catch { /* ignore */ }
+}
+
+function _showValidationError(rowIdx, msg) {
+  const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
+  if (!tr) return;
+  const inp = tr.querySelector('.rules-edit-pattern');
+  if (inp) inp.classList.add('invalid');
+  let hint = tr.querySelector('.rules-pattern-error');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.className = 'rules-pattern-error';
+    tr.querySelector('.rules-pattern-cell')?.appendChild(hint);
+  }
+  hint.textContent = msg;
+}
+
+function _clearValidationError(rowIdx) {
+  const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
+  if (!tr) return;
+  tr.querySelector('.rules-edit-pattern')?.classList.remove('invalid');
+  tr.querySelector('.rules-pattern-error')?.remove();
+}
+
+// ── Save ───────────────────────────────────────────────────────────────────────
+
+async function rulesSave() {
+  rulesCollectFromDOM();
+  const status  = document.getElementById('routes-save-status');
+  const saveBtn = document.getElementById('routes-save-btn');
+  saveBtn.disabled = true;
+  status.textContent = 'Saving…';
+  status.className   = 'routes-save-status';
+  try {
+    // Strip UI-only metadata and filter out soft-deleted rows before sending
+    const payload = rulesEditData
+      .filter(r => !r._deleted)
+      .map(({_new, _deleted, ...r}) => r);
+    const res = await fetch('/api/rules', {
+      method:  'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({rules: payload}),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      status.textContent = 'Error: ' + txt.trim();
+      status.className   = 'routes-save-status routes-save-error';
+      return;
+    }
+    status.textContent = 'Saved ✓';
+    status.className   = 'routes-save-status routes-save-ok';
+    Alpine.store('hop').routes = rulesEditData.map(r => ({...r}));
+    setTimeout(rulesCancel, 800);
+  } catch {
+    status.textContent = 'Network error';
+    status.className   = 'routes-save-status routes-save-error';
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// newRowIdx: index of the just-inserted row (gets enter animation); undefined = no animation
+function renderEditTable(newRowIdx) {
+  const thead = document.getElementById('routes-thead');
+  if (thead) {
+    thead.innerHTML = `<tr>
+      <th style="width:5rem"></th>
+      <th class="routes-num-h">#</th>
+      <th>Pattern</th>
+      <th>Via</th>
+      <th style="width:4rem"></th>
+    </tr>`;
+  }
+
+  const tb = document.getElementById('routes-tbody');
+  if (!tb) return;
+
+  const tunnelNames = Object.keys(Alpine.store('hop').tunnels || {}).sort();
+
+  if (rulesEditData.length === 0) {
+    tb.innerHTML = '<tr><td colspan="5" class="routes-empty">No rules — click + Add or use the row buttons to insert.</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = '';
+
+  // Top insert-before-first row
+  const topRow = document.createElement('tr');
+  topRow.className = 'rules-top-insert';
+  topRow.innerHTML = `<td colspan="4"></td><td class="rules-row-actions"><button class="rules-insert-btn" onclick="rulesInsertAfter(-1)" title="Insert rule at top">+</button></td>`;
+  tb.appendChild(topRow);
+
+  rulesEditData.forEach((r, i) => {
+    const isNew     = !!r._new;
+    const isDeleted = !!r._deleted;
+    const currentVia = r.tunnel || (r.via || 'direct');
+
+    const tr = document.createElement('tr');
+    tr.dataset.idx = i;
+    if (isNew)     tr.classList.add('rules-row-new');
+    if (isDeleted) tr.classList.add('rules-row-deleted');
+    if (i === newRowIdx) tr.classList.add('rules-row-enter');
+
+    const moveDisabled = isDeleted;
+    const viaCell = isDeleted
+      ? `<div class="rules-via-picker rules-via-picker-disabled" data-value="${escHtml(currentVia)}">
+           <span class="rules-via-picker-label">${escHtml(currentVia)}</span>
+           <span class="rules-via-picker-arrow">▾</span>
+         </div>`
+      : buildViaPicker(i, currentVia, tunnelNames);
+    const actionBtn = isDeleted
+      ? `<button class="rules-undo-btn"   onclick="rulesDeleteRow(${i})" title="Undo delete">↩</button>`
+      : `<button class="rules-delete-btn" onclick="rulesDeleteRow(${i})" title="Delete">✕</button>`;
+
+    tr.innerHTML = `
+      <td class="rules-reorder">
+        <button class="rules-reorder-btn" onclick="rulesMoveUp(${i})"   ${(i === 0                        || moveDisabled) ? 'disabled' : ''}>↑</button>
+        <button class="rules-reorder-btn" onclick="rulesMoveDown(${i})" ${(i === rulesEditData.length - 1 || moveDisabled) ? 'disabled' : ''}>↓</button>
+      </td>
+      <td class="routes-num">${i + 1}</td>
+      <td class="rules-pattern-cell">
+        <input type="text" class="rules-edit-pattern" value="${escHtml(r.pattern)}"
+               placeholder="*.example.com or 10.0.0.0/8"
+               ${isDeleted ? 'disabled' : `oninput="debounceValidate(${i}, this.value)"`}>
+      </td>
+      <td>${viaCell}</td>
+      <td class="rules-row-actions">
+        ${isDeleted ? '' : `<button class="rules-insert-btn" onclick="rulesInsertAfter(${i})" title="Insert rule below">+</button>`}
+        ${actionBtn}
+      </td>
+    `;
+    tb.appendChild(tr);
+
+    // Re-validate existing patterns so errors are visible after re-render
+    if (r.pattern && !isDeleted) _doValidate(i, r.pattern);
+  });
 }
 
 window.routesTesterUpdate = function(input) {

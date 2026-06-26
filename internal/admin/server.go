@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -40,35 +41,47 @@ type VPNStatter interface {
 
 // Server is the HTTP admin server.
 type Server struct {
-	bind      string
-	port      int
-	proxyPort int
-	pid       int
-	readme    []byte
-	tunnels   TunnelStatter
-	vpns      VPNStatter // nil when no VPNs configured
-	direct    DirectStatter
-	routes    RouteStatter
-	logs      *logger.Broadcaster
-	startedAt time.Time
+	bind        string
+	port        int
+	proxyPort   int
+	pid         int
+	readme      []byte
+	tunnels     TunnelStatter
+	vpns        VPNStatter // nil when no VPNs configured
+	direct      DirectStatter
+	routes      RouteStatter
+	logs        *logger.Broadcaster
+	startedAt   time.Time
+	cfg         *config.Config
+	cfgMu       sync.Mutex
+	ruleUpdater RuleUpdater
 }
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte) *Server {
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater) *Server {
 	return &Server{
-		bind:      bind,
-		port:      port,
-		proxyPort: proxyPort,
-		pid:       os.Getpid(),
-		readme:    readme,
-		tunnels:   tunnels,
-		vpns:      vpns,
-		direct:    direct,
-		routes:    routes,
-		logs:      logger.GetBroadcaster(),
-		startedAt: time.Now(),
+		bind:        bind,
+		port:        port,
+		proxyPort:   proxyPort,
+		pid:         os.Getpid(),
+		readme:      readme,
+		tunnels:     tunnels,
+		vpns:        vpns,
+		direct:      direct,
+		routes:      routes,
+		logs:        logger.GetBroadcaster(),
+		startedAt:   time.Now(),
+		cfg:         cfg,
+		ruleUpdater: ruleUpdater,
 	}
+}
+
+func noCacheFS(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
 }
 
 // ListenAndServe starts the admin HTTP server. Blocks until ctx is cancelled.
@@ -80,8 +93,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("GET /readme", s.handleReadme)
 	mux.HandleFunc("GET /traffic/stream", s.handleTrafficStream)
 	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
+	mux.HandleFunc("PUT /api/rules", s.handleRules)
+	mux.HandleFunc("GET /api/validate-pattern", s.handleValidatePattern)
 	sub, _ := fs.Sub(uiFiles, "ui")
-	mux.Handle("GET /", http.FileServerFS(sub))
+	mux.Handle("GET /", noCacheFS(http.FileServerFS(sub)))
 
 	addr := fmt.Sprintf("%s:%d", s.bind, s.port)
 	ln, err := net.Listen("tcp", addr)

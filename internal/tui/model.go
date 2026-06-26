@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -283,11 +284,13 @@ type ssePayload struct {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type statusMsg  admin.StatusResponse
-type sseMsg     ssePayload
-type logLineMsg string
-type errMsg     error
-type tickMsg    time.Time
+type statusMsg    admin.StatusResponse
+type sseMsg       ssePayload
+type logLineMsg   string
+type errMsg       error
+type tickMsg      time.Time
+type rulesSavedMsg   struct{}
+type rulesSaveErrMsg struct{ err error }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -313,6 +316,15 @@ type Model struct {
 	routeInput   textinput.Model
 	routeFocused bool
 
+	// edit mode (Patterns tab)
+	editMode      bool
+	editRules     []admin.RouteJSON
+	editCursor    int
+	editPatInput  textinput.Model
+	editPatFocused bool
+	editError     string
+	editSaving    bool
+
 	tick    int
 	width   int
 	height  int
@@ -330,9 +342,14 @@ func New(adminURL string) Model {
 	done := make(chan struct{})
 
 	ti := textinput.New()
-	ti.Placeholder = "hostname or URL…"
+	ti.Placeholder = "hostname or URL — Ctrl+N to clear"
 	ti.CharLimit = 256
 	ti.Width = 60
+
+	ep := textinput.New()
+	ep.Placeholder = "*.example.com or 10.0.0.0/8"
+	ep.CharLimit = 256
+	ep.Width = 32
 
 	return Model{
 		adminURL: adminURL,
@@ -347,6 +364,7 @@ func New(adminURL string) Model {
 		width:       80,
 		height:      24,
 		routeInput:  ti,
+		editPatInput: ep,
 	}
 }
 
@@ -362,7 +380,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		// When the route input is focused, only esc/enter escape; everything else goes to the input.
+		// Pattern edit input (inside edit mode) — most keys go to textinput.
+		if m.editPatFocused {
+			switch msg.String() {
+			case "esc":
+				m.editPatFocused = false
+				m.editPatInput.Blur()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			case "enter":
+				if m.editCursor < len(m.editRules) {
+					m.editRules[m.editCursor].Pattern = m.editPatInput.Value()
+				}
+				m.editPatFocused = false
+				m.editPatInput.Blur()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			default:
+				m.editPatInput, cmd = m.editPatInput.Update(msg)
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, cmd
+			}
+		}
+
+		// URL tester input.
 		if m.routeFocused {
 			switch msg.String() {
 			case "esc", "enter":
@@ -374,6 +421,116 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.routeVP.SetContent(m.buildRoutesContent())
 				}
 				return m, cmd
+			}
+			return m, nil
+		}
+
+		// Edit mode row-selection keys.
+		if m.editMode {
+			switch msg.String() {
+			case "q", "Q", "ctrl+c":
+				close(m.done)
+				return m, tea.Quit
+			case "esc":
+				m.editMode = false
+				m.editError = ""
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesContent())
+				}
+				return m, nil
+			case "enter", "ctrl+s":
+				if !m.editSaving {
+					m.editSaving = true
+					m.editError = ""
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+					return m, m.saveRulesCmd()
+				}
+				return m, nil
+			case "up", "k":
+				if m.editCursor > 0 {
+					m.editCursor--
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "down", "j":
+				if m.editCursor < len(m.editRules)-1 {
+					m.editCursor++
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "K":
+				if m.editCursor > 0 {
+					m.editRules[m.editCursor-1], m.editRules[m.editCursor] = m.editRules[m.editCursor], m.editRules[m.editCursor-1]
+					m.editCursor--
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "J":
+				if m.editCursor < len(m.editRules)-1 {
+					m.editRules[m.editCursor], m.editRules[m.editCursor+1] = m.editRules[m.editCursor+1], m.editRules[m.editCursor]
+					m.editCursor++
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "d", "D":
+				if m.editCursor < len(m.editRules) {
+					m.editRules = append(m.editRules[:m.editCursor], m.editRules[m.editCursor+1:]...)
+					if m.editCursor >= len(m.editRules) && m.editCursor > 0 {
+						m.editCursor--
+					}
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "a", "A":
+				m.editRules = append(m.editRules, admin.RouteJSON{})
+				m.editCursor = len(m.editRules) - 1
+				m.editPatInput.SetValue("")
+				m.editPatFocused = true
+				m.editPatInput.Focus()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, textinput.Blink
+			case "e", "E":
+				if m.editCursor < len(m.editRules) {
+					m.editPatInput.SetValue(m.editRules[m.editCursor].Pattern)
+					m.editPatFocused = true
+					m.editPatInput.Focus()
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+					return m, textinput.Blink
+				}
+				return m, nil
+			case "t", "T":
+				m.editCycleVia()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Ctrl+N: clear URL tester on Patterns tab.
+		if msg.String() == "ctrl+n" && m.activeTab == tabRoutes {
+			m.routeInput.SetValue("")
+			m.routeInput.Blur()
+			m.routeFocused = false
+			if m.routeVPReady {
+				m.routeVP.SetContent(m.buildRoutesContent())
 			}
 			return m, nil
 		}
@@ -401,6 +558,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p", "P":
 			m.activeTab = tabRoutes
 			m = m.resizeViewports()
+			return m, nil
+
+		case "e", "E":
+			if m.activeTab == tabRoutes {
+				m.editMode = true
+				m.editError = ""
+				m.editSaving = false
+				m.editCursor = 0
+				m.editRules = make([]admin.RouteJSON, len(m.status.Routes))
+				copy(m.editRules, m.status.Routes)
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			}
 			return m, nil
 
 		case "/":
@@ -448,6 +620,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m = m.resizeViewports()
 
+	case rulesSavedMsg:
+		m.editSaving = false
+		m.editMode = false
+		m.editError = ""
+		if m.routeVPReady {
+			m.routeVP.SetContent(m.buildRoutesContent())
+		}
+
+	case rulesSaveErrMsg:
+		m.editSaving = false
+		m.editError = msg.err.Error()
+		if m.routeVPReady {
+			m.routeVP.SetContent(m.buildRoutesEditContent())
+		}
+
 	case statusMsg:
 		m.status = admin.StatusResponse(msg)
 		m.err = nil
@@ -463,7 +650,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.vpReady {
 			m.vp.SetContent(m.buildStatusContent())
 		}
-		if m.routeVPReady {
+		if m.routeVPReady && !m.editMode {
 			m.routeVP.SetContent(m.buildRoutesContent())
 		}
 
@@ -663,41 +850,66 @@ func (m Model) renderHeader() string {
 	case tabStatus:
 		fmt.Fprintf(&b, "\n")
 	case tabRoutes:
-		fmt.Fprintf(&b, "\n")
-		// Input line — styled by focus state.
-		var inputPrefix string
-		if m.routeFocused {
-			inputPrefix = styleTabActive.Render("/ ")
-		} else {
-			inputPrefix = styleMuted.Render("/ ")
-		}
-		fmt.Fprintf(&b, "  %s%s\n", inputPrefix, m.routeInput.View())
-
-		// Result line.
-		matchIdx := m.findRouteMatch()
-		if m.routeInput.Value() == "" {
-			fmt.Fprintf(&b, "  %s\n", styleMuted.Render("type a hostname or URL to test routing"))
-		} else if matchIdx >= 0 {
-			r := m.status.Routes[matchIdx]
-			via := r.Tunnel
-			if via == "" {
-				via = r.Via
+		if m.editMode {
+			// Edit mode header.
+			fmt.Fprintf(&b, "\n")
+			if m.editSaving {
+				fmt.Fprintf(&b, "  %s\n", styleConnecting.Render("saving…"))
+			} else {
+				fmt.Fprintf(&b, "  %s  %s\n",
+					styleTabActive.Render("EDIT"),
+					styleMuted.Render("e=pattern  t=via  K/J=reorder  d=del  a=add  Enter=save  Esc=cancel"),
+				)
 			}
-			fmt.Fprintf(&b, "  %s\n",
-				styleConnected.Render(fmt.Sprintf("✓ rule %d → %s", matchIdx+1, via)),
+			if m.editError != "" {
+				fmt.Fprintf(&b, "  %s\n", styleDisconnected.Render("✗ "+m.editError))
+			} else {
+				fmt.Fprintf(&b, "\n")
+			}
+			fmt.Fprintf(&b, "\n")
+			fmt.Fprintf(&b, "  %s%s%s\n",
+				styleRouteNum.Render("#"),
+				styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
+				lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
 			)
+			fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 		} else {
-			fmt.Fprintf(&b, "  %s\n", styleMuted.Render("no rule matched → direct (fallback)"))
-		}
+			fmt.Fprintf(&b, "\n")
+			// Input line — styled by focus state.
+			var inputPrefix string
+			if m.routeFocused {
+				inputPrefix = styleTabActive.Render("/ ")
+			} else {
+				inputPrefix = styleMuted.Render("/ ")
+			}
+			fmt.Fprintf(&b, "  %s%s\n", inputPrefix, m.routeInput.View())
 
-		fmt.Fprintf(&b, "\n")
-		fmt.Fprintf(&b, "  %s%s%s%s\n",
-			styleRouteNum.Render("#"),
-			styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
-			lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
-			styleMuted.Render("STATUS"),
-		)
-		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
+			// Result line.
+			matchIdx := m.findRouteMatch()
+			if m.routeInput.Value() == "" {
+				fmt.Fprintf(&b, "  %s\n", styleMuted.Render("type a hostname or URL to test routing"))
+			} else if matchIdx >= 0 {
+				r := m.status.Routes[matchIdx]
+				via := r.Tunnel
+				if via == "" {
+					via = r.Via
+				}
+				fmt.Fprintf(&b, "  %s\n",
+					styleConnected.Render(fmt.Sprintf("✓ rule %d → %s", matchIdx+1, via)),
+				)
+			} else {
+				fmt.Fprintf(&b, "  %s\n", styleMuted.Render("no rule matched → direct (fallback)"))
+			}
+
+			fmt.Fprintf(&b, "\n")
+			fmt.Fprintf(&b, "  %s%s%s%s\n",
+				styleRouteNum.Render("#"),
+				styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
+				lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
+				styleMuted.Render("STATUS"),
+			)
+			fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
+		}
 	default:
 		levelLabel := logLevelLabels[m.logLevel]
 		fmt.Fprintf(&b, "\n")
@@ -711,10 +923,12 @@ func (m Model) renderHeader() string {
 func (m Model) renderFooter() string {
 	hints := "q quit  tab/s/l/p switch  ↑↓/jk scroll"
 	if m.activeTab == tabRoutes {
-		if m.routeFocused {
+		if m.editMode {
+			hints = "↑↓/jk cursor  K/J reorder  e edit  t via  d del  a add  Enter save  Esc cancel"
+		} else if m.routeFocused {
 			hints += "  esc unfocus"
 		} else {
-			hints += "  / test URL"
+			hints += "  / test URL  e edit"
 		}
 	}
 	if m.activeTab == tabLogs {
@@ -820,6 +1034,126 @@ func (m Model) buildRoutesContent() string {
 		)
 	}
 	return b.String()
+}
+
+// sortedTunnelNames returns tunnel names from the current status, sorted.
+func (m Model) sortedTunnelNames() []string {
+	names := make([]string, 0, len(m.status.Tunnels))
+	for n := range m.status.Tunnels {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// editCycleVia cycles the via of the currently selected edit rule through
+// "direct" + all known tunnel names.
+func (m *Model) editCycleVia() {
+	if m.editCursor >= len(m.editRules) {
+		return
+	}
+	r := &m.editRules[m.editCursor]
+	options := append([]string{"direct"}, m.sortedTunnelNames()...)
+	current := r.Tunnel
+	if current == "" {
+		current = "direct"
+	}
+	for i, opt := range options {
+		if opt == current {
+			next := options[(i+1)%len(options)]
+			if next == "direct" {
+				r.Tunnel = ""
+				r.Via = "direct"
+			} else {
+				r.Tunnel = next
+				r.Via = ""
+			}
+			return
+		}
+	}
+	r.Tunnel = ""
+	r.Via = "direct"
+}
+
+// buildRoutesEditContent renders the editable rule table for the routes viewport.
+func (m Model) buildRoutesEditContent() string {
+	if len(m.editRules) == 0 {
+		return "\n" + styleMuted.Render("  no rules — press a to add") + "\n"
+	}
+
+	var b strings.Builder
+	for i, r := range m.editRules {
+		via := r.Tunnel
+		if via == "" {
+			via = r.Via
+		}
+		if via == "" {
+			via = "direct"
+		}
+
+		selected := m.editCursor == i
+
+		var cursor string
+		if selected {
+			cursor = styleTabActive.Render("> ")
+		} else {
+			cursor = "  "
+		}
+
+		var patRendered string
+		if selected && m.editPatFocused {
+			// Show textinput for the pattern.
+			patRendered = styleRoutePattern.Render(m.editPatInput.View())
+		} else if selected {
+			patRendered = styleRoutePattern.Foreground(colorAccent).Render(r.Pattern)
+		} else {
+			patRendered = styleRoutePattern.Render(r.Pattern)
+		}
+
+		var viaRendered string
+		if via == "direct" || r.Tunnel == "" {
+			viaRendered = lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render(via)
+		} else {
+			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
+		}
+
+		fmt.Fprintf(&b, "%s%s%s%s\n",
+			cursor,
+			styleRouteNum.Render(fmt.Sprintf("%d", i+1)),
+			patRendered,
+			viaRendered,
+		)
+	}
+	return b.String()
+}
+
+// saveRulesCmd returns a Cmd that PUTs the current editRules to the admin API.
+func (m Model) saveRulesCmd() tea.Cmd {
+	rules := make([]admin.RouteJSON, len(m.editRules))
+	copy(rules, m.editRules)
+	url := strings.TrimSuffix(m.adminURL, "/status") + "/api/rules"
+	return func() tea.Msg {
+		body, err := json.Marshal(map[string]interface{}{"rules": rules})
+		if err != nil {
+			return rulesSaveErrMsg{err}
+		}
+		resp, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+		if err != nil {
+			return rulesSaveErrMsg{err}
+		}
+		resp.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(resp)
+		if err != nil {
+			return rulesSaveErrMsg{err}
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			var msg [256]byte
+			n, _ := res.Body.Read(msg[:])
+			return rulesSaveErrMsg{fmt.Errorf("%s", strings.TrimSpace(string(msg[:n])))}
+		}
+		return rulesSavedMsg{}
+	}
 }
 
 // buildStatusContent renders the scrollable content for the status viewport.

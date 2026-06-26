@@ -15,10 +15,15 @@ import (
 type ConfigError struct {
 	Field   string
 	Message string
+	Hint    string // optional fix suggestion shown to the user
 }
 
 func (e *ConfigError) Error() string {
-	return fmt.Sprintf("config: field %q: %s", e.Field, e.Message)
+	s := fmt.Sprintf("config: field %q: %s", e.Field, e.Message)
+	if e.Hint != "" {
+		s += "\n  → " + e.Hint
+	}
+	return s
 }
 
 // TunnelConfig describes a single SSH jump-host tunnel.
@@ -325,14 +330,38 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	for _, rule := range cfg.Proxy.Rules {
+	for i, rule := range cfg.Proxy.Rules {
 		if rule.Pattern == "" {
-			return &ConfigError{Field: "proxy.rules[].pattern", Message: "pattern is required"}
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].pattern", i+1), Message: "pattern is required"}
 		}
 		if rule.Tunnel == "" && rule.Via == "" {
-			return &ConfigError{Field: "proxy.rules[].tunnel", Message: "either tunnel or via is required"}
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].tunnel", i+1), Message: "either tunnel or via is required"}
+		}
+		if err := ValidatePattern(rule.Pattern); err != nil {
+			hint := patternErrorHint(cfg.Path, rule.Pattern, i+1)
+			return &ConfigError{
+				Field:   fmt.Sprintf("proxy.rules[%d]", i+1),
+				Message: fmt.Sprintf("invalid pattern %q: %s", rule.Pattern, err.Error()),
+				Hint:    hint,
+			}
 		}
 	}
 
 	return nil
+}
+
+// patternErrorHint builds a user-friendly fix hint for a bad routing pattern.
+// It tries to locate the exact line number in the config file.
+func patternErrorHint(path, pattern string, ruleNum int) string {
+	if path == "" {
+		return fmt.Sprintf("fix rule %d in your config file and restart hopscotch", ruleNum)
+	}
+	if data, err := os.ReadFile(path); err == nil {
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "pattern:") && strings.Contains(line, pattern) {
+				return fmt.Sprintf("line %d in %s — fix the pattern and restart hopscotch", i+1, path)
+			}
+		}
+	}
+	return fmt.Sprintf("fix rule %d in %s and restart hopscotch", ruleNum, path)
 }

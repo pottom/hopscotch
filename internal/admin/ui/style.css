@@ -497,7 +497,14 @@ main, main.main {
   display: flex;
   flex-direction: column;
   flex: 1;
-  padding: 1rem 1.75rem 1.5rem;
+  min-height: 0;
+}
+
+.routes-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 0.75rem 1.75rem 1.5rem;
   gap: 1rem;
   min-height: 0;
   overflow-y: auto;
@@ -571,10 +578,225 @@ main, main.main {
 
 .routes-arrow      { color: var(--accent); width: 1.2rem; font-size: .75rem; }
 .routes-num        { color: var(--muted); width: 2.5rem; }
+.routes-num-h      { width: 2.5rem; }
 .routes-pattern    { color: #e2e8f0; }
 .routes-via-tunnel { color: var(--accent); }
 .routes-via-direct { color: var(--muted); }
 .routes-empty      { color: var(--muted); padding: 1.5rem 0.75rem; }
+
+.routes-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 0.75rem;
+  padding: 1rem 1.75rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.routes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.routes-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.routes-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.routes-btn:disabled              { opacity: 0.45; cursor: default; }
+.routes-btn-primary               { border-color: var(--accent); color: var(--accent); }
+.routes-btn-primary:hover:not(:disabled) { background: rgba(56,189,248,.1); }
+
+.routes-save-status  { font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace; font-size: 0.7rem; }
+.routes-save-ok      { color: var(--connected); }
+.routes-save-error   { color: var(--disconnected); }
+
+/* ── Edit row animation ──────────────────── */
+@keyframes rules-row-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.rules-row-enter { animation: rules-row-in 0.18s ease-out; }
+
+/* ── Pattern input ───────────────────────── */
+.rules-edit-pattern {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.78rem;
+  display: block;
+  padding: 0.3rem 0.5rem !important;
+  height: auto !important;
+  margin-bottom: 0 !important;
+  outline: none;
+  transition: border-color .15s;
+  width: 100%;
+  box-sizing: border-box;
+  line-height: 1.4;
+}
+.rules-edit-pattern:focus      { border-color: var(--accent); }
+.rules-edit-pattern.invalid    { border-color: var(--disconnected); }
+
+.rules-pattern-cell { position: relative; }
+.rules-pattern-error {
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.65rem;
+  color: var(--disconnected);
+  margin-top: 0.15rem;
+  line-height: 1.2;
+}
+
+/* ── Custom via picker ───────────────────── */
+.rules-via-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  width: 100%;
+  transition: border-color .15s;
+  box-sizing: border-box;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.rules-via-picker:focus         { outline: none; border-color: var(--accent); }
+.rules-via-picker.open          { border-color: var(--accent); }
+.rules-via-picker-label         { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.rules-via-picker-arrow         { color: var(--muted); font-size: 0.6rem; flex-shrink: 0; transition: transform .15s; }
+.rules-via-picker.open .rules-via-picker-arrow { transform: rotate(180deg); }
+
+.rules-via-picker-list {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  background: #0a1220;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  z-index: 200;
+  list-style: none;
+  padding: 0.3rem;
+  box-shadow: 0 12px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(56,189,248,.12);
+}
+.rules-via-picker.open .rules-via-picker-list { display: block; }
+
+.rules-via-opt {
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text);
+  border-radius: 5px;
+  transition: background .1s, color .1s;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.rules-via-opt::before          { content: ''; display: inline-block; width: 0.55rem; flex-shrink: 0; }
+.rules-via-opt.selected::before { content: '✓'; color: var(--accent); font-size: 0.7rem; }
+.rules-via-opt:hover            { background: rgba(56,189,248,.1); color: var(--accent); }
+.rules-via-opt.selected         { color: var(--accent); font-weight: 500; }
+
+/* ── Row action buttons ──────────────────── */
+.rules-reorder     { white-space: nowrap; }
+.rules-reorder-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.3rem;
+  transition: color .15s, border-color .15s;
+}
+.rules-reorder-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.rules-reorder-btn:disabled             { opacity: 0.25; cursor: default; }
+
+.rules-row-actions { white-space: nowrap; }
+.rules-insert-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+  transition: color .15s, border-color .15s;
+}
+.rules-insert-btn:hover { color: var(--connected); border-color: var(--connected); }
+
+.rules-top-insert td { padding: 0.05rem 0.5rem; border-bottom: none; }
+
+.rules-delete-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.35rem;
+  transition: color .15s, border-color .15s;
+  margin-left: 0.15rem;
+}
+.rules-delete-btn:hover { color: var(--disconnected); border-color: var(--disconnected); }
+
+.rules-undo-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+  transition: color .15s, border-color .15s;
+}
+.rules-undo-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Diff-style row highlights ───────────────────────────────
+   z-layer 2: subtle tint on the td, coloured left stripe
+   z-layer 1: controls are identical on all rows — transparent
+              so the tint bleeds through uniformly
+────────────────────────────────────────────────────────────── */
+.rules-row-new td     { background: rgba(52, 211, 153, 0.07); }
+.rules-row-deleted td { background: rgba(248, 113, 113, 0.09); }
+.rules-row-new .rules-reorder     { border-left: 3px solid rgba(52, 211, 153, 0.65); }
+.rules-row-deleted .rules-reorder { border-left: 3px solid rgba(248, 113, 113, 0.65); }
+
+/* Layer 1 — identical controls regardless of new/deleted state */
+.rules-row-new .rules-edit-pattern,
+.rules-row-deleted .rules-edit-pattern {
+  background: transparent !important;
+  color: var(--text) !important;       /* override browser disabled dimming */
+  opacity: 1 !important;               /* override Pico :disabled opacity   */
+  -webkit-text-fill-color: var(--text);
+}
+.rules-row-new .rules-via-picker,
+.rules-row-deleted .rules-via-picker {
+  background: transparent !important;
+}
+.rules-row-deleted .rules-via-picker { pointer-events: none; cursor: default; }
 
 /* ── FOOTER ──────────────────────────────── */
 .footer {
