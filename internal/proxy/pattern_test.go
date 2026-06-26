@@ -19,6 +19,15 @@ func TestMatchPattern(t *testing.T) {
 		{"10.0.1.*", "10.0.2.1", false},
 		{"exact.host.com", "exact.host.com", true},
 		{"exact.host.com", "other.host.com", false},
+		// CIDR
+		{"10.0.1.0/24", "10.0.1.1", true},
+		{"10.0.1.0/24", "10.0.1.254", true},
+		{"10.0.1.0/24", "10.0.2.1", false},
+		{"10.0.0.0/8", "10.255.255.1", true},
+		{"10.0.0.0/8", "11.0.0.1", false},
+		{"10.0.1.0/24", "not-an-ip", false},
+		{"192.168.0.0/16", "192.168.42.10", true},
+		{"192.168.0.0/16", "192.169.0.1", false},
 	}
 
 	for _, tc := range tests {

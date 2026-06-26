@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"hopscotch/internal/config"
+	"hopscotch/internal/proxy"
 )
 
 var sshConfigWrite bool
@@ -152,23 +153,42 @@ func buildSSHConfig(cfg *config.Config) string {
 	sb.WriteString(fmt.Sprintf("#   Include %s/.config/hopscotch/ssh_config\n", home))
 	sb.WriteString("\n")
 
-	// Map tunnel name → patterns from proxy rules.
-	tunnelPatterns := map[string][]string{}
+	// Map tunnel name → glob patterns and CIDR blocks separately.
+	// CIDR blocks cannot be expressed as SSH Host patterns, so they are
+	// noted as comments; use Match originalhost for named aliases instead.
+	type tunnelEntries struct {
+		globs []string
+		cidrs []string
+	}
+	entries := map[string]*tunnelEntries{}
 	for _, rule := range cfg.Proxy.Rules {
 		if rule.Tunnel == "" {
 			continue
 		}
-		tunnelPatterns[rule.Tunnel] = append(tunnelPatterns[rule.Tunnel], rule.Pattern)
+		if entries[rule.Tunnel] == nil {
+			entries[rule.Tunnel] = &tunnelEntries{}
+		}
+		if proxy.IsCIDR(rule.Pattern) {
+			entries[rule.Tunnel].cidrs = append(entries[rule.Tunnel].cidrs, rule.Pattern)
+		} else {
+			entries[rule.Tunnel].globs = append(entries[rule.Tunnel].globs, rule.Pattern)
+		}
 	}
 
 	for _, t := range cfg.Tunnels {
-		patterns, ok := tunnelPatterns[t.Name]
+		e, ok := entries[t.Name]
 		if !ok {
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("# tunnel: %s → localhost:%d\n", t.Name, t.LocalPort))
-		sb.WriteString(fmt.Sprintf("Host %s\n", strings.Join(patterns, " ")))
-		sb.WriteString("    ProxyCommand hopscotch proxy-connect %h %p\n")
+		if len(e.cidrs) > 0 {
+			sb.WriteString(fmt.Sprintf("# CIDR rules (not SSH Host syntax — cover with Match originalhost): %s\n",
+				strings.Join(e.cidrs, " ")))
+		}
+		if len(e.globs) > 0 {
+			sb.WriteString(fmt.Sprintf("Host %s\n", strings.Join(e.globs, " ")))
+			sb.WriteString("    ProxyCommand hopscotch proxy-connect %h %p\n")
+		}
 		sb.WriteString("\n")
 	}
 
