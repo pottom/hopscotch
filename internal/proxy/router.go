@@ -60,7 +60,7 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 		port = ""
 	}
 
-	label, dialer, tunnelStatus, err := r.resolve(ctx, host)
+	label, dialer, tunnelStatus, pattern, err := r.resolve(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +69,7 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 		log.Info("proxy",
 			"proto", inferProto(port),
 			"host", host,
+			"pattern", pattern,
 			"via", label,
 			"tunnel", tunnelStatus,
 		)
@@ -76,6 +77,7 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 		log.Info("proxy",
 			"proto", inferProto(port),
 			"host", host,
+			"pattern", pattern,
 			"via", label,
 		)
 	}
@@ -100,37 +102,37 @@ type dialContexter interface {
 	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
-// resolve finds the matching rule and returns the label, dialer, and (for tunnels)
+// resolve finds the matching rule and returns the label, dialer, matched pattern, and (for tunnels)
 // the tunnel status captured before any wait — so the caller can log what state
 // the tunnel was in when the request arrived.
-func (r *Router) resolve(ctx context.Context, host string) (label string, dialer dialContexter, tunnelStatus string, err error) {
+func (r *Router) resolve(ctx context.Context, host string) (label string, dialer dialContexter, tunnelStatus string, pattern string, err error) {
 	for _, rule := range r.rules {
 		if !matchPattern(rule.Pattern, host) {
 			continue
 		}
 
 		if rule.Via == "direct" {
-			return "direct", &r.direct, "", nil
+			return "direct", &r.direct, "", rule.Pattern, nil
 		}
 
 		t := r.tunnels.Get(rule.Tunnel)
 		if t == nil {
-			return "", nil, "", fmt.Errorf("rule refers to unknown tunnel %q", rule.Tunnel)
+			return "", nil, "", "", fmt.Errorf("rule refers to unknown tunnel %q", rule.Tunnel)
 		}
 
 		// Snapshot status before waiting so the log reflects what the caller saw.
 		initialStatus := t.Stats().Status.String()
 
 		if err := r.waitForTunnel(ctx, t); err != nil {
-			return "", nil, "", err
+			return "", nil, "", "", err
 		}
 
-		return rule.Tunnel, t, initialStatus, nil
+		return rule.Tunnel, t, initialStatus, rule.Pattern, nil
 	}
 
 	// No matching rule — use direct as fallback.
 	log.Warn("no routing rule matched, using direct", "host", host)
-	return "direct", &r.direct, "", nil
+	return "direct", &r.direct, "", "", nil
 }
 
 // waitForTunnel blocks until the tunnel is connected or the wait window expires.

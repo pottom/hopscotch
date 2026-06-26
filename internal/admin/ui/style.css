@@ -62,7 +62,7 @@ body {
   align-items: center;
   padding: 0.15em 0.6em;
   border-radius: 999px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.65rem;
   font-weight: 500;
   letter-spacing: 0.07em;
@@ -76,7 +76,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
   color: var(--muted);
   white-space: nowrap;
@@ -86,12 +86,12 @@ body {
 
 .update-badge {
   color: var(--connecting);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
 }
 
 .uplink-badge {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
 }
 .uplink-badge.up   { color: var(--connected); }
@@ -163,7 +163,7 @@ body {
 }
 
 .log-chip {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.62rem;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -186,7 +186,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 9px;
   padding: 0.75rem 1rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.75rem;
   line-height: 1.7;
   min-height: 0;
@@ -229,7 +229,7 @@ body {
   color: var(--muted);
 }
 .docs-body code {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.82em;
   background: rgba(255,255,255,.06);
   border: 1px solid var(--border);
@@ -270,7 +270,7 @@ body {
   gap: 0.5rem;
   padding: 0.45rem 1.75rem;
   border-bottom: 1px solid var(--border);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
   flex-shrink: 0;
 }
@@ -305,7 +305,7 @@ main, main.main {
 }
 
 .empty {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.8rem;
   color: var(--muted);
   padding: 1rem 3rem;
@@ -333,7 +333,7 @@ main, main.main {
 }
 
 .status-label {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
   font-weight: 500;
 }
@@ -392,7 +392,7 @@ main, main.main {
 }
 
 .tc-host {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.7rem;
   color: var(--muted);
   white-space: nowrap;
@@ -415,7 +415,7 @@ main, main.main {
 }
 
 .tc-info-item {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.7rem;
   color: var(--muted);
   white-space: nowrap;
@@ -441,7 +441,7 @@ main, main.main {
 }
 
 .tc-ka-warn {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.68rem;
   font-weight: 500;
   color: var(--connecting);
@@ -457,7 +457,7 @@ main, main.main {
 }
 
 .tc-bps-in, .tc-bps-out, .tc-active {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
   white-space: nowrap;
 }
@@ -468,7 +468,7 @@ main, main.main {
 
 /* error reason line */
 .tc-reason {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.68rem;
   padding: 0 1.25rem 0.4rem;
   line-height: 1.4;
@@ -525,7 +525,7 @@ main, main.main {
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 0.35rem 0.75rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.78rem;
   color: var(--text);
   outline: none;
@@ -535,7 +535,7 @@ main, main.main {
 .routes-tester-input:focus { border-color: var(--accent); }
 
 .routes-tester-result {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.75rem;
   min-height: 1.2em;
 }
@@ -545,7 +545,7 @@ main, main.main {
 .routes-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.78rem;
 }
 
@@ -569,6 +569,7 @@ main, main.main {
 .routes-table tr.routes-match td { background: rgba(56,189,248,.07); }
 .routes-table tr.routes-match .routes-pattern { color: var(--accent); }
 
+.routes-arrow      { color: var(--accent); width: 1.2rem; font-size: .75rem; }
 .routes-num        { color: var(--muted); width: 2.5rem; }
 .routes-pattern    { color: #e2e8f0; }
 .routes-via-tunnel { color: var(--accent); }
@@ -582,7 +583,7 @@ main, main.main {
   justify-content: space-between;
   padding: 0.55rem 1.75rem;
   border-top: 1px solid var(--border);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.7rem;
   color: var(--muted);
   flex-wrap: wrap;
@@ -619,7 +620,7 @@ main, main.main {
   gap: 0.75rem;
   padding: 0.45rem 1.2rem;
   border-bottom: 1px solid var(--border);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
   flex-shrink: 0;
 }
@@ -638,7 +639,7 @@ main, main.main {
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.68rem;
   padding: 0.28em 0.65em;
   cursor: pointer;
@@ -660,7 +661,7 @@ main, main.main {
 .sh-label-row td {
   padding: 0.75rem 0.55rem 0.2rem;
   color: var(--muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -675,7 +676,7 @@ main, main.main {
   padding: 0.3rem 0.55rem;
   border-bottom: 1px solid var(--border);
   color: var(--muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.61rem;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -689,7 +690,7 @@ main, main.main {
 .status-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.74rem;
   table-layout: fixed;
   min-width: 700px;
