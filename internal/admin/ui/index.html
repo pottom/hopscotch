@@ -68,45 +68,39 @@
 
   <div class="status-scroll">
 
-    <div id="vpn-section" style="display:none">
-      <div class="section-label">VPN</div>
-      <table class="status-table">
-        <colgroup>
-          <col class="col-name"><col class="col-host"><col class="col-iface">
-          <col class="col-status"><col class="col-uptime"><col class="col-rc">
-          <col class="col-msg">
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Name</th><th>Host</th><th>Iface</th>
-            <th>Status</th><th>Uptime</th><th>RC</th><th>Message</th>
-          </tr>
-        </thead>
-        <tbody id="vpn-tbody"></tbody>
-      </table>
-    </div>
+    <table class="status-table">
+      <colgroup>
+        <col class="col-name"><col class="col-host"><col class="col-vpn">
+        <col class="col-port"><col class="col-status"><col class="col-uptime">
+        <col class="col-rc"><col class="col-bps"><col class="col-bps">
+        <col class="col-conn"><col class="col-msg">
+      </colgroup>
 
-    <div id="tunnel-section">
-      <div class="section-label">Tunnels</div>
-      <table class="status-table">
-        <colgroup>
-          <col class="col-name"><col class="col-host"><col class="col-vpn">
-          <col class="col-port"><col class="col-status"><col class="col-uptime">
-          <col class="col-rc"><col class="col-bps"><col class="col-bps">
-          <col class="col-conn"><col class="col-msg">
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Name</th><th>Host</th><th>VPN</th><th>Port</th>
-            <th>Status</th><th>Uptime</th><th>RC</th>
-            <th>↓</th><th>↑</th><th>Conn</th><th>Message</th>
-          </tr>
-        </thead>
-        <tbody id="tunnel-tbody">
-          <tr><td colspan="11" class="st-loading">loading…</td></tr>
-        </tbody>
-      </table>
-    </div>
+      <!-- VPN section -->
+      <tbody id="vpn-section" style="display:none">
+        <tr class="sh-label-row"><td colspan="11">VPN</td></tr>
+        <tr class="sh-head-row">
+          <th>Name</th><th>Host</th><th>Iface</th><th></th>
+          <th>Status</th><th>Uptime</th><th>RC</th>
+          <th></th><th></th><th></th><th>Message</th>
+        </tr>
+        <!-- rows injected by JS -->
+      </tbody>
+      <tbody id="vpn-tbody"></tbody>
+
+      <!-- Tunnels section -->
+      <tbody>
+        <tr class="sh-label-row"><td colspan="11">Tunnels</td></tr>
+        <tr class="sh-head-row">
+          <th>Name</th><th>Host</th><th>VPN</th><th>Port</th>
+          <th>Status</th><th>Uptime</th><th>RC</th>
+          <th>↓</th><th>↑</th><th>Conn</th><th>Message</th>
+        </tr>
+      </tbody>
+      <tbody id="tunnel-tbody">
+        <tr><td colspan="11" class="st-loading">loading…</td></tr>
+      </tbody>
+    </table>
 
   </div>
 </div>
@@ -117,7 +111,7 @@
     <div class="log-header">
       <span class="log-label">Live log stream</span>
       <div class="log-level-chips">
-        <button class="log-chip" data-level="DEBUG" onclick="setLogLevel('DEBUG')">DEBU</button>
+        <button class="log-chip" data-level="DEBUG" onclick="setLogLevel('DEBUG')">ALL</button>
         <button class="log-chip active" data-level="INFO"  onclick="setLogLevel('INFO')">INFO</button>
         <button class="log-chip" data-level="WARN"  onclick="setLogLevel('WARN')">WARN</button>
         <button class="log-chip" data-level="ERROR" onclick="setLogLevel('ERROR')">ERR</button>

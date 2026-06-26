@@ -200,9 +200,11 @@ function renderVPNTable() {
       `<td data-col="name">${escHtml(name)}</td>` +
       `<td data-col="host">${escHtml(v.host || '—')}</td>` +
       `<td data-col="iface">${escHtml(v.tun_iface || '—')}</td>` +
+      `<td data-col="port"></td>` +
       `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
+      `<td></td><td></td><td></td>` +
       `<td data-col="msg">${vpnMsgHtml(v)}</td>`;
     tbody.appendChild(tr);
   }
@@ -493,6 +495,9 @@ function connectSSE() {
 
 // Start polling/SSE only after Alpine has fully initialized the store.
 document.addEventListener('alpine:initialized', () => {
+  const savedTab = localStorage.getItem('activeTab');
+  if (savedTab) switchTab(savedTab);
+
   refreshStatus();
   setInterval(refreshStatus, 5000);
   connectSSE();
@@ -516,6 +521,7 @@ window.switchTab = function(name) {
     a.classList.toggle('active', a.dataset.tab === name);
   });
   document.getElementById('panel-' + name).classList.add('active');
+  localStorage.setItem('activeTab', name);
 
   if (!TAB_INIT[name]) {
     TAB_INIT[name] = true;
@@ -530,7 +536,7 @@ window.switchTab = function(name) {
 const MAX_LOG_LINES = 500;
 let logLineCount = 0;
 let ansiUp = null;
-let currentLogLevel = 'INFO';
+let currentLogLevel = localStorage.getItem('logLevel') || 'INFO';
 let activeLogEs = null;
 
 const LOG_LEVEL_ORDER = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
@@ -574,6 +580,7 @@ function appendLogLine(scroll, raw) {
 
 window.setLogLevel = function(level) {
   currentLogLevel = level;
+  localStorage.setItem('logLevel', level);
   document.querySelectorAll('.log-chip').forEach(c => {
     c.classList.toggle('active', c.dataset.level === level);
   });
@@ -584,6 +591,10 @@ window.setLogLevel = function(level) {
 function initLogStream() {
   const scroll = document.getElementById('log-scroll');
   if (!scroll) return;
+
+  document.querySelectorAll('.log-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.level === currentLogLevel);
+  });
 
   if (activeLogEs) { activeLogEs.close(); activeLogEs = null; }
   scroll.innerHTML = '';

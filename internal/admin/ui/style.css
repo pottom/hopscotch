@@ -654,14 +654,34 @@ main, main.main {
   overflow-y: auto;
   overflow-x: auto;
   min-height: 0;
-  padding: 0.75rem 0 1.5rem;
+  padding: 0.75rem 1.75rem 1.5rem;
 }
 
-#vpn-section { margin-bottom: 1.25rem; }
+.sh-label-row td {
+  padding: 0.75rem 0.55rem 0.2rem;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: none;
+}
+.sh-label-row:first-child td { padding-top: 0.4rem; }
+#vpn-tbody + tbody .sh-label-row td { padding-top: 1.75rem; }
 
-.status-scroll .section-label {
-  padding: 0.4rem 0.75rem 0.35rem;
-  margin-bottom: 0;
+.sh-head-row th {
+  text-align: left;
+  padding: 0.3rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.61rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 /* ── STATUS TABLES ───────────────────────── */
