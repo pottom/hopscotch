@@ -620,8 +620,33 @@ function initLogStream() {
 
 // ── Routes tab ────────────────────────────────────────────────────────────────
 
+function ipToInt(ip) {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    const v = parseInt(p, 10);
+    if (isNaN(v) || v < 0 || v > 255) return null;
+    n = (n << 8) | v;
+  }
+  return n >>> 0;
+}
+
+function matchCIDR(cidr, host) {
+  const slash = cidr.indexOf('/');
+  if (slash === -1) return false;
+  const prefix = parseInt(cidr.slice(slash + 1), 10);
+  if (isNaN(prefix) || prefix < 0 || prefix > 32) return false;
+  const networkInt = ipToInt(cidr.slice(0, slash));
+  const hostInt = ipToInt(host);
+  if (networkInt === null || hostInt === null) return false;
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+  return (networkInt & mask) === (hostInt & mask);
+}
+
 function matchPattern(pattern, host) {
   if (pattern === '*') return true;
+  if (pattern.includes('/')) return matchCIDR(pattern, host);
   if (pattern.endsWith('.*')) {
     return host.startsWith(pattern.slice(0, -1));
   }
