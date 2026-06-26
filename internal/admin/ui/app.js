@@ -654,6 +654,9 @@ function matchPattern(pattern, host) {
     const suffix = pattern.slice(1);
     return host.endsWith(suffix) || host === pattern.slice(2);
   }
+  if (pattern.startsWith('*')) {
+    return host.endsWith(pattern.slice(1));
+  }
   return pattern === host;
 }
 
