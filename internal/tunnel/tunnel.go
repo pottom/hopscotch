@@ -20,6 +20,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"hopscotch/internal/config"
+	"hopscotch/internal/msgs"
 	"hopscotch/internal/netcheck"
 )
 
@@ -152,7 +153,7 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		// isn't already connected (e.g. after an SSH auth failure the VPN stays up).
 		if t.vpnGate != nil && (t.vpnIsConnected == nil || !t.vpnIsConnected()) {
 			s := t.Stats()
-			s.LastError = "waiting for VPN: " + t.cfg.RequiresVPN
+			s.LastError = msgs.WaitingForVPNPrefix + t.cfg.RequiresVPN
 			s.NextReconnectAt = time.Time{} // clear stale countdown from previous delay
 			t.stats.Store(s)
 
@@ -215,7 +216,7 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		// Skip the countdown after restore — waiting for the network already
 		// served as the delay.
 		if !netcheck.HasUplink() {
-			s.LastError = "waiting for network"
+			s.LastError = msgs.WaitingForNetwork
 			t.stats.Store(s)
 			log.Info("tunnel waiting for network", "tunnel", t.cfg.Name)
 			if err := netcheck.WaitForUplink(ctx); err != nil {
@@ -413,14 +414,14 @@ func (t *Tunnel) watchDeps(ctx context.Context, lost chan<- string) {
 		case <-ticker.C:
 			if !netcheck.HasUplink() {
 				select {
-				case lost <- "waiting for network":
+				case lost <- msgs.WaitingForNetwork:
 				default:
 				}
 				return
 			}
 			if t.vpnIsConnected != nil && !t.vpnIsConnected() {
 				select {
-				case lost <- "waiting for VPN: " + t.cfg.RequiresVPN:
+				case lost <- msgs.WaitingForVPNPrefix + t.cfg.RequiresVPN:
 				default:
 				}
 				return

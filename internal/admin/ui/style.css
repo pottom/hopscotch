@@ -990,7 +990,7 @@ col.col-conn   { width: 48px;  }
 .vdep-connecting   { color: var(--connecting); }
 .vdep-disconnected { color: var(--disconnected); }
 
-/* Error sub-row — shown below a tunnel row when last_error is set */
+/* Error/progress sub-row — shown below a tunnel row when last_error is set */
 .status-table tr.msg-row td {
   background: rgba(248, 113, 113, 0.04);
   border-bottom: none;
@@ -998,7 +998,8 @@ col.col-conn   { width: 48px;  }
 .status-table tr.msg-row + tr td {
   border-top: 1px solid rgba(248, 113, 113, 0.12);
 }
-.msg-row-cell {
+/* specificity (0,2,2) beats .status-table tbody td (0,1,2) */
+.status-table tr.msg-row td.msg-row-cell {
   font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   font-size: 0.72rem;
   color: var(--disconnected);
@@ -1007,6 +1008,9 @@ col.col-conn   { width: 48px;  }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.status-table tr.msg-row td.msg-row-cell.msg-row-progress {
+  color: var(--connecting);
 }
 
 /* Direct row */

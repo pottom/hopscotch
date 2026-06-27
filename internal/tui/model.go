@@ -20,6 +20,7 @@ import (
 
 	"hopscotch/internal/admin"
 	"hopscotch/internal/config"
+	"hopscotch/internal/msgs"
 	"hopscotch/internal/proxy"
 )
 
@@ -1073,9 +1074,9 @@ func (m Model) buildRoutesContent() string {
 		var viaRendered string
 		var statusStr string
 		switch {
-		case via == "direct" || via == "":
+		case via == config.ViaDirect || via == "":
 			viaRendered = lipgloss.NewStyle().Foreground(colorDirect).Width(22).Render(via)
-		case via == "block":
+		case via == config.ViaBlock:
 			viaRendered = lipgloss.NewStyle().Foreground(colorDisconnected).Width(22).Render(via)
 		default:
 			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
@@ -1130,24 +1131,24 @@ func (m *Model) editCycleVia() {
 		return
 	}
 	r := &m.editRules[m.editCursor]
-	options := append([]string{"direct"}, append(m.sortedTunnelNames(), "block")...)
+	options := append([]string{config.ViaDirect}, append(m.sortedTunnelNames(), config.ViaBlock)...)
 	current := r.Via
 	if current == "" {
 		current = r.Tunnel
 	}
 	if current == "" {
-		current = "direct"
+		current = config.ViaDirect
 	}
 	for i, opt := range options {
 		if opt == current {
 			next := options[(i+1)%len(options)]
 			switch next {
-			case "direct":
+			case config.ViaDirect:
 				r.Tunnel = ""
-				r.Via = "direct"
-			case "block":
+				r.Via = config.ViaDirect
+			case config.ViaBlock:
 				r.Tunnel = ""
-				r.Via = "block"
+				r.Via = config.ViaBlock
 			default:
 				r.Tunnel = next
 				r.Via = ""
@@ -1157,7 +1158,7 @@ func (m *Model) editCycleVia() {
 		}
 	}
 	r.Tunnel = ""
-	r.Via = "direct"
+	r.Via = config.ViaDirect
 	r.recomputeModified()
 }
 
@@ -1174,7 +1175,7 @@ func (m Model) buildRoutesEditContent() string {
 			via = r.Via
 		}
 		if via == "" {
-			via = "direct"
+			via = config.ViaDirect
 		}
 
 		selected := m.editCursor == i
@@ -1221,7 +1222,7 @@ func (m Model) buildRoutesEditContent() string {
 		switch {
 		case r.isDeleted:
 			viaRendered = viaW.Foreground(colorDisconnected).Strikethrough(true).Render(via)
-		case via == "block":
+		case via == config.ViaBlock:
 			viaRendered = viaW.Foreground(colorDisconnected).Render(via)
 		case r.isNew:
 			viaRendered = viaW.Foreground(colorConnected).Render(via)
@@ -1362,7 +1363,7 @@ func (m Model) buildStatusContent() string {
 			if vpnReasonW > 0 {
 				reason := "—"
 				var reasonStyle lipgloss.Style
-				if v.LastError != "" && (v.State != "connected" || isVPNProgressMsg(v.LastError)) {
+				if v.LastError != "" && (v.State != msgs.StatusConnected || isVPNProgressMsg(v.LastError)) {
 					reason = v.LastError
 					if isVPNProgressMsg(v.LastError) {
 						reasonStyle = styleConnecting
@@ -1433,20 +1434,29 @@ func (m Model) buildStatusContent() string {
 			active = w.active
 		}
 
-		// error sub-line: non-empty only for real errors (not progress messages)
+		// error sub-line: propagate VPN root cause so "waiting for VPN: X" shows X's actual reason.
+		dispErr := t.LastError
+		if strings.HasPrefix(t.LastError, msgs.WaitingForVPNPrefix) {
+			vpnName := strings.TrimPrefix(t.LastError, msgs.WaitingForVPNPrefix)
+			if v, ok := m.status.VPNs[vpnName]; ok && v.LastError != "" {
+				dispErr = v.LastError
+			}
+		}
 		errLine := ""
-		if t.LastError != "" && t.Status != "connected" &&
-			!strings.HasPrefix(t.LastError, "waiting for VPN") &&
-			t.LastError != "waiting for network" {
-			msg := t.LastError
+		if dispErr != "" && t.Status != msgs.StatusConnected {
+			msg := dispErr
 			avail := m.width - 6
 			if lipgloss.Width(msg) > avail && avail > 8 {
 				msg = string([]rune(msg)[:avail-1]) + "…"
 			}
-			errLine = "    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("✗ "+msg)
+			if strings.HasPrefix(dispErr, msgs.WaitingForVPNPrefix) || dispErr == msgs.WaitingForNetwork {
+				errLine = "    " + styleConnecting.Render("◌ "+msg)
+			} else {
+				errLine = "    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("✗ "+msg)
+			}
 		}
 		var tunnelStatusStr string
-		if strings.HasPrefix(t.LastError, "waiting for VPN") || strings.HasPrefix(t.LastError, "waiting for network") {
+		if strings.HasPrefix(t.LastError, msgs.WaitingForVPNPrefix) || t.LastError == msgs.WaitingForNetwork {
 			tunnelStatusStr = styleConnecting.Render("◌ pending")
 		} else {
 			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
@@ -1457,9 +1467,9 @@ func (m Model) buildStatusContent() string {
 			vpnLabel = t.RequiresVPN
 			if v, ok := m.status.VPNs[t.RequiresVPN]; ok {
 				switch v.State {
-				case "connected":
+				case msgs.StatusConnected:
 					vpnStyle = styleColVPN.Foreground(colorConnected)
-				case "connecting":
+				case msgs.StatusConnecting:
 					vpnStyle = styleColVPN.Foreground(colorConnecting)
 				default:
 					vpnStyle = styleColVPN.Foreground(colorDisconnected)
@@ -1590,23 +1600,23 @@ func renderBadge(status string) string {
 
 func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int) string {
 	switch status {
-	case "connected":
+	case msgs.StatusConnected:
 		if keepaliveFails > 0 {
 			return styleConnected.Render(fmt.Sprintf("● connected ⚠%d", keepaliveFails))
 		}
 		return styleConnected.Render("● connected")
-	case "connecting":
+	case msgs.StatusConnecting:
 		dot := "●"
 		if tick%2 == 0 {
 			dot = "○"
 		}
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("%s connecting %ds", dot, *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("%s next try: %ds", dot, *reconnectIn))
 		}
 		return styleConnecting.Render(dot + " connecting")
-	case "disconnected":
+	case msgs.StatusDisconnected:
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("○ connecting %ds", *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("○ next try: %ds", *reconnectIn))
 		}
 		return styleDisconnected.Render("○ disconnected")
 	default:
@@ -1636,8 +1646,8 @@ func isVPNProgressMsg(msg string) bool {
 		strings.HasPrefix(msg, "pre_connect: ") ||
 		strings.HasPrefix(msg, "probing ") ||
 		msg == "openconnect starting" ||
-		msg == "waiting for VPN tunnel" ||
-		msg == "waiting for network"
+		msg == msgs.WaitingForVPNTunnel ||
+		msg == msgs.WaitingForNetwork
 }
 
 func fmtDuration(d time.Duration) string {

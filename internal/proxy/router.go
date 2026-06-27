@@ -119,11 +119,11 @@ func (r *Router) resolve(ctx context.Context, host string) (label string, dialer
 			continue
 		}
 
-		if rule.Via == "direct" {
-			return "direct", &r.direct, "", rule.Pattern, nil
+		if rule.Via == config.ViaDirect {
+			return config.ViaDirect, &r.direct, "", rule.Pattern, nil
 		}
 
-		if rule.Via == "block" {
+		if rule.Via == config.ViaBlock {
 			return "", nil, "", "", fmt.Errorf("%w: connection to %s blocked by rule (pattern: %s)", errBlocked, host, rule.Pattern)
 		}
 
@@ -144,7 +144,7 @@ func (r *Router) resolve(ctx context.Context, host string) (label string, dialer
 
 	// No matching rule — use direct as fallback.
 	log.Warn("no routing rule matched, using direct", "host", host)
-	return "direct", &r.direct, "", "", nil
+	return config.ViaDirect, &r.direct, "", "", nil
 }
 
 // waitForTunnel returns immediately with an error if the tunnel is not connected.

@@ -115,7 +115,7 @@ function escHtml(s) {
 function vpnStatusHtml(state, reconnectIn) {
   if (state === 'connected') return '<span class="st-connected">● connected</span>';
   if (state === 'connecting' || state === 'disconnected') {
-    if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next: ${reconnectIn}s</span>`;
+    if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next try: ${reconnectIn}s</span>`;
     if (state === 'connecting') return '<span class="st-connecting">connecting</span>';
     return '<span class="st-disconnected">disconnected</span>';
   }
@@ -134,7 +134,7 @@ function tunnelStatusHtml(t) {
       : '<span class="st-connected">● connected</span>';
   }
   if (s === 'connecting' || s === 'disconnected') {
-    if (ri != null && ri >= 0) return `<span class="st-connecting">○ next: ${ri}s</span>`;
+    if (ri != null && ri >= 0) return `<span class="st-connecting">○ next try: ${ri}s</span>`;
     return s === 'connecting'
       ? '<span class="st-connecting">connecting</span>'
       : '<span class="st-disconnected">disconnected</span>';
@@ -163,11 +163,17 @@ function tunnelMsgHtml(t) {
   return `<span class="msg-error">${escHtml(m)}</span>`;
 }
 
-// tunnelMsgText returns the raw error text for sub-row display (progress msgs suppressed).
+// tunnelMsgText returns the display text for the error sub-row.
+// Propagates VPN root cause: "waiting for VPN: X" → VPN X's own last_error.
 function tunnelMsgText(t) {
   if (!t) return '';
-  const m = t.last_error || '';
-  if (!m || isTunnelProgressMsg(m)) return '';
+  let m = t.last_error || '';
+  if (!m) return '';
+  if (m.startsWith('waiting for VPN: ')) {
+    const vpnName = m.slice('waiting for VPN: '.length);
+    const vpn = Alpine.store('hop').vpns[vpnName];
+    if (vpn?.last_error) m = vpn.last_error;
+  }
   return m;
 }
 
@@ -270,12 +276,14 @@ function buildTunnelRows(names) {
         `<td data-col="active">${t.active || 0}</td>`;
     }
     tbody.appendChild(tr);
-    // message sub-row — only rendered when there's a message
+    // message sub-row — shown for errors (red ✗) and progress msgs (amber ◌)
     const msg = tunnelMsgText(store.tunnels[name]);
+    const isProgress = msg ? isTunnelProgressMsg(msg) : false;
     const mtr = document.createElement('tr');
     mtr.className = 'msg-row'; mtr.dataset.name = name;
     mtr.style.display = msg ? '' : 'none';
-    mtr.innerHTML = `<td colspan="10" class="msg-row-cell">${msg ? '✗ ' + escHtml(msg) : ''}</td>`;
+    const prefix = isProgress ? '◌ ' : '✗ ';
+    mtr.innerHTML = `<td colspan="10" class="msg-row-cell${isProgress ? ' msg-row-progress' : ''}">${msg ? escHtml(prefix + msg) : ''}</td>`;
     tbody.appendChild(mtr);
     const gtr = document.createElement('tr');
     gtr.className = 'graph-row'; gtr.dataset.name = name;
@@ -312,8 +320,12 @@ function updateTunnelRows() {
     const mRow = row.nextElementSibling?.classList.contains('msg-row') ? row.nextElementSibling : null;
     if (mRow) {
       const msg = tunnelMsgText(t);
+      const isProgress = msg ? isTunnelProgressMsg(msg) : false;
+      const cell = mRow.querySelector('.msg-row-cell');
       mRow.style.display = msg ? '' : 'none';
-      mRow.querySelector('.msg-row-cell').textContent = msg ? '✗ ' + msg : '';
+      cell.classList.toggle('msg-row-progress', isProgress);
+      const prefix = isProgress ? '◌ ' : '✗ ';
+      cell.textContent = msg ? prefix + msg : '';
     }
   }
 }

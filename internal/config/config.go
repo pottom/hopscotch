@@ -67,6 +67,12 @@ type VPNConfig struct {
 	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
 }
 
+// ViaDirect and ViaBlock are the special via values for routing rules.
+const (
+	ViaDirect = "direct"
+	ViaBlock  = "block"
+)
+
 // Rule maps a host pattern to a tunnel name or "direct".
 type Rule struct {
 	Pattern string `yaml:"pattern"`
@@ -337,11 +343,11 @@ func validate(cfg *Config) error {
 		if rule.Tunnel == "" && rule.Via == "" {
 			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].tunnel", i+1), Message: "either tunnel or via is required"}
 		}
-		if rule.Via != "" && rule.Via != "direct" && rule.Via != "block" && rule.Tunnel != "" {
+		if rule.Via != "" && rule.Via != ViaDirect && rule.Via != ViaBlock && rule.Tunnel != "" {
 			// via is only for special values; tunnel name goes in tunnel field
 		}
-		if rule.Via != "" && rule.Via != "direct" && rule.Via != "block" {
-			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].via", i+1), Message: fmt.Sprintf("via must be %q, %q, or empty (use tunnel field for tunnel names)", "direct", "block")}
+		if rule.Via != "" && rule.Via != ViaDirect && rule.Via != ViaBlock {
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].via", i+1), Message: fmt.Sprintf("via must be %q, %q, or empty (use tunnel field for tunnel names)", ViaDirect, ViaBlock)}
 		}
 		if err := ValidatePattern(rule.Pattern); err != nil {
 			hint := patternErrorHint(cfg.Path, rule.Pattern, i+1)

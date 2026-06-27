@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
+	"hopscotch/internal/msgs"
 	"hopscotch/internal/netcheck"
 )
 
@@ -181,7 +182,7 @@ func (c *Connection) Run(ctx context.Context) error {
 		// Skip the backoff countdown after restore — waiting for the network
 		// already served as the delay.
 		if !netcheck.HasUplink() {
-			c.lastError.Store("waiting for network")
+			c.lastError.Store(msgs.WaitingForNetwork)
 			log.Info("vpn waiting for network", "vpn", c.cfg.Name)
 			if err := netcheck.WaitForUplink(ctx); err != nil {
 				c.nextReconnectAt.Store(time.Time{})
