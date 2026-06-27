@@ -148,20 +148,6 @@ function vpnDepHtml(vpn, state) {
   return `<span class="vdep ${cls}">${state === 'connected' ? '●' : '○'} ${escHtml(vpn)}</span>`;
 }
 
-function vpnMsgHtml(v) {
-  const m = v.last_error || '';
-  if (!m) return '<span class="st-muted">—</span>';
-  if (isVPNProgressMsg(m)) return `<span class="msg-progress">${escHtml(m)}</span>`;
-  if (v.state !== 'connected') return `<span class="msg-error">${escHtml(m)}</span>`;
-  return `<span class="st-muted">${escHtml(m)}</span>`;
-}
-
-function tunnelMsgHtml(t) {
-  const m = t.last_error || '';
-  if (!m) return '<span class="st-muted">—</span>';
-  if (isTunnelProgressMsg(m)) return `<span class="msg-progress">${escHtml(m)}</span>`;
-  return `<span class="msg-error">${escHtml(m)}</span>`;
-}
 
 // tunnelMsgText returns the display text for the error sub-row.
 // Propagates VPN root cause: "waiting for VPN: X" → VPN X's own last_error.
@@ -218,9 +204,17 @@ function renderVPNTable() {
       `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
-      `<td></td><td></td><td></td>` +
-      `<td data-col="msg">${vpnMsgHtml(v)}</td>`;
+      `<td></td><td></td><td></td>`;
     tbody.appendChild(tr);
+    // message sub-row — only when not connected and last_error is set
+    const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
+    const vpnIsProgress = vpnMsg ? isVPNProgressMsg(vpnMsg) : false;
+    const vmtr = document.createElement('tr');
+    vmtr.className = 'msg-row'; vmtr.dataset.name = name;
+    vmtr.style.display = vpnMsg ? '' : 'none';
+    const vpnPrefix = vpnIsProgress ? '◌ ' : '└ ✗ ';
+    vmtr.innerHTML = `<td colspan="10" class="msg-row-cell${vpnIsProgress ? ' msg-row-progress' : ''}">${vpnMsg ? escHtml(vpnPrefix + vpnMsg) : ''}</td>`;
+    tbody.appendChild(vmtr);
   }
 }
 
@@ -276,13 +270,13 @@ function buildTunnelRows(names) {
         `<td data-col="active">${t.active || 0}</td>`;
     }
     tbody.appendChild(tr);
-    // message sub-row — shown for errors (red ✗) and progress msgs (amber ◌)
+    // message sub-row — shown for errors (red └ ✗) and progress msgs (amber ◌)
     const msg = tunnelMsgText(store.tunnels[name]);
     const isProgress = msg ? isTunnelProgressMsg(msg) : false;
     const mtr = document.createElement('tr');
     mtr.className = 'msg-row'; mtr.dataset.name = name;
     mtr.style.display = msg ? '' : 'none';
-    const prefix = isProgress ? '◌ ' : '✗ ';
+    const prefix = isProgress ? '◌ ' : '└ ✗ ';
     mtr.innerHTML = `<td colspan="10" class="msg-row-cell${isProgress ? ' msg-row-progress' : ''}">${msg ? escHtml(prefix + msg) : ''}</td>`;
     tbody.appendChild(mtr);
     const gtr = document.createElement('tr');
@@ -324,7 +318,7 @@ function updateTunnelRows() {
       const cell = mRow.querySelector('.msg-row-cell');
       mRow.style.display = msg ? '' : 'none';
       cell.classList.toggle('msg-row-progress', isProgress);
-      const prefix = isProgress ? '◌ ' : '✗ ';
+      const prefix = isProgress ? '◌ ' : '└ ✗ ';
       cell.textContent = msg ? prefix + msg : '';
     }
   }
@@ -339,9 +333,10 @@ window.toggleRowGraph = function(row) {
   const expanded = row.classList.toggle('expanded');
   if (expanded) {
     const name = row.dataset.name;
-    const gRow = row.nextElementSibling;
-    if (gRow && gRow.classList.contains('graph-row') && !charts[name]) {
-      const canvas = gRow.querySelector('canvas');
+    let next = row.nextElementSibling;
+    while (next && !next.classList.contains('graph-row')) next = next.nextElementSibling;
+    if (next && !charts[name]) {
+      const canvas = next.querySelector('canvas');
       if (canvas) window.initChart(name, canvas);
     }
   }
@@ -355,7 +350,7 @@ document.addEventListener('alpine:init', () => {
     vpns:    {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
-    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, admin_port: 0, status: '…' },
+    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', admin_port: 0, admin_bind: '', status: '…' },
 
     tunnelList() {
       return Object.keys(this.tunnels).sort();
@@ -415,7 +410,9 @@ async function refreshStatus() {
       pid:            st.pid,
       uptime:         st.uptime,
       proxy_port:     st.proxy_port,
+      proxy_bind:     st.proxy_bind || '',
       admin_port:     st.admin_port,
+      admin_bind:     st.admin_bind || '',
       status:         st.status,
       uplink:         st.uplink ?? true,
       uplink_iface:   st.uplink_iface || '',

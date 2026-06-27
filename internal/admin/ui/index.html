@@ -173,11 +173,11 @@
   <div class="footer-ports">
     <div class="port-item">
       <span>SOCKS5</span>
-      <span x-text="':' + $store.hop.meta.proxy_port"></span>
+      <span x-text="$store.hop.meta.proxy_bind + ':' + $store.hop.meta.proxy_port"></span>
     </div>
     <div class="port-item">
       <span>ADMIN</span>
-      <span x-text="':' + $store.hop.meta.admin_port"></span>
+      <span x-text="$store.hop.meta.admin_bind + ':' + $store.hop.meta.admin_port"></span>
     </div>
   </div>
   <div id="footer-ts"></div>

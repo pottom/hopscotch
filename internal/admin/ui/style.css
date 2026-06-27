@@ -1004,7 +1004,7 @@ col.col-conn   { width: 48px;  }
   font-size: 0.72rem;
   color: var(--disconnected);
   opacity: 0.85;
-  padding: 0.2rem 0.55rem 0.3rem !important;
+  padding: 0.2rem 0.55rem 0.3rem 1.4rem !important;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1013,8 +1013,14 @@ col.col-conn   { width: 48px;  }
   color: var(--connecting);
 }
 
-/* Direct row */
-.direct-row td[data-col="name"] { color: var(--muted); }
+/* Host and iface columns — muted like TUI */
+.status-table td[data-col="host"],
+.status-table td[data-col="iface"] { color: var(--muted); }
+
+/* Name column colours per section */
+#vpn-tbody    tr.data-row td[data-col="name"]              { color: #2dd4bf; }
+#tunnel-tbody tr.data-row:not(.direct-row) td[data-col="name"] { color: #38bdf8; }
+.direct-row td[data-col="name"] { color: #a78bfa; }
 
 /* Row expand icon — shows ▶ that rotates ▼ when row is expanded */
 .row-expand {
@@ -1037,7 +1043,8 @@ col.col-conn   { width: 48px;  }
 
 /* Graph rows — hidden by default, shown per-row via .expanded class */
 .graph-row { display: none !important; }
-.data-row.expanded + .graph-row { display: table-row !important; }
+.data-row.expanded + .graph-row,
+.data-row.expanded + .msg-row + .graph-row { display: table-row !important; }
 
 .graph-cell {
   height: 68px;

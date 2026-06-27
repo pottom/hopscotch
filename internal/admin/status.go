@@ -49,7 +49,9 @@ type StatusResponse struct {
 	Uptime        string                      `json:"uptime"`
 	PID           int                         `json:"pid"`
 	ProxyPort     int                         `json:"proxy_port"`
+	ProxyBind     string                      `json:"proxy_bind"`
 	AdminPort     int                         `json:"admin_port"`
+	AdminBind     string                      `json:"admin_bind"`
 	Uplink        bool                        `json:"uplink"`
 	UplinkIface   string                      `json:"uplink_iface,omitempty"`
 	Tunnels       map[string]TunnelStatusJSON `json:"tunnels"`
@@ -132,7 +134,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Uptime:        time.Since(s.startedAt).Round(time.Second).String(),
 		PID:           s.pid,
 		ProxyPort:     s.proxyPort,
+		ProxyBind:     s.proxyBind,
 		AdminPort:     s.port,
+		AdminBind:     s.bind,
 		Uplink:        netcheck.HasUplink(),
 		UplinkIface:   netcheck.UplinkInterface(),
 		Tunnels:       tunnels,

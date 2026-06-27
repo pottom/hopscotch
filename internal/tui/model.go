@@ -39,6 +39,7 @@ var (
 	colorDisconnected = lipgloss.Color("#f87171")
 	colorMuted        = lipgloss.Color("#475569")
 	colorAccent       = lipgloss.Color("#38bdf8")
+	colorVPN          = lipgloss.Color("#2dd4bf")
 	colorDirect       = lipgloss.Color("#a78bfa")
 	colorText         = lipgloss.Color("#cbd5e1")
 	colorBright       = lipgloss.Color("#e2e8f0")
@@ -1004,7 +1005,7 @@ func (m Model) renderFooter() string {
 		hints += "  ↓"
 	}
 
-	ports := fmt.Sprintf("PROXY :%d  ADMIN :%d", m.status.ProxyPort, m.status.AdminPort)
+	ports := fmt.Sprintf("PROXY %s:%d  ADMIN %s:%d", m.status.ProxyBind, m.status.ProxyPort, m.status.AdminBind, m.status.AdminPort)
 
 	var leftStr string
 	if m.editMode {
@@ -1014,13 +1015,12 @@ func (m Model) renderFooter() string {
 		leftStr = styleMuted.Render(hints)
 	}
 	right := styleMuted.Render(ports)
-
 	gap := m.width - lipgloss.Width(leftStr) - lipgloss.Width(right) - 4
 	if gap < 2 {
 		gap = 2
 	}
 
-	return "\n  " + leftStr + strings.Repeat(" ", gap) + right + "\n"
+	return "\n  " + leftStr + strings.Repeat(" ", gap) + right
 }
 
 // findRouteMatch returns the index of the first rule matching the input value, or -1.
@@ -1298,7 +1298,6 @@ func (m Model) saveRulesCmd() tea.Cmd {
 // buildStatusContent renders the scrollable content for the status viewport.
 // fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
 const fixedColsWidth    = 2 + 26 + 22 + 14 + 7 + 20 + 10 + 5 + 15 + 15 + 8 // = 144
-const vpnFixedColsWidth = 2 + 26 + 29 + 14 + 20 + 10 + 5              // = 106
 
 func (m Model) sectionSep() string {
 	return "  " + styleMuted.Render(strings.Repeat("─", max(m.width-4, 10))) + "\n"
@@ -1319,15 +1318,7 @@ func (m Model) buildStatusContent() string {
 
 	// ── VPN section ───────────────────────────────────────────────────────────
 	if len(m.status.VPNs) > 0 {
-		vpnReasonW := m.width - vpnFixedColsWidth - 2
-		if vpnReasonW < 8 {
-			vpnReasonW = 0
-		}
-		vpnReasonHdr := ""
-		if vpnReasonW >= 8 {
-			vpnReasonHdr = hdr(styleMuted, "MESSAGE")
-		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s\n",
 			hdr(styleColName, "VPN"),
 			hdr(styleVPNColHost, "HOST"),
 			hdr(styleVPNColIface, "IFACE"),
@@ -1335,7 +1326,6 @@ func (m Model) buildStatusContent() string {
 			hdr(styleColStatus, "STATUS"),
 			hdr(styleColUptime, "UPTIME"),
 			hdr(styleColRecon, "RC"),
-			vpnReasonHdr,
 		)
 		b.WriteString(m.sectionSep())
 
@@ -1359,37 +1349,31 @@ func (m Model) buildStatusContent() string {
 				uptime = fmtDuration(time.Duration(v.UptimeSeconds) * time.Second)
 			}
 
-			vpnReasonStr := ""
-			if vpnReasonW > 0 {
-				reason := "—"
-				var reasonStyle lipgloss.Style
-				if v.LastError != "" && (v.State != msgs.StatusConnected || isVPNProgressMsg(v.LastError)) {
-					reason = v.LastError
-					if isVPNProgressMsg(v.LastError) {
-						reasonStyle = styleConnecting
-					} else {
-						reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
-					}
-				} else {
-					reasonStyle = styleMuted
-				}
-				vpnReasonStr = renderReason(reason, reasonStyle, vpnReasonW, vpnFixedColsWidth+2)
-			}
-
 			iface := v.TunIface
 			if iface == "" {
 				iface = "—"
 			}
-			fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
-				styleColName.Render(name),
+			fmt.Fprintf(&b, "  %s%s%s%s%s%s%s\n",
+				styleColName.Foreground(colorVPN).Render(name),
 				styleVPNColHost.Render(v.Host),
 				styleVPNColIface.Render(iface),
 				styleColPort.Render(""),
 				styleColStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)),
 				styleColUptime.Render(uptime),
 				styleColRecon.Render(fmt.Sprintf("%d", v.Reconnects)),
-				vpnReasonStr,
 			)
+			if v.LastError != "" && v.State != msgs.StatusConnected {
+				msg := v.LastError
+				avail := m.width - 6
+				if lipgloss.Width(msg) > avail && avail > 8 {
+					msg = string([]rune(msg)[:avail-1]) + "…"
+				}
+				if isVPNProgressMsg(v.LastError) {
+					b.WriteString("    " + styleConnecting.Render("◌ "+msg) + "\n")
+				} else {
+					b.WriteString("    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("└ ✗ "+msg) + "\n")
+				}
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -1452,7 +1436,7 @@ func (m Model) buildStatusContent() string {
 			if strings.HasPrefix(dispErr, msgs.WaitingForVPNPrefix) || dispErr == msgs.WaitingForNetwork {
 				errLine = "    " + styleConnecting.Render("◌ "+msg)
 			} else {
-				errLine = "    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("✗ "+msg)
+				errLine = "    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("└ ✗ "+msg)
 			}
 		}
 		var tunnelStatusStr string
@@ -1464,10 +1448,11 @@ func (m Model) buildStatusContent() string {
 		vpnLabel := "—"
 		vpnStyle := styleColVPN.Foreground(colorMuted)
 		if t.RequiresVPN != "" {
-			vpnLabel = t.RequiresVPN
+			bullet := "○"
 			if v, ok := m.status.VPNs[t.RequiresVPN]; ok {
 				switch v.State {
 				case msgs.StatusConnected:
+					bullet = "●"
 					vpnStyle = styleColVPN.Foreground(colorConnected)
 				case msgs.StatusConnecting:
 					vpnStyle = styleColVPN.Foreground(colorConnecting)
@@ -1475,9 +1460,10 @@ func (m Model) buildStatusContent() string {
 					vpnStyle = styleColVPN.Foreground(colorDisconnected)
 				}
 			}
+			vpnLabel = bullet + " " + t.RequiresVPN
 		}
 		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
-			styleColName.Render(name),
+			styleColName.Foreground(colorAccent).Render(name),
 			styleColHost.Render(t.Host),
 			vpnStyle.Render(vpnLabel),
 			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
@@ -1570,22 +1556,6 @@ func wrapAt(s string, width int) []string {
 
 // renderReason returns the inline reason string (with possible embedded newlines for wrapping).
 // indent is the number of spaces to prepend on continuation lines.
-func renderReason(reason string, style lipgloss.Style, reasonW, indent int) string {
-	if reasonW <= 0 {
-		return ""
-	}
-	lines := wrapAt(reason, reasonW)
-	indentStr := strings.Repeat(" ", indent)
-	var parts []string
-	for i, l := range lines {
-		if i == 0 {
-			parts = append(parts, "  "+style.Render(l))
-		} else {
-			parts = append(parts, indentStr+style.Render(l))
-		}
-	}
-	return strings.Join(parts, "\n")
-}
 
 func renderBadge(status string) string {
 	switch status {

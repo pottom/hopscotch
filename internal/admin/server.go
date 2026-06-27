@@ -43,6 +43,7 @@ type VPNStatter interface {
 type Server struct {
 	bind        string
 	port        int
+	proxyBind   string
 	proxyPort   int
 	pid         int
 	readme      []byte
@@ -63,6 +64,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPN
 	return &Server{
 		bind:        bind,
 		port:        port,
+		proxyBind:   cfg.Proxy.Bind,
 		proxyPort:   proxyPort,
 		pid:         os.Getpid(),
 		readme:      readme,
