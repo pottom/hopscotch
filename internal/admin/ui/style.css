@@ -979,9 +979,10 @@ col.col-msg    { /* auto */ }
 .st-loading      { color: var(--muted); padding: 0.5rem 0.6rem; font-size: 0.72rem; }
 
 /* BPS cells */
-.bps-in  { color: var(--accent); }
-.bps-out { color: var(--accent2); }
-td[data-col="active"] { color: var(--muted); }
+.status-table .bps-in          { color: var(--accent); }
+.status-table .bps-out         { color: var(--accent2); }
+.status-table td[data-col="active"] { color: var(--muted); }
+.status-table td[data-col="rc"]    { color: var(--muted); }
 
 /* VPN dependency badge */
 .vdep { font-size: 0.72rem; }

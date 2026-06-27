@@ -1513,7 +1513,7 @@ func (m Model) buildStatusContent() string {
 		dActive = dw.active
 	}
 	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
-		styleColName.Foreground(colorMuted).Render("direct"),
+		styleColName.Foreground(colorDirect).Render("direct"),
 		styleColHost.Render(""),
 		styleColVPN.Render(""),
 		styleColPort.Render(""),
