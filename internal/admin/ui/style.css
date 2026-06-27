@@ -779,21 +779,25 @@ main, main.main {
    z-layer 1: controls are identical on all rows — transparent
               so the tint bleeds through uniformly
 ────────────────────────────────────────────────────────────── */
-.rules-row-new td     { background: rgba(52, 211, 153, 0.07); }
-.rules-row-deleted td { background: rgba(248, 113, 113, 0.09); }
-.rules-row-new .rules-reorder     { border-left: 3px solid rgba(52, 211, 153, 0.65); }
-.rules-row-deleted .rules-reorder { border-left: 3px solid rgba(248, 113, 113, 0.65); }
+.rules-row-new td      { background: rgba(52,  211, 153, 0.07); }
+.rules-row-deleted td  { background: rgba(248, 113, 113, 0.09); }
+.rules-row-modified td { background: rgba(251, 191,  36, 0.08); }
+.rules-row-new .rules-reorder      { border-left: 3px solid rgba(52,  211, 153, 0.65); }
+.rules-row-deleted .rules-reorder  { border-left: 3px solid rgba(248, 113, 113, 0.65); }
+.rules-row-modified .rules-reorder { border-left: 3px solid rgba(251, 191,  36, 0.65); }
 
-/* Layer 1 — identical controls regardless of new/deleted state */
+/* Layer 1 — identical controls regardless of row state */
 .rules-row-new .rules-edit-pattern,
-.rules-row-deleted .rules-edit-pattern {
+.rules-row-deleted .rules-edit-pattern,
+.rules-row-modified .rules-edit-pattern {
   background: transparent !important;
   color: var(--text) !important;       /* override browser disabled dimming */
   opacity: 1 !important;               /* override Pico :disabled opacity   */
   -webkit-text-fill-color: var(--text);
 }
 .rules-row-new .rules-via-picker,
-.rules-row-deleted .rules-via-picker {
+.rules-row-deleted .rules-via-picker,
+.rules-row-modified .rules-via-picker {
   background: transparent !important;
 }
 .rules-row-deleted .rules-via-picker { pointer-events: none; cursor: default; }

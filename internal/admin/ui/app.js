@@ -758,7 +758,13 @@ const _validateTimers = {};
 
 function rulesStartEdit() {
   rulesEditMode = true;
-  rulesEditData = (Alpine.store('hop').routes || []).map(r => ({...r, _new: false, _deleted: false}));
+  rulesEditData = (Alpine.store('hop').routes || []).map(r => ({
+    ...r,
+    _new: false, _deleted: false, _modified: false,
+    _origPattern: r.pattern,
+    _origTunnel:  r.tunnel || '',
+    _origVia:     r.via    || 'direct',
+  }));
   document.getElementById('routes-edit-btn').style.display   = 'none';
   document.getElementById('routes-save-btn').style.display   = '';
   document.getElementById('routes-cancel-btn').style.display = '';
@@ -816,6 +822,16 @@ function rulesMoveDown(i) {
   renderEditTable();
 }
 
+function rulesEffectiveVia(r) {
+  return r.tunnel || r.via || 'direct';
+}
+
+function rulesComputeModified(r) {
+  if (r._new || r._deleted) return false;
+  return r.pattern !== (r._origPattern || '') ||
+         rulesEffectiveVia(r) !== (r._origTunnel || r._origVia || 'direct');
+}
+
 function rulesCollectFromDOM() {
   document.querySelectorAll('#routes-tbody tr[data-idx]').forEach(tr => {
     const idx = parseInt(tr.dataset.idx);
@@ -828,6 +844,7 @@ function rulesCollectFromDOM() {
       tunnel: via === 'direct' ? '' : via,
       via:    via === 'direct' ? 'direct' : '',
     };
+    rulesEditData[idx]._modified = rulesComputeModified(rulesEditData[idx]);
   });
 }
 
@@ -847,6 +864,9 @@ window.rulesPickerSelect = function(rowIdx, value, event) {
     rulesEditData[rowIdx].tunnel = value === 'direct' ? '' : value;
     rulesEditData[rowIdx].via    = value === 'direct' ? 'direct' : '';
     rulesEditData[rowIdx]._pickerValue = value;
+    rulesEditData[rowIdx]._modified = rulesComputeModified(rulesEditData[rowIdx]);
+    const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
+    if (tr) tr.classList.toggle('rules-row-modified', !!rulesEditData[rowIdx]._modified);
   }
   document.querySelectorAll('.rules-via-picker.open').forEach(p => p.classList.remove('open'));
   // Update just the picker label without full re-render
@@ -882,6 +902,13 @@ function buildViaPicker(rowIdx, currentVia, tunnelNames) {
 
 window.debounceValidate = function(rowIdx, pattern) {
   clearTimeout(_validateTimers[rowIdx]);
+  // Live modified tracking — update flag + CSS class without full re-render
+  if (rulesEditData[rowIdx] && !rulesEditData[rowIdx]._new) {
+    rulesEditData[rowIdx].pattern  = pattern;
+    rulesEditData[rowIdx]._modified = rulesComputeModified(rulesEditData[rowIdx]);
+    const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
+    if (tr) tr.classList.toggle('rules-row-modified', !!rulesEditData[rowIdx]._modified);
+  }
   _validateTimers[rowIdx] = setTimeout(() => _doValidate(rowIdx, pattern), 300);
 };
 
@@ -932,7 +959,7 @@ async function rulesSave() {
     // Strip UI-only metadata and filter out soft-deleted rows before sending
     const payload = rulesEditData
       .filter(r => !r._deleted)
-      .map(({_new, _deleted, ...r}) => r);
+      .map(({_new, _deleted, _modified, _origPattern, _origTunnel, _origVia, _pickerValue, ...r}) => r);
     const res = await fetch('/api/rules', {
       method:  'PUT',
       headers: {'Content-Type': 'application/json'},
@@ -998,10 +1025,13 @@ function renderEditTable(newRowIdx) {
     const isDeleted = !!r._deleted;
     const currentVia = r.tunnel || (r.via || 'direct');
 
+    const isModified = !!r._modified && !isNew && !isDeleted;
+
     const tr = document.createElement('tr');
     tr.dataset.idx = i;
-    if (isNew)     tr.classList.add('rules-row-new');
-    if (isDeleted) tr.classList.add('rules-row-deleted');
+    if (isNew)      tr.classList.add('rules-row-new');
+    if (isDeleted)  tr.classList.add('rules-row-deleted');
+    if (isModified) tr.classList.add('rules-row-modified');
     if (i === newRowIdx) tr.classList.add('rules-row-enter');
 
     const moveDisabled = isDeleted;
