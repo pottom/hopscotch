@@ -19,6 +19,7 @@ import (
 	colorful "github.com/lucasb-eyer/go-colorful"
 
 	"hopscotch/internal/admin"
+	"hopscotch/internal/config"
 	"hopscotch/internal/proxy"
 )
 
@@ -70,6 +71,10 @@ var (
 
 	styleRouteNum     = lipgloss.NewStyle().Foreground(colorMuted).Width(4)
 	styleRoutePattern = lipgloss.NewStyle().Foreground(colorBright).Width(32)
+
+	styleEditNew      = lipgloss.NewStyle().Foreground(colorConnected)
+	styleEditDeleted  = lipgloss.NewStyle().Foreground(colorDisconnected)
+	styleEditModified = lipgloss.NewStyle().Foreground(colorConnecting)
 )
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -292,6 +297,34 @@ type tickMsg      time.Time
 type rulesSavedMsg   struct{}
 type rulesSaveErrMsg struct{ err error }
 
+// editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
+type editRule struct {
+	admin.RouteJSON
+	origPattern string // for change detection
+	origTunnel  string
+	origVia     string
+	isNew       bool
+	isDeleted   bool
+	isModified  bool
+	validErr    string
+}
+
+func (r *editRule) recomputeModified() {
+	r.isModified = r.Pattern != r.origPattern || r.Tunnel != r.origTunnel || r.Via != r.origVia
+}
+
+func (r *editRule) validate() {
+	if r.Pattern == "" {
+		r.validErr = "pattern is required"
+		return
+	}
+	if err := config.ValidatePattern(r.Pattern); err != nil {
+		r.validErr = err.Error()
+		return
+	}
+	r.validErr = ""
+}
+
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 type Model struct {
@@ -318,7 +351,7 @@ type Model struct {
 
 	// edit mode (Patterns tab)
 	editMode      bool
-	editRules     []admin.RouteJSON
+	editRules     []editRule
 	editCursor    int
 	editPatInput  textinput.Model
 	editPatFocused bool
@@ -392,7 +425,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "enter":
 				if m.editCursor < len(m.editRules) {
-					m.editRules[m.editCursor].Pattern = m.editPatInput.Value()
+					r := &m.editRules[m.editCursor]
+					r.Pattern = m.editPatInput.Value()
+					r.recomputeModified()
+					r.validate()
 				}
 				m.editPatFocused = false
 				m.editPatInput.Blur()
@@ -402,6 +438,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			default:
 				m.editPatInput, cmd = m.editPatInput.Update(msg)
+				// Live validation while typing
+				if m.editCursor < len(m.editRules) {
+					r := &m.editRules[m.editCursor]
+					r.Pattern = m.editPatInput.Value()
+					r.validate()
+				}
 				if m.routeVPReady {
 					m.routeVP.SetContent(m.buildRoutesEditContent())
 				}
@@ -438,7 +480,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.routeVP.SetContent(m.buildRoutesContent())
 				}
 				return m, nil
-			case "enter", "ctrl+s":
+			case "ctrl+s":
 				if !m.editSaving {
 					m.editSaving = true
 					m.editError = ""
@@ -464,7 +506,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case "K":
+			case "shift+up":
 				if m.editCursor > 0 {
 					m.editRules[m.editCursor-1], m.editRules[m.editCursor] = m.editRules[m.editCursor], m.editRules[m.editCursor-1]
 					m.editCursor--
@@ -473,7 +515,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case "J":
+			case "shift+down":
 				if m.editCursor < len(m.editRules)-1 {
 					m.editRules[m.editCursor], m.editRules[m.editCursor+1] = m.editRules[m.editCursor+1], m.editRules[m.editCursor]
 					m.editCursor++
@@ -484,27 +526,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "d", "D":
 				if m.editCursor < len(m.editRules) {
-					m.editRules = append(m.editRules[:m.editCursor], m.editRules[m.editCursor+1:]...)
-					if m.editCursor >= len(m.editRules) && m.editCursor > 0 {
-						m.editCursor--
+					r := &m.editRules[m.editCursor]
+					if r.isNew {
+						// New row: remove immediately (no history to preserve)
+						m.editRules = append(m.editRules[:m.editCursor], m.editRules[m.editCursor+1:]...)
+						if m.editCursor >= len(m.editRules) && m.editCursor > 0 {
+							m.editCursor--
+						}
+					} else {
+						r.isDeleted = !r.isDeleted // toggle soft-delete
 					}
 					if m.routeVPReady {
 						m.routeVP.SetContent(m.buildRoutesEditContent())
 					}
 				}
 				return m, nil
-			case "a", "A":
-				m.editRules = append(m.editRules, admin.RouteJSON{})
-				m.editCursor = len(m.editRules) - 1
-				m.editPatInput.SetValue("")
-				m.editPatFocused = true
-				m.editPatInput.Focus()
-				if m.routeVPReady {
-					m.routeVP.SetContent(m.buildRoutesEditContent())
-				}
+			case "a": // append: insert new row BELOW cursor
+				m.editInsertRule(m.editCursor + 1)
 				return m, textinput.Blink
-			case "e", "E":
-				if m.editCursor < len(m.editRules) {
+			case "i": // insert: insert new row ABOVE cursor
+				m.editInsertRule(m.editCursor)
+				return m, textinput.Blink
+			case "e", "E", "enter":
+				if m.editCursor < len(m.editRules) && !m.editRules[m.editCursor].isDeleted {
 					m.editPatInput.SetValue(m.editRules[m.editCursor].Pattern)
 					m.editPatFocused = true
 					m.editPatInput.Focus()
@@ -514,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, textinput.Blink
 				}
 				return m, nil
-			case "t", "T":
+			case "v", "V":
 				m.editCycleVia()
 				if m.routeVPReady {
 					m.routeVP.SetContent(m.buildRoutesEditContent())
@@ -566,8 +610,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editError = ""
 				m.editSaving = false
 				m.editCursor = 0
-				m.editRules = make([]admin.RouteJSON, len(m.status.Routes))
-				copy(m.editRules, m.status.Routes)
+				m.editRules = make([]editRule, len(m.status.Routes))
+				for i, r := range m.status.Routes {
+					m.editRules[i] = editRule{
+						RouteJSON:   r,
+						origPattern: r.Pattern,
+						origTunnel:  r.Tunnel,
+						origVia:     r.Via,
+					}
+				}
 				if m.routeVPReady {
 					m.routeVP.SetContent(m.buildRoutesEditContent())
 				}
@@ -851,15 +902,12 @@ func (m Model) renderHeader() string {
 		fmt.Fprintf(&b, "\n")
 	case tabRoutes:
 		if m.editMode {
-			// Edit mode header.
+			// Edit mode header — hints live in the footer (like vim's mode line).
 			fmt.Fprintf(&b, "\n")
 			if m.editSaving {
 				fmt.Fprintf(&b, "  %s\n", styleConnecting.Render("saving…"))
 			} else {
-				fmt.Fprintf(&b, "  %s  %s\n",
-					styleTabActive.Render("EDIT"),
-					styleMuted.Render("e=pattern  t=via  K/J=reorder  d=del  a=add  Enter=save  Esc=cancel"),
-				)
+				fmt.Fprintf(&b, "\n")
 			}
 			if m.editError != "" {
 				fmt.Fprintf(&b, "  %s\n", styleDisconnected.Render("✗ "+m.editError))
@@ -924,7 +972,7 @@ func (m Model) renderFooter() string {
 	hints := "q quit  tab/s/l/p switch  ↑↓/jk scroll"
 	if m.activeTab == tabRoutes {
 		if m.editMode {
-			hints = "↑↓/jk cursor  K/J reorder  e edit  t via  d del  a add  Enter save  Esc cancel"
+			hints = "↑↓/jk=cursor  shift+↑↓=reorder  e/enter=edit  v=via  i=ins↑  a=add↓  d=del  ctrl+s=save  esc=cancel"
 		} else if m.routeFocused {
 			hints += "  esc unfocus"
 		} else {
@@ -955,15 +1003,22 @@ func (m Model) renderFooter() string {
 	}
 
 	ports := fmt.Sprintf("PROXY :%d  ADMIN :%d", m.status.ProxyPort, m.status.AdminPort)
-	left := styleMuted.Render(hints)
+
+	var leftStr string
+	if m.editMode {
+		modeLabel := styleTabActive.Bold(true).Render("-- EDIT --")
+		leftStr = modeLabel + "  " + styleMuted.Render(hints)
+	} else {
+		leftStr = styleMuted.Render(hints)
+	}
 	right := styleMuted.Render(ports)
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
+	gap := m.width - lipgloss.Width(leftStr) - lipgloss.Width(right) - 4
 	if gap < 2 {
 		gap = 2
 	}
 
-	return "\n  " + left + strings.Repeat(" ", gap) + right + "\n"
+	return "\n  " + leftStr + strings.Repeat(" ", gap) + right + "\n"
 }
 
 // findRouteMatch returns the index of the first rule matching the input value, or -1.
@@ -1046,6 +1101,24 @@ func (m Model) sortedTunnelNames() []string {
 	return names
 }
 
+// editInsertRule inserts a new empty rule at idx, sets cursor there, opens pattern input.
+func (m *Model) editInsertRule(idx int) {
+	if idx > len(m.editRules) {
+		idx = len(m.editRules)
+	}
+	newRule := editRule{isNew: true}
+	tail := make([]editRule, len(m.editRules[idx:]))
+	copy(tail, m.editRules[idx:])
+	m.editRules = append(m.editRules[:idx], append([]editRule{newRule}, tail...)...)
+	m.editCursor = idx
+	m.editPatInput.SetValue("")
+	m.editPatFocused = true
+	m.editPatInput.Focus()
+	if m.routeVPReady {
+		m.routeVP.SetContent(m.buildRoutesEditContent())
+	}
+}
+
 // editCycleVia cycles the via of the currently selected edit rule through
 // "direct" + all known tunnel names.
 func (m *Model) editCycleVia() {
@@ -1068,11 +1141,13 @@ func (m *Model) editCycleVia() {
 				r.Tunnel = next
 				r.Via = ""
 			}
+			r.recomputeModified()
 			return
 		}
 	}
 	r.Tunnel = ""
 	r.Via = "direct"
+	r.recomputeModified()
 }
 
 // buildRoutesEditContent renders the editable rule table for the routes viewport.
@@ -1093,35 +1168,78 @@ func (m Model) buildRoutesEditContent() string {
 
 		selected := m.editCursor == i
 
-		var cursor string
-		if selected {
-			cursor = styleTabActive.Render("> ")
-		} else {
-			cursor = "  "
+		// Prefix: cursor glyph with colour indicating row state
+		var prefix string
+		switch {
+		case selected && r.isNew:
+			prefix = styleEditNew.Bold(true).Render("> ")
+		case selected && r.isDeleted:
+			prefix = styleEditDeleted.Bold(true).Render("> ")
+		case selected:
+			prefix = styleTabActive.Render("> ")
+		case r.isNew:
+			prefix = styleEditNew.Render("+ ")
+		case r.isDeleted:
+			prefix = styleEditDeleted.Render("- ")
+		default:
+			prefix = "  "
 		}
 
+		// Pattern
 		var patRendered string
-		if selected && m.editPatFocused {
-			// Show textinput for the pattern.
+		switch {
+		case selected && m.editPatFocused:
 			patRendered = styleRoutePattern.Render(m.editPatInput.View())
-		} else if selected {
+		case r.isDeleted:
+			patRendered = styleRoutePattern.Foreground(colorDisconnected).Strikethrough(true).Render(r.Pattern)
+		case r.isNew:
+			patRendered = styleRoutePattern.Foreground(colorConnected).Render(r.Pattern)
+		case r.isModified && selected:
+			patRendered = styleRoutePattern.Foreground(colorConnecting).Render(r.Pattern)
+		case r.isModified:
+			patRendered = styleRoutePattern.Foreground(colorConnecting).Render(r.Pattern)
+		case selected:
 			patRendered = styleRoutePattern.Foreground(colorAccent).Render(r.Pattern)
-		} else {
+		default:
 			patRendered = styleRoutePattern.Render(r.Pattern)
 		}
 
+		// Via
 		var viaRendered string
-		if via == "direct" || r.Tunnel == "" {
-			viaRendered = lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render(via)
-		} else {
-			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
+		viaW := lipgloss.NewStyle().Width(22)
+		switch {
+		case r.isDeleted:
+			viaRendered = viaW.Foreground(colorDisconnected).Strikethrough(true).Render(via)
+		case r.isNew:
+			viaRendered = viaW.Foreground(colorConnected).Render(via)
+		case r.isModified:
+			viaRendered = viaW.Foreground(colorConnecting).Render(via)
+		case r.Tunnel != "":
+			viaRendered = viaW.Foreground(colorAccent).Render(via)
+		default:
+			viaRendered = viaW.Foreground(colorMuted).Render(via)
 		}
 
-		fmt.Fprintf(&b, "%s%s%s%s\n",
-			cursor,
+		// Inline validation error — same line, after via, truncated to fit
+		var errStr string
+		if r.validErr != "" && !r.isDeleted {
+			// 2 prefix + 4 num + 32 pattern + 22 via = 60 used; leave 4 margin
+			avail := m.width - 60 - 4
+			if avail > 6 {
+				msg := "✗ " + r.validErr
+				if lipgloss.Width(msg) > avail {
+					msg = string([]rune(msg)[:avail-1]) + "…"
+				}
+				errStr = lipgloss.NewStyle().Foreground(colorDisconnected).Render(msg)
+			}
+		}
+
+		fmt.Fprintf(&b, "%s%s%s%s%s\n",
+			prefix,
 			styleRouteNum.Render(fmt.Sprintf("%d", i+1)),
 			patRendered,
 			viaRendered,
+			errStr,
 		)
 	}
 	return b.String()
@@ -1129,8 +1247,15 @@ func (m Model) buildRoutesEditContent() string {
 
 // saveRulesCmd returns a Cmd that PUTs the current editRules to the admin API.
 func (m Model) saveRulesCmd() tea.Cmd {
-	rules := make([]admin.RouteJSON, len(m.editRules))
-	copy(rules, m.editRules)
+	var rules []admin.RouteJSON
+	for _, r := range m.editRules {
+		if !r.isDeleted {
+			rules = append(rules, r.RouteJSON)
+		}
+	}
+	if rules == nil {
+		rules = []admin.RouteJSON{}
+	}
 	url := strings.TrimSuffix(m.adminURL, "/status") + "/api/rules"
 	return func() tea.Msg {
 		body, err := json.Marshal(map[string]interface{}{"rules": rules})
