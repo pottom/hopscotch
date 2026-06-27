@@ -968,7 +968,7 @@ col.col-uptime { width: 78px;  }
 col.col-rc     { width: 40px;  }
 col.col-bps    { width: 90px;  }
 col.col-conn   { width: 48px;  }
-col.col-msg    { /* auto */ }
+/* col-msg removed */
 
 /* Status span states */
 .st-connected    { color: var(--connected); }
@@ -990,17 +990,24 @@ col.col-msg    { /* auto */ }
 .vdep-connecting   { color: var(--connecting); }
 .vdep-disconnected { color: var(--disconnected); }
 
-/* Message cells — wraps when needed */
-.status-table td[data-col="msg"] {
-  white-space: normal;
-  word-break: break-word;
-  line-height: 1.4;
-  vertical-align: top;
-  padding-top: 0.4rem;
-  padding-bottom: 0.4rem;
+/* Error sub-row — shown below a tunnel row when last_error is set */
+.status-table tr.msg-row td {
+  background: rgba(248, 113, 113, 0.04);
+  border-bottom: none;
 }
-.msg-progress { color: var(--connecting); }
-.msg-error    { color: var(--disconnected); }
+.status-table tr.msg-row + tr td {
+  border-top: 1px solid rgba(248, 113, 113, 0.12);
+}
+.msg-row-cell {
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--disconnected);
+  opacity: 0.85;
+  padding: 0.2rem 0.55rem 0.3rem !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* Direct row */
 .direct-row td[data-col="name"] { color: var(--muted); }

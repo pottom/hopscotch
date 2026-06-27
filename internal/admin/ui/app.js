@@ -163,6 +163,14 @@ function tunnelMsgHtml(t) {
   return `<span class="msg-error">${escHtml(m)}</span>`;
 }
 
+// tunnelMsgText returns the raw error text for sub-row display (progress msgs suppressed).
+function tunnelMsgText(t) {
+  if (!t) return '';
+  const m = t.last_error || '';
+  if (!m || isTunnelProgressMsg(m)) return '';
+  return m;
+}
+
 function chartId(name) {
   return 'chart-' + name.replace(/[^a-z0-9]/gi, '_');
 }
@@ -244,8 +252,7 @@ function buildTunnelRows(names) {
         `<td data-col="rc"><span class="st-muted">—</span></td>` +
         `<td class="bps-in"  data-col="bps-in">${fmtBytes(d.bps_in  || 0) + '/s'}</td>` +
         `<td class="bps-out" data-col="bps-out">${fmtBytes(d.bps_out || 0) + '/s'}</td>` +
-        `<td data-col="active">${d.active || 0}</td>` +
-        `<td data-col="msg"><span class="st-muted">—</span></td>`;
+        `<td data-col="active">${d.active || 0}</td>`;
     } else {
       const t = store.tunnels[name];
       if (!t) continue;
@@ -260,13 +267,19 @@ function buildTunnelRows(names) {
         `<td data-col="rc">${t.reconnect_count || 0}</td>` +
         `<td class="bps-in"  data-col="bps-in">${fmtBytes(t.bps_in  || 0) + '/s'}</td>` +
         `<td class="bps-out" data-col="bps-out">${fmtBytes(t.bps_out || 0) + '/s'}</td>` +
-        `<td data-col="active">${t.active || 0}</td>` +
-        `<td data-col="msg">${tunnelMsgHtml(t)}</td>`;
+        `<td data-col="active">${t.active || 0}</td>`;
     }
     tbody.appendChild(tr);
+    // message sub-row — only rendered when there's a message
+    const msg = tunnelMsgText(store.tunnels[name]);
+    const mtr = document.createElement('tr');
+    mtr.className = 'msg-row'; mtr.dataset.name = name;
+    mtr.style.display = msg ? '' : 'none';
+    mtr.innerHTML = `<td colspan="10" class="msg-row-cell">${msg ? '✗ ' + escHtml(msg) : ''}</td>`;
+    tbody.appendChild(mtr);
     const gtr = document.createElement('tr');
     gtr.className = 'graph-row'; gtr.dataset.name = name;
-    gtr.innerHTML = `<td colspan="11"><div class="graph-cell"><canvas id="${chartId(name)}"></canvas></div></td>`;
+    gtr.innerHTML = `<td colspan="10"><div class="graph-cell"><canvas id="${chartId(name)}"></canvas></div></td>`;
     tbody.appendChild(gtr);
   }
   if (document.body.classList.contains('graphs-on')) requestAnimationFrame(initAllCharts);
@@ -295,7 +308,13 @@ function updateTunnelRows() {
     setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0) + '/s');
     setCell(row, 'bps-out', fmtBytes(t.bps_out || 0) + '/s');
     setCell(row, 'active', t.active || 0);
-    setCell(row, 'msg', tunnelMsgHtml(t), true);
+    // update msg sub-row
+    const mRow = row.nextElementSibling?.classList.contains('msg-row') ? row.nextElementSibling : null;
+    if (mRow) {
+      const msg = tunnelMsgText(t);
+      mRow.style.display = msg ? '' : 'none';
+      mRow.querySelector('.msg-row-cell').textContent = msg ? '✗ ' + msg : '';
+    }
   }
 }
 

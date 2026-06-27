@@ -1309,11 +1309,6 @@ func (m Model) buildStatusContent() string {
 		sparkW = 10
 	}
 
-	// Remaining space after fixed columns for the reason field.
-	reasonW := m.width - fixedColsWidth - 2
-	if reasonW < 8 {
-		reasonW = 0
-	}
 
 	hdr := func(s lipgloss.Style, label string) string {
 		return s.Foreground(colorMuted).Render(label)
@@ -1399,11 +1394,7 @@ func (m Model) buildStatusContent() string {
 	}
 
 	// ── Tunnel section ────────────────────────────────────────────────────────
-	reasonHdr := ""
-	if reasonW >= 8 {
-		reasonHdr = hdr(styleMuted, "MESSAGE")
-	}
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s%s\n",
+	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
 		hdr(styleColName, "TUNNEL"),
 		hdr(styleColHost, "HOST"),
 		hdr(styleColVPN, "VPN"),
@@ -1414,7 +1405,6 @@ func (m Model) buildStatusContent() string {
 		hdr(styleColBpsIn, "↓"),
 		hdr(styleColBpsOut, "↑"),
 		hdr(styleColConn, "CONN"),
-		reasonHdr,
 	)
 	b.WriteString(m.sectionSep())
 
@@ -1443,23 +1433,17 @@ func (m Model) buildStatusContent() string {
 			active = w.active
 		}
 
-		reasonStr := ""
-		if reasonW > 0 {
-			reason := "—"
-			var reasonStyle lipgloss.Style
-			if t.LastError != "" && t.Status != "connected" {
-				reason = t.LastError
-				if strings.HasPrefix(t.LastError, "waiting for VPN") ||
-					t.LastError == "waiting for network" {
-					reasonStyle = styleConnecting // amber — informational, not an error
-				} else {
-					reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
-				}
-			} else {
-				reasonStyle = styleMuted
+		// error sub-line: non-empty only for real errors (not progress messages)
+		errLine := ""
+		if t.LastError != "" && t.Status != "connected" &&
+			!strings.HasPrefix(t.LastError, "waiting for VPN") &&
+			t.LastError != "waiting for network" {
+			msg := t.LastError
+			avail := m.width - 6
+			if lipgloss.Width(msg) > avail && avail > 8 {
+				msg = string([]rune(msg)[:avail-1]) + "…"
 			}
-			// fixedColsWidth+4 = 2 (row indent) + columns + 2 (separator before reason)
-			reasonStr = renderReason(reason, reasonStyle, reasonW, fixedColsWidth+2)
+			errLine = "    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("✗ "+msg)
 		}
 		var tunnelStatusStr string
 		if strings.HasPrefix(t.LastError, "waiting for VPN") || strings.HasPrefix(t.LastError, "waiting for network") {
@@ -1482,7 +1466,7 @@ func (m Model) buildStatusContent() string {
 				}
 			}
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s%s\n",
+		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
 			styleColName.Render(name),
 			styleColHost.Render(t.Host),
 			vpnStyle.Render(vpnLabel),
@@ -1493,8 +1477,10 @@ func (m Model) buildStatusContent() string {
 			styleColBpsIn.Render("↓ "+fmtBytes(bpsIn)),
 			styleColBpsOut.Render("↑ "+fmtBytes(bpsOut)),
 			styleColConn.Render(fmtActive(active)),
-			reasonStr,
 		)
+		if errLine != "" {
+			fmt.Fprintf(&b, "%s\n", errLine)
+		}
 
 		if !m.compact && w != nil {
 			for _, line := range renderGraph(w.dataIn, w.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
