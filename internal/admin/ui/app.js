@@ -715,9 +715,11 @@ function renderRoutesTable(highlightIdx) {
     const t = tunnels[via];
     const vs = tunnelVisualStatus(t);
 
-    const viaHtml = (via === 'direct' || !r.tunnel)
-      ? `<span class="routes-via-direct">${via}</span>`
-      : `<span class="routes-via-tunnel">${via}</span>`;
+    const viaHtml = via === 'block'
+      ? `<span class="routes-via-block">${via}</span>`
+      : via === 'direct'
+        ? `<span class="routes-via-direct">${via}</span>`
+        : `<span class="routes-via-tunnel">${via}</span>`;
 
     let statusHtml = '';
     if (t) {
@@ -841,8 +843,8 @@ function rulesCollectFromDOM() {
     rulesEditData[idx] = {
       ...rulesEditData[idx],
       pattern,
-      tunnel: via === 'direct' ? '' : via,
-      via:    via === 'direct' ? 'direct' : '',
+      tunnel: (via === 'direct' || via === 'block') ? '' : via,
+      via:    (via === 'direct' || via === 'block') ? via : '',
     };
     rulesEditData[idx]._modified = rulesComputeModified(rulesEditData[idx]);
   });
@@ -861,8 +863,8 @@ window.rulesPickerSelect = function(rowIdx, value, event) {
   event.stopPropagation();
   rulesCollectFromDOM();
   if (rowIdx < rulesEditData.length) {
-    rulesEditData[rowIdx].tunnel = value === 'direct' ? '' : value;
-    rulesEditData[rowIdx].via    = value === 'direct' ? 'direct' : '';
+    rulesEditData[rowIdx].tunnel = (value === 'direct' || value === 'block') ? '' : value;
+    rulesEditData[rowIdx].via    = (value === 'direct' || value === 'block') ? value : '';
     rulesEditData[rowIdx]._pickerValue = value;
     rulesEditData[rowIdx]._modified = rulesComputeModified(rulesEditData[rowIdx]);
     const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
@@ -885,7 +887,7 @@ document.addEventListener('click', () => {
 });
 
 function buildViaPicker(rowIdx, currentVia, tunnelNames) {
-  const options = ['direct', ...tunnelNames];
+  const options = ['direct', ...tunnelNames, 'block'];
   const items = options.map(v =>
     `<li class="rules-via-opt${v === currentVia ? ' selected' : ''}" data-value="${escHtml(v)}"
         onclick="rulesPickerSelect(${rowIdx}, '${escHtml(v)}', event)">${escHtml(v)}</li>`
@@ -973,7 +975,7 @@ async function rulesSave() {
     }
     status.textContent = 'Saved ✓';
     status.className   = 'routes-save-status routes-save-ok';
-    Alpine.store('hop').routes = rulesEditData.map(r => ({...r}));
+    refreshStatus();
     setTimeout(rulesCancel, 800);
   } catch {
     status.textContent = 'Network error';

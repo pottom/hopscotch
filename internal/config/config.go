@@ -337,6 +337,12 @@ func validate(cfg *Config) error {
 		if rule.Tunnel == "" && rule.Via == "" {
 			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].tunnel", i+1), Message: "either tunnel or via is required"}
 		}
+		if rule.Via != "" && rule.Via != "direct" && rule.Via != "block" && rule.Tunnel != "" {
+			// via is only for special values; tunnel name goes in tunnel field
+		}
+		if rule.Via != "" && rule.Via != "direct" && rule.Via != "block" {
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].via", i+1), Message: fmt.Sprintf("via must be %q, %q, or empty (use tunnel field for tunnel names)", "direct", "block")}
+		}
 		if err := ValidatePattern(rule.Pattern); err != nil {
 			hint := patternErrorHint(cfg.Path, rule.Pattern, i+1)
 			return &ConfigError{

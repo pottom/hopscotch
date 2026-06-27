@@ -38,6 +38,7 @@ var (
 	colorDisconnected = lipgloss.Color("#f87171")
 	colorMuted        = lipgloss.Color("#475569")
 	colorAccent       = lipgloss.Color("#38bdf8")
+	colorDirect       = lipgloss.Color("#a78bfa")
 	colorText         = lipgloss.Color("#cbd5e1")
 	colorBright       = lipgloss.Color("#e2e8f0")
 
@@ -932,10 +933,10 @@ func (m Model) renderHeader() string {
 			}
 			fmt.Fprintf(&b, "  %s%s\n", inputPrefix, m.routeInput.View())
 
-			// Result line.
+			// Result line — show routing hint when input is empty.
 			matchIdx := m.findRouteMatch()
 			if m.routeInput.Value() == "" {
-				fmt.Fprintf(&b, "  %s\n", styleMuted.Render("type a hostname or URL to test routing"))
+				fmt.Fprintf(&b, "  %s\n", styleMuted.Render("top to bottom · first match wins · unmatched → direct"))
 			} else if matchIdx >= 0 {
 				r := m.status.Routes[matchIdx]
 				via := r.Tunnel
@@ -1071,9 +1072,12 @@ func (m Model) buildRoutesContent() string {
 
 		var viaRendered string
 		var statusStr string
-		if via == "direct" || via == "" {
-			viaRendered = lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render(via)
-		} else {
+		switch {
+		case via == "direct" || via == "":
+			viaRendered = lipgloss.NewStyle().Foreground(colorDirect).Width(22).Render(via)
+		case via == "block":
+			viaRendered = lipgloss.NewStyle().Foreground(colorDisconnected).Width(22).Render(via)
+		default:
 			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
 			if t, ok := m.status.Tunnels[via]; ok {
 				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures)
@@ -1120,24 +1124,31 @@ func (m *Model) editInsertRule(idx int) {
 }
 
 // editCycleVia cycles the via of the currently selected edit rule through
-// "direct" + all known tunnel names.
+// "direct" → tunnel names → "block".
 func (m *Model) editCycleVia() {
 	if m.editCursor >= len(m.editRules) {
 		return
 	}
 	r := &m.editRules[m.editCursor]
-	options := append([]string{"direct"}, m.sortedTunnelNames()...)
-	current := r.Tunnel
+	options := append([]string{"direct"}, append(m.sortedTunnelNames(), "block")...)
+	current := r.Via
+	if current == "" {
+		current = r.Tunnel
+	}
 	if current == "" {
 		current = "direct"
 	}
 	for i, opt := range options {
 		if opt == current {
 			next := options[(i+1)%len(options)]
-			if next == "direct" {
+			switch next {
+			case "direct":
 				r.Tunnel = ""
 				r.Via = "direct"
-			} else {
+			case "block":
+				r.Tunnel = ""
+				r.Via = "block"
+			default:
 				r.Tunnel = next
 				r.Via = ""
 			}
@@ -1210,14 +1221,16 @@ func (m Model) buildRoutesEditContent() string {
 		switch {
 		case r.isDeleted:
 			viaRendered = viaW.Foreground(colorDisconnected).Strikethrough(true).Render(via)
+		case via == "block":
+			viaRendered = viaW.Foreground(colorDisconnected).Render(via)
 		case r.isNew:
 			viaRendered = viaW.Foreground(colorConnected).Render(via)
 		case r.isModified:
 			viaRendered = viaW.Foreground(colorConnecting).Render(via)
 		case r.Tunnel != "":
 			viaRendered = viaW.Foreground(colorAccent).Render(via)
-		default:
-			viaRendered = viaW.Foreground(colorMuted).Render(via)
+		default: // "direct"
+			viaRendered = viaW.Foreground(colorDirect).Render(via)
 		}
 
 		// Inline validation error — same line, after via, truncated to fit

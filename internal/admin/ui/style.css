@@ -581,8 +581,10 @@ main, main.main {
 .routes-num-h      { width: 2.5rem; }
 .routes-pattern    { color: #e2e8f0; }
 .routes-via-tunnel { color: var(--accent); }
-.routes-via-direct { color: var(--muted); }
+.routes-via-direct { color: #a78bfa; }
+.routes-via-block  { color: #f87171; }
 .routes-empty      { color: var(--muted); padding: 1.5rem 0.75rem; }
+.routes-hint       { color: var(--muted); font-size: 0.72rem; padding: 0 1.75rem 0.6rem; }
 
 .routes-top-bar {
   display: flex;
@@ -718,6 +720,13 @@ main, main.main {
 .rules-via-opt.selected::before { content: '✓'; color: var(--accent); font-size: 0.7rem; }
 .rules-via-opt:hover            { background: rgba(56,189,248,.1); color: var(--accent); }
 .rules-via-opt.selected         { color: var(--accent); font-weight: 500; }
+
+/* block option — red warning colour */
+.rules-via-opt[data-value="block"]          { color: #f87171; }
+.rules-via-opt[data-value="block"]:hover    { background: rgba(248,113,113,.1); color: #f87171; }
+.rules-via-opt[data-value="block"].selected { color: #f87171; font-weight: 500; }
+.rules-via-opt[data-value="block"].selected::before { color: #f87171; }
+.rules-via-picker[data-value="block"] .rules-via-picker-label { color: #f87171; }
 
 /* ── Row action buttons ──────────────────── */
 .rules-reorder     { white-space: nowrap; }
