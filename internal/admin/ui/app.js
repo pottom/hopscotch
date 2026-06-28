@@ -350,7 +350,7 @@ document.addEventListener('alpine:init', () => {
     vpns:    {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
-    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', admin_port: 0, admin_bind: '', status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
+    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', proxy_auth_enabled: false, admin_port: 0, admin_bind: '', admin_auth_enabled: false, status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
 
     tunnelList() {
       return Object.keys(this.tunnels).sort();
@@ -409,10 +409,12 @@ async function refreshStatus() {
       latest_version: st.latest_version || '',
       pid:            st.pid,
       uptime:         st.uptime,
-      proxy_port:     st.proxy_port,
-      proxy_bind:     st.proxy_bind || '',
-      admin_port:     st.admin_port,
-      admin_bind:     st.admin_bind || '',
+      proxy_port:         st.proxy_port,
+      proxy_bind:         st.proxy_bind || '',
+      proxy_auth_enabled: st.proxy_auth_enabled || false,
+      admin_port:         st.admin_port,
+      admin_bind:         st.admin_bind || '',
+      admin_auth_enabled: st.admin_auth_enabled || false,
       status:         st.status,
       uplink:         st.uplink ?? true,
       uplink_iface:   st.uplink_iface || '',

@@ -1016,7 +1016,15 @@ func (m Model) renderFooter() string {
 		hints += "  ↓"
 	}
 
-	ports := fmt.Sprintf("PROXY %s:%d  ADMIN %s:%d", m.status.ProxyBind, m.status.ProxyPort, m.status.AdminBind, m.status.AdminPort)
+	proxyStr := fmt.Sprintf("PROXY %s:%d", m.status.ProxyBind, m.status.ProxyPort)
+	if m.status.ProxyAuthEnabled {
+		proxyStr += " ⚿"
+	}
+	adminStr := fmt.Sprintf("ADMIN %s:%d", m.status.AdminBind, m.status.AdminPort)
+	if m.status.AdminAuthEnabled {
+		adminStr += " ⚿"
+	}
+	ports := proxyStr + "  " + adminStr
 
 	var leftStr string
 	if m.editMode {

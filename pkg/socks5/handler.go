@@ -113,10 +113,10 @@ func sendReply(w io.Writer, replyCode byte) error {
 }
 
 // handle processes a single SOCKS5 client connection end-to-end.
-func handle(ctx context.Context, client net.Conn, dialer Dialer) error {
+func handle(ctx context.Context, client net.Conn, dialer Dialer, creds *Credentials) error {
 	defer client.Close()
 
-	if err := negotiateAuth(client); err != nil {
+	if err := negotiateAuth(client, creds); err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
 

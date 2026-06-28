@@ -84,6 +84,8 @@ type Rule struct {
 type ProxyConfig struct {
 	Port      int    `yaml:"port"`
 	Bind      string `yaml:"bind"`       // listen address; default 0.0.0.0
+	Username  string `yaml:"username"`   // SOCKS5 auth username; leave empty to disable auth
+	Password  string `yaml:"password"`   // SOCKS5 auth password; required when username is set
 	Rules     []Rule `yaml:"rules"`
 	NoProxy   string `yaml:"no_proxy"`   // passed to NO_PROXY / no_proxy on shell enable
 	ShellIcon string `yaml:"shell_icon"` // icon shown in HOPSCOTCH_ACTIVE; default ⇢
@@ -93,6 +95,8 @@ type ProxyConfig struct {
 type AdminConfig struct {
 	Port         int    `yaml:"port"`
 	Bind         string `yaml:"bind"`
+	Username     string `yaml:"username"`     // HTTP Basic Auth username; leave empty to disable
+	Password     string `yaml:"password"`     // HTTP Basic Auth password; required when username is set
 	ShowPublicIP bool   `yaml:"show_public_ip"` // periodically fetch and display public IP; default false
 }
 
@@ -304,6 +308,13 @@ func validate(cfg *Config) error {
 
 	if cfg.Proxy.Port == cfg.Admin.Port {
 		return &ConfigError{Field: "proxy.port / admin.port", Message: "proxy and admin ports must differ"}
+	}
+
+	if (cfg.Proxy.Username == "") != (cfg.Proxy.Password == "") {
+		return &ConfigError{Field: "proxy.username / proxy.password", Message: "both username and password must be set together"}
+	}
+	if (cfg.Admin.Username == "") != (cfg.Admin.Password == "") {
+		return &ConfigError{Field: "admin.username / admin.password", Message: "both username and password must be set together"}
 	}
 
 	// Validate VPN definitions.

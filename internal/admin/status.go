@@ -48,10 +48,12 @@ type StatusResponse struct {
 	LatestVersion string                      `json:"latest_version,omitempty"`
 	Uptime        string                      `json:"uptime"`
 	PID           int                         `json:"pid"`
-	ProxyPort     int                         `json:"proxy_port"`
-	ProxyBind     string                      `json:"proxy_bind"`
-	AdminPort     int                         `json:"admin_port"`
-	AdminBind     string                      `json:"admin_bind"`
+	ProxyPort        int    `json:"proxy_port"`
+	ProxyBind        string `json:"proxy_bind"`
+	ProxyAuthEnabled bool   `json:"proxy_auth_enabled,omitempty"`
+	AdminPort        int    `json:"admin_port"`
+	AdminBind        string `json:"admin_bind"`
+	AdminAuthEnabled bool   `json:"admin_auth_enabled,omitempty"`
 	Uplink        bool                        `json:"uplink"`
 	UplinkIface   string                      `json:"uplink_iface,omitempty"`
 	UplinkIP      string                      `json:"uplink_ip,omitempty"`
@@ -141,10 +143,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		LatestVersion: version.LatestVersion,
 		Uptime:        time.Since(s.startedAt).Round(time.Second).String(),
 		PID:           s.pid,
-		ProxyPort:     s.proxyPort,
-		ProxyBind:     s.proxyBind,
-		AdminPort:     s.port,
-		AdminBind:     s.bind,
+		ProxyPort:        s.proxyPort,
+		ProxyBind:        s.proxyBind,
+		ProxyAuthEnabled: s.proxyAuthEnabled,
+		AdminPort:        s.port,
+		AdminBind:        s.bind,
+		AdminAuthEnabled: s.adminAuthEnabled(),
 		Uplink:        uplink,
 		UplinkIface:   netcheck.UplinkInterface(),
 		UplinkIP:      netcheck.UplinkIP(),
