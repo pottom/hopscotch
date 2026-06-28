@@ -403,8 +403,9 @@ func New(adminURL string, client *http.Client) Model {
 		mirrorGraph: true,
 		width:       80,
 		height:      24,
-		routeInput:  ti,
+		routeInput:   ti,
 		editPatInput: ep,
+		logLevel:     1, // default: INFO+
 	}
 }
 
