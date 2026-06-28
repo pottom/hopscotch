@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"hopscotch/internal/logger"
+	"github.com/pottom/hopscotch/internal/logger"
 )
 
 const logStreamHeartbeat = 15 * time.Second

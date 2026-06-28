@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/tunnel"
 )
 
 // mockLookup implements TunnelLookup for testing.

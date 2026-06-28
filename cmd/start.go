@@ -14,16 +14,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
-	"hopscotch/internal/admin"
-	"hopscotch/internal/config"
-	"hopscotch/internal/proxy"
-	"hopscotch/internal/netcheck"
-	"hopscotch/internal/security"
-	"hopscotch/internal/state"
-	"hopscotch/internal/tunnel"
-	"hopscotch/internal/updater"
-	"hopscotch/internal/version"
-	"hopscotch/internal/vpn"
+	"github.com/pottom/hopscotch/internal/admin"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/proxy"
+	"github.com/pottom/hopscotch/internal/netcheck"
+	"github.com/pottom/hopscotch/internal/security"
+	"github.com/pottom/hopscotch/internal/state"
+	"github.com/pottom/hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/updater"
+	"github.com/pottom/hopscotch/internal/version"
+	"github.com/pottom/hopscotch/internal/vpn"
 )
 
 var (

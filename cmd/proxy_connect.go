@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 var proxyConnectCmd = &cobra.Command{

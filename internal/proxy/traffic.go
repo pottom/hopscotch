@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/tunnel"
 )
 
 // DirectCounter wraps net.Dialer to track bytes and active connections for

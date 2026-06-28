@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"hopscotch/internal/tunnel"
-	"hopscotch/internal/version"
+	"github.com/pottom/hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/version"
 )
 
 type healthResponse struct {

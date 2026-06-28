@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/tunnel"
 )
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {

@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"hopscotch/internal/netcheck"
-	"hopscotch/internal/tunnel"
-	"hopscotch/internal/version"
-	"hopscotch/internal/vpn"
+	"github.com/pottom/hopscotch/internal/netcheck"
+	"github.com/pottom/hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/version"
+	"github.com/pottom/hopscotch/internal/vpn"
 )
 
 // RouteJSON is a single routing rule in the /status response.

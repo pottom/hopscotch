@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"hopscotch/internal/tunnel"
-	"hopscotch/internal/vpn"
+	"github.com/pottom/hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/vpn"
 )
 
 // trafficEntry is the per-source payload sent over SSE each second.

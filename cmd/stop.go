@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/state"
+	"github.com/pottom/hopscotch/internal/state"
 )
 
 var stopCmd = &cobra.Command{

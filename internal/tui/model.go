@@ -19,10 +19,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	colorful "github.com/lucasb-eyer/go-colorful"
 
-	"hopscotch/internal/admin"
-	"hopscotch/internal/config"
-	"hopscotch/internal/msgs"
-	"hopscotch/internal/proxy"
+	"github.com/pottom/hopscotch/internal/admin"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/msgs"
+	"github.com/pottom/hopscotch/internal/proxy"
 )
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
@@ -403,8 +403,9 @@ func New(adminURL string, client *http.Client) Model {
 		mirrorGraph: true,
 		width:       80,
 		height:      24,
-		routeInput:  ti,
+		routeInput:   ti,
 		editPatInput: ep,
+		logLevel:     1, // default: INFO+
 	}
 }
 

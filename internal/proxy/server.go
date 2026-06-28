@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"hopscotch/pkg/socks5"
+	"github.com/pottom/hopscotch/pkg/socks5"
 )
 
 // Server wraps a SOCKS5 server with a routing-aware dialer.

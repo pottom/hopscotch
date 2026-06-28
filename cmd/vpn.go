@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/keychain"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/keychain"
 )
 
 var vpnCmd = &cobra.Command{

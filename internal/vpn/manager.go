@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/log"
 	"golang.org/x/sync/errgroup"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 // Manager owns all VPN connections and provides WaitConnected for tunnel dependency.
