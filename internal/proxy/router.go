@@ -63,19 +63,21 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 		port = ""
 	}
 
+	proto := inferProto(network, port)
+
 	label, dialer, tunnelStatus, pattern, err := r.resolve(ctx, host)
 	if err != nil {
 		if errors.Is(err, errBlocked) {
-			log.Warn("proxy blocked", "host", host, "proto", inferProto(port), "err", err)
+			log.Warn("proxy blocked", "host", host, "proto", proto, "err", err)
 		} else {
-			log.Warn("proxy refused", "host", host, "proto", inferProto(port), "err", err)
+			log.Warn("proxy refused", "host", host, "proto", proto, "err", err)
 		}
 		return nil, err
 	}
 
 	if tunnelStatus != "" {
 		log.Info("proxy",
-			"proto", inferProto(port),
+			"proto", proto,
 			"host", host,
 			"pattern", pattern,
 			"via", label,
@@ -83,7 +85,7 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 		)
 	} else {
 		log.Info("proxy",
-			"proto", inferProto(port),
+			"proto", proto,
 			"host", host,
 			"pattern", pattern,
 			"via", label,
@@ -92,17 +94,59 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 	return dialer.DialContext(ctx, network, addr)
 }
 
-// inferProto guesses the application protocol from the port number.
-func inferProto(port string) string {
+// inferProto returns a human-readable protocol string in the form
+// "name/network/port" (e.g. "ssh/tcp/22") when the port is well-known,
+// or "network/port" (e.g. "tcp/9999") otherwise.
+func inferProto(network, port string) string {
+	if network == "" {
+		network = "tcp"
+	}
+	name := knownPort(port)
+	if port == "" {
+		return network
+	}
+	if name != "" {
+		return name + "/" + network + "/" + port
+	}
+	return network + "/" + port
+}
+
+func knownPort(port string) string {
 	switch port {
-	case "443", "8443":
-		return "https"
+	case "21":
+		return "ftp"
+	case "22":
+		return "ssh"
+	case "25", "587":
+		return "smtp"
+	case "53":
+		return "dns"
 	case "80", "8080":
 		return "http"
-	case "":
-		return "tcp"
+	case "443", "8443":
+		return "https"
+	case "1433":
+		return "mssql"
+	case "3306":
+		return "mysql"
+	case "3389":
+		return "rdp"
+	case "5432":
+		return "postgres"
+	case "5672":
+		return "amqp"
+	case "6379":
+		return "redis"
+	case "6443":
+		return "k8s-api"
+	case "8883":
+		return "mqtt"
+	case "9200":
+		return "elasticsearch"
+	case "27017":
+		return "mongodb"
 	default:
-		return "tcp/" + port
+		return ""
 	}
 }
 
