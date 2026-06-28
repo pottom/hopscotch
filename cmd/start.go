@@ -17,6 +17,7 @@ import (
 	"hopscotch/internal/admin"
 	"hopscotch/internal/config"
 	"hopscotch/internal/proxy"
+	"hopscotch/internal/netcheck"
 	"hopscotch/internal/security"
 	"hopscotch/internal/state"
 	"hopscotch/internal/tunnel"
@@ -101,12 +102,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	mgr := tunnel.NewManager(cfg.Tunnels, vpnGater)
 	router := proxy.NewRouter(cfg.Proxy.Rules, mgr)
-	proxySrv := proxy.NewServer(cfg.Proxy.Bind, cfg.Proxy.Port, router)
+	proxySrv := proxy.NewServer(cfg.Proxy.Bind, cfg.Proxy.Port, router, cfg.Proxy.Username, cfg.Proxy.Password)
 	var vpnStatter admin.VPNStatter
 	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
 		vpnStatter = vpnMgr
 	}
-	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent)
+	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent, cfg, router, proxySrv.AuthEnabled())
 
 	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)
@@ -121,6 +122,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 		"tunnels", len(cfg.Tunnels),
 		"vpns", len(cfg.VPNs),
 	)
+	if cfg.Proxy.Username != "" {
+		log.Info("proxy auth enabled", "user", cfg.Proxy.Username)
+	}
+	if cfg.Admin.Username != "" {
+		log.Info("admin auth enabled", "user", cfg.Admin.Username)
+	}
 	config.LogConfig(cfg)
 
 	if updater.InContainer() {
@@ -144,6 +151,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
+
+	if cfg.Admin.ShowPublicIP {
+		netcheck.StartPublicIPWatcher(ctx, 60*time.Second)
+	}
 
 	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
 		g.Go(func() error { return vpnMgr.Run(ctx) })
@@ -174,9 +185,9 @@ func handleAlreadyRunning(pid int, stateMgr *state.Manager) error {
 	return killAndWait(pid, stateMgr)
 }
 
-// killAndWait sends SIGTERM to pid and waits up to 15 seconds for it to exit.
-// The generous timeout allows the VPN subprocess to receive SIGTERM, run the
-// vpnc-script disconnect (route/DNS cleanup), and exit cleanly before we give up.
+// killAndWait sends SIGTERM to pid and waits up to 5 seconds for a clean exit,
+// then escalates to SIGKILL. The grace period allows VPN subprocesses to run
+// vpnc-script disconnect (route/DNS cleanup) before we force-kill.
 func killAndWait(pid int, stateMgr *state.Manager) error {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
@@ -188,7 +199,7 @@ func killAndWait(pid int, stateMgr *state.Manager) error {
 		return fmt.Errorf("sending SIGTERM to %d: %w", pid, err)
 	}
 
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if !isRunning(pid) {
 			stateMgr.Remove()
@@ -198,7 +209,20 @@ func killAndWait(pid int, stateMgr *state.Manager) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	return fmt.Errorf("process %d did not stop within 15 seconds", pid)
+	log.Warn("graceful shutdown timed out, sending SIGKILL", "pid", pid)
+	if err := proc.Signal(syscall.SIGKILL); err != nil {
+		return fmt.Errorf("process %d did not stop and SIGKILL failed: %w", pid, err)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !isRunning(pid) {
+			stateMgr.Remove()
+			log.Info("previous instance killed")
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("process %d did not stop even after SIGKILL", pid)
 }
 
 func checkKeys(cfg *config.Config) error {

@@ -2,10 +2,12 @@ package tui
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
+	"net/http/cookiejar"
 	"regexp"
 	"sort"
 	"strings"
@@ -18,6 +20,8 @@ import (
 	colorful "github.com/lucasb-eyer/go-colorful"
 
 	"hopscotch/internal/admin"
+	"hopscotch/internal/config"
+	"hopscotch/internal/msgs"
 	"hopscotch/internal/proxy"
 )
 
@@ -36,6 +40,8 @@ var (
 	colorDisconnected = lipgloss.Color("#f87171")
 	colorMuted        = lipgloss.Color("#475569")
 	colorAccent       = lipgloss.Color("#38bdf8")
+	colorVPN          = lipgloss.Color("#2dd4bf")
+	colorDirect       = lipgloss.Color("#a78bfa")
 	colorText         = lipgloss.Color("#cbd5e1")
 	colorBright       = lipgloss.Color("#e2e8f0")
 
@@ -51,24 +57,14 @@ var (
 	styleBadgeDegraded = lipgloss.NewStyle().Foreground(colorConnecting).Bold(true)
 	styleBadgeOffline  = lipgloss.NewStyle().Foreground(colorDisconnected).Bold(true)
 
-	styleColName    = lipgloss.NewStyle().Foreground(colorBright).Width(26)
-	styleColHost    = lipgloss.NewStyle().Foreground(colorMuted).Width(22)
-	styleColVPN     = lipgloss.NewStyle().Width(14)
-	styleColPort    = lipgloss.NewStyle().Foreground(colorText).Width(7)
-	styleVPNColHost  = lipgloss.NewStyle().Foreground(colorMuted).Width(22) // HOST — same as TUNNEL HOST
-	styleVPNColIface = lipgloss.NewStyle().Foreground(colorMuted).Width(14) // IFACE — same width as TUNNEL VPN col
-	styleColStatus = lipgloss.NewStyle().Width(20)
-	styleColUptime = lipgloss.NewStyle().Foreground(colorText).Width(10)
-	styleColRecon  = lipgloss.NewStyle().Foreground(colorMuted).Width(5)
-	styleColBpsIn  = lipgloss.NewStyle().Foreground(colorBpsIn).Width(15)
-	styleColBpsOut = lipgloss.NewStyle().Foreground(colorBpsOut).Width(15)
-	styleColConn   = lipgloss.NewStyle().Foreground(colorText).Width(8)
-
 	styleTabActive   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleTabInactive = lipgloss.NewStyle().Foreground(colorMuted)
 
 	styleRouteNum     = lipgloss.NewStyle().Foreground(colorMuted).Width(4)
 	styleRoutePattern = lipgloss.NewStyle().Foreground(colorBright).Width(32)
+
+	styleEditNew     = lipgloss.NewStyle().Foreground(colorConnected)
+	styleEditDeleted = lipgloss.NewStyle().Foreground(colorDisconnected)
 )
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -80,7 +76,14 @@ const (
 	numTabs   = 3
 )
 
-const headerHeight = 3 // title+tabs · stats · blank
+// headerLines returns the number of header lines for the current terminal width.
+// Normally 3 (title+tabs · stats · blank); becomes 4 when the title meta wraps.
+func (m Model) headerLines() int {
+	if m.width > 0 && lipgloss.Width(m.titleLeft())+lipgloss.Width(m.renderTabBar())+6 > m.width {
+		return 4
+	}
+	return 3
+}
 
 const footerHeight = 2 // separator newline + hints+ports line
 
@@ -283,11 +286,41 @@ type ssePayload struct {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type statusMsg  admin.StatusResponse
-type sseMsg     ssePayload
-type logLineMsg string
-type errMsg     error
-type tickMsg    time.Time
+type statusMsg    admin.StatusResponse
+type sseMsg       ssePayload
+type logLineMsg   string
+type errMsg       error
+type tickMsg      time.Time
+type rulesSavedMsg   struct{}
+type rulesSaveErrMsg struct{ err error }
+
+// editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
+type editRule struct {
+	admin.RouteJSON
+	origPattern string // for change detection
+	origTunnel  string
+	origVia     string
+	isNew       bool
+	isDeleted   bool
+	isModified  bool
+	validErr    string
+}
+
+func (r *editRule) recomputeModified() {
+	r.isModified = r.Pattern != r.origPattern || r.Tunnel != r.origTunnel || r.Via != r.origVia
+}
+
+func (r *editRule) validate() {
+	if r.Pattern == "" {
+		r.validErr = "pattern is required"
+		return
+	}
+	if err := config.ValidatePattern(r.Pattern); err != nil {
+		r.validErr = err.Error()
+		return
+	}
+	r.validErr = ""
+}
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -296,12 +329,13 @@ type Model struct {
 	traffic map[string]*trafficWindow
 	err     error
 
-	adminURL string
-	sseURL   string
-	logURL   string
-	sseCh    chan ssePayload
-	logCh    chan string
-	done     chan struct{}
+	adminURL   string
+	sseURL     string
+	logURL     string
+	sseCh      chan ssePayload
+	logCh      chan string
+	done       chan struct{}
+	httpClient *http.Client
 
 	activeTab    int
 	logLines     []string
@@ -313,6 +347,15 @@ type Model struct {
 	routeInput   textinput.Model
 	routeFocused bool
 
+	// edit mode (Patterns tab)
+	editMode      bool
+	editRules     []editRule
+	editCursor    int
+	editPatInput  textinput.Model
+	editPatFocused bool
+	editError     string
+	editSaving    bool
+
 	tick    int
 	width   int
 	height  int
@@ -323,37 +366,52 @@ type Model struct {
 	ready       bool
 }
 
-func New(adminURL string) Model {
+// New creates a TUI Model using the provided pre-authenticated http.Client.
+// The caller (cmd/status.go) is responsible for resolving credentials and
+// performing login before calling New.
+func New(adminURL string, client *http.Client) Model {
 	base := strings.TrimSuffix(adminURL, "/status")
 	sseCh := make(chan ssePayload, 8)
 	logCh := make(chan string, 64)
 	done := make(chan struct{})
 
+	if client == nil {
+		jar, _ := cookiejar.New(nil)
+		client = &http.Client{Jar: jar}
+	}
+
 	ti := textinput.New()
-	ti.Placeholder = "hostname or URL…"
+	ti.Placeholder = "hostname or URL — Ctrl+N to clear"
 	ti.CharLimit = 256
 	ti.Width = 60
 
+	ep := textinput.New()
+	ep.Placeholder = "*.example.com or 10.0.0.0/8"
+	ep.CharLimit = 256
+	ep.Width = 32
+
 	return Model{
-		adminURL: adminURL,
-		sseURL:   base + "/traffic/stream",
-		logURL:   base + "/logs/stream",
-		sseCh:    sseCh,
-		logCh:    logCh,
-		done:     done,
+		adminURL:    adminURL,
+		sseURL:      base + "/traffic/stream",
+		logURL:      base + "/logs/stream",
+		sseCh:       sseCh,
+		logCh:       logCh,
+		done:        done,
+		httpClient:  client,
 		traffic:     make(map[string]*trafficWindow),
 		compact:     true,
 		mirrorGraph: true,
 		width:       80,
 		height:      24,
 		routeInput:  ti,
+		editPatInput: ep,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	go runSSE(m.sseURL, m.sseCh, m.done)
-	go runLogSSE(m.logURL, m.logCh, m.done)
-	return tea.Batch(fetchStatus(m.adminURL), tickEvery(), waitForSSE(m.sseCh), waitForLog(m.logCh))
+	go runSSE(m.sseURL, m.httpClient, m.sseCh, m.done)
+	go runLogSSE(m.logURL, m.httpClient, m.logCh, m.done)
+	return tea.Batch(fetchStatus(m.adminURL, m.httpClient), tickEvery(), waitForSSE(m.sseCh), waitForLog(m.logCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -362,7 +420,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		// When the route input is focused, only esc/enter escape; everything else goes to the input.
+		// Pattern edit input (inside edit mode) — most keys go to textinput.
+		if m.editPatFocused {
+			switch msg.String() {
+			case "esc":
+				m.editPatFocused = false
+				m.editPatInput.Blur()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			case "enter":
+				if m.editCursor < len(m.editRules) {
+					r := &m.editRules[m.editCursor]
+					r.Pattern = m.editPatInput.Value()
+					r.recomputeModified()
+					r.validate()
+				}
+				m.editPatFocused = false
+				m.editPatInput.Blur()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			default:
+				m.editPatInput, cmd = m.editPatInput.Update(msg)
+				// Live validation while typing
+				if m.editCursor < len(m.editRules) {
+					r := &m.editRules[m.editCursor]
+					r.Pattern = m.editPatInput.Value()
+					r.validate()
+				}
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, cmd
+			}
+		}
+
+		// URL tester input.
 		if m.routeFocused {
 			switch msg.String() {
 			case "esc", "enter":
@@ -374,6 +470,118 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.routeVP.SetContent(m.buildRoutesContent())
 				}
 				return m, cmd
+			}
+			return m, nil
+		}
+
+		// Edit mode row-selection keys.
+		if m.editMode {
+			switch msg.String() {
+			case "q", "Q", "ctrl+c":
+				close(m.done)
+				return m, tea.Quit
+			case "esc":
+				m.editMode = false
+				m.editError = ""
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesContent())
+				}
+				return m, nil
+			case "ctrl+s":
+				if !m.editSaving {
+					m.editSaving = true
+					m.editError = ""
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+					return m, m.saveRulesCmd()
+				}
+				return m, nil
+			case "up", "k":
+				if m.editCursor > 0 {
+					m.editCursor--
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "down", "j":
+				if m.editCursor < len(m.editRules)-1 {
+					m.editCursor++
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "shift+up":
+				if m.editCursor > 0 {
+					m.editRules[m.editCursor-1], m.editRules[m.editCursor] = m.editRules[m.editCursor], m.editRules[m.editCursor-1]
+					m.editCursor--
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "shift+down":
+				if m.editCursor < len(m.editRules)-1 {
+					m.editRules[m.editCursor], m.editRules[m.editCursor+1] = m.editRules[m.editCursor+1], m.editRules[m.editCursor]
+					m.editCursor++
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "d", "D":
+				if m.editCursor < len(m.editRules) {
+					r := &m.editRules[m.editCursor]
+					if r.isNew {
+						// New row: remove immediately (no history to preserve)
+						m.editRules = append(m.editRules[:m.editCursor], m.editRules[m.editCursor+1:]...)
+						if m.editCursor >= len(m.editRules) && m.editCursor > 0 {
+							m.editCursor--
+						}
+					} else {
+						r.isDeleted = !r.isDeleted // toggle soft-delete
+					}
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+				}
+				return m, nil
+			case "a": // append: insert new row BELOW cursor
+				m.editInsertRule(m.editCursor + 1)
+				return m, textinput.Blink
+			case "i": // insert: insert new row ABOVE cursor
+				m.editInsertRule(m.editCursor)
+				return m, textinput.Blink
+			case "e", "E", "enter":
+				if m.editCursor < len(m.editRules) && !m.editRules[m.editCursor].isDeleted {
+					m.editPatInput.SetValue(m.editRules[m.editCursor].Pattern)
+					m.editPatFocused = true
+					m.editPatInput.Focus()
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+					return m, textinput.Blink
+				}
+				return m, nil
+			case "v", "V":
+				m.editCycleVia()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Ctrl+N: clear URL tester on Patterns tab.
+		if msg.String() == "ctrl+n" && m.activeTab == tabRoutes {
+			m.routeInput.SetValue("")
+			m.routeInput.Blur()
+			m.routeFocused = false
+			if m.routeVPReady {
+				m.routeVP.SetContent(m.buildRoutesContent())
 			}
 			return m, nil
 		}
@@ -401,6 +609,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p", "P":
 			m.activeTab = tabRoutes
 			m = m.resizeViewports()
+			return m, nil
+
+		case "e", "E":
+			if m.activeTab == tabRoutes {
+				m.editMode = true
+				m.editError = ""
+				m.editSaving = false
+				m.editCursor = 0
+				m.editRules = make([]editRule, len(m.status.Routes))
+				for i, r := range m.status.Routes {
+					m.editRules[i] = editRule{
+						RouteJSON:   r,
+						origPattern: r.Pattern,
+						origTunnel:  r.Tunnel,
+						origVia:     r.Via,
+					}
+				}
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			}
 			return m, nil
 
 		case "/":
@@ -448,6 +678,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m = m.resizeViewports()
 
+	case rulesSavedMsg:
+		m.editSaving = false
+		m.editMode = false
+		m.editError = ""
+		if m.routeVPReady {
+			m.routeVP.SetContent(m.buildRoutesContent())
+		}
+
+	case rulesSaveErrMsg:
+		m.editSaving = false
+		m.editError = msg.err.Error()
+		if m.routeVPReady {
+			m.routeVP.SetContent(m.buildRoutesEditContent())
+		}
+
+	case loginRequiredMsg:
+		m.err = fmt.Errorf("unauthorized — use: hopscotch status --username USER --password PASS")
+		return m, tea.Quit
+
 	case statusMsg:
 		m.status = admin.StatusResponse(msg)
 		m.err = nil
@@ -463,7 +712,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.vpReady {
 			m.vp.SetContent(m.buildStatusContent())
 		}
-		if m.routeVPReady {
+		if m.routeVPReady && !m.editMode {
 			m.routeVP.SetContent(m.buildRoutesContent())
 		}
 
@@ -515,7 +764,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.vpReady {
 			m.vp.SetContent(m.buildStatusContent())
 		}
-		return m, tea.Batch(fetchStatus(m.adminURL), tickEvery())
+		return m, tea.Batch(fetchStatus(m.adminURL, m.httpClient), tickEvery())
 	}
 
 	return m, cmd
@@ -524,7 +773,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // resizeViewports recalculates both viewports for the current terminal size
 // and active tab. Called on WindowSizeMsg and when switching tabs.
 func (m Model) resizeViewports() Model {
-	vpH := m.height - headerHeight - footerHeight
+	vpH := m.height - m.headerLines() - footerHeight
 	if vpH < 1 {
 		vpH = 1
 	}
@@ -582,6 +831,15 @@ func (m Model) View() string {
 	if m.err != nil {
 		return styleDisconnected.Render("\n  hopscotch is not running") + "\n"
 	}
+	if m.width < 80 {
+		msg := "↔  Terminal too narrow — please resize to at least 80 columns"
+		pad := strings.Repeat("\n", max(0, m.height/2))
+		indentW := (m.width - lipgloss.Width(msg)) / 2
+		if indentW < 2 {
+			indentW = 2
+		}
+		return pad + styleMuted.Render(strings.Repeat(" ", indentW)+msg) + "\n"
+	}
 
 	vp := m.vp.View()
 	switch m.activeTab {
@@ -595,32 +853,64 @@ func (m Model) View() string {
 
 // ── Header renderers ──────────────────────────────────────────────────────────
 
-func (m Model) renderTitleLine() string {
+// titleLeft returns the rendered meta portion of the title line (badge, uplink, PID, uptime).
+func (m Model) titleLeft() string {
 	versionStr := m.status.Version
 	if v := m.status.LatestVersion; v != "" {
 		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
-	uplinkStr := styleMuted.Render("○ no link")
+	uplinkStr := lipgloss.NewStyle().Foreground(colorDisconnected).Render("○ no link")
 	if m.status.Uplink {
 		uplinkLabel := m.status.UplinkIface
 		if uplinkLabel == "" {
 			uplinkLabel = "link"
 		}
-		uplinkStr = styleConnected.Render("● " + uplinkLabel)
+		label := "● " + uplinkLabel
+		if m.status.UplinkIP != "" {
+			label += " " + m.status.UplinkIP
+		}
+		uplinkStr = styleConnected.Render(label)
 	}
-	left := fmt.Sprintf("  %s  %s  %s  %s  %s",
-		styleHeader.Render("hopscotch "+versionStr),
+	var internetStr string
+	if m.status.PublicIP != "" {
+		internetStr = "  " + styleConnected.Render("⊕ internet "+m.status.PublicIP)
+	} else if m.status.Uplink && !m.status.Internet {
+		internetStr = "  " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("○ no internet")
+	}
+	return fmt.Sprintf("%s  %s%s  %s  %s",
 		renderBadge(m.status.Status),
 		uplinkStr,
+		internetStr,
 		styleMuted.Render(fmt.Sprintf("PID %d", m.status.PID)),
 		styleMuted.Render("up "+m.status.Uptime),
 	)
-	right := m.renderTabBar() + "  "
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 2 {
-		gap = 2
+}
+
+func (m Model) renderTitleLine() string {
+	versionStr := m.status.Version
+	if v := m.status.LatestVersion; v != "" {
+		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
-	return left + strings.Repeat(" ", gap) + right + "\n"
+	appStr := "  " + styleHeader.Render("hopscotch "+versionStr)
+	meta    := m.titleLeft()
+	right   := m.renderTabBar() + "  "
+	rightW  := lipgloss.Width(right)
+
+	fullLeft := appStr + "  " + meta
+	if lipgloss.Width(fullLeft)+rightW <= m.width {
+		// Single line: everything fits.
+		gap := m.width - lipgloss.Width(fullLeft) - rightW
+		if gap < 1 {
+			gap = 1
+		}
+		return fullLeft + strings.Repeat(" ", gap) + right + "\n"
+	}
+	// Two lines: app name + tabs on line 1, meta on line 2.
+	gap := m.width - lipgloss.Width(appStr) - rightW
+	if gap < 1 {
+		gap = 1
+	}
+	return appStr + strings.Repeat(" ", gap) + right + "\n" + "  " + meta + "\n"
 }
 
 func (m Model) renderStatsLine() string {
@@ -663,41 +953,63 @@ func (m Model) renderHeader() string {
 	case tabStatus:
 		fmt.Fprintf(&b, "\n")
 	case tabRoutes:
-		fmt.Fprintf(&b, "\n")
-		// Input line — styled by focus state.
-		var inputPrefix string
-		if m.routeFocused {
-			inputPrefix = styleTabActive.Render("/ ")
-		} else {
-			inputPrefix = styleMuted.Render("/ ")
-		}
-		fmt.Fprintf(&b, "  %s%s\n", inputPrefix, m.routeInput.View())
-
-		// Result line.
-		matchIdx := m.findRouteMatch()
-		if m.routeInput.Value() == "" {
-			fmt.Fprintf(&b, "  %s\n", styleMuted.Render("type a hostname or URL to test routing"))
-		} else if matchIdx >= 0 {
-			r := m.status.Routes[matchIdx]
-			via := r.Tunnel
-			if via == "" {
-				via = r.Via
+		if m.editMode {
+			// Edit mode header — hints live in the footer (like vim's mode line).
+			fmt.Fprintf(&b, "\n")
+			if m.editSaving {
+				fmt.Fprintf(&b, "  %s\n", styleConnecting.Render("saving…"))
+			} else {
+				fmt.Fprintf(&b, "\n")
 			}
-			fmt.Fprintf(&b, "  %s\n",
-				styleConnected.Render(fmt.Sprintf("✓ rule %d → %s", matchIdx+1, via)),
+			if m.editError != "" {
+				fmt.Fprintf(&b, "  %s\n", styleDisconnected.Render("✗ "+m.editError))
+			} else {
+				fmt.Fprintf(&b, "\n")
+			}
+			fmt.Fprintf(&b, "\n")
+			fmt.Fprintf(&b, "  %s%s%s\n",
+				styleRouteNum.Render("#"),
+				styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
+				lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
 			)
+			fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 		} else {
-			fmt.Fprintf(&b, "  %s\n", styleMuted.Render("no rule matched → direct (fallback)"))
-		}
+			fmt.Fprintf(&b, "\n")
+			// Input line — styled by focus state.
+			var inputPrefix string
+			if m.routeFocused {
+				inputPrefix = styleTabActive.Render("/ ")
+			} else {
+				inputPrefix = styleMuted.Render("/ ")
+			}
+			fmt.Fprintf(&b, "  %s%s\n", inputPrefix, m.routeInput.View())
 
-		fmt.Fprintf(&b, "\n")
-		fmt.Fprintf(&b, "  %s%s%s%s\n",
-			styleRouteNum.Render("#"),
-			styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
-			lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
-			styleMuted.Render("STATUS"),
-		)
-		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
+			// Result line — show routing hint when input is empty.
+			matchIdx := m.findRouteMatch()
+			if m.routeInput.Value() == "" {
+				fmt.Fprintf(&b, "  %s\n", styleMuted.Render("top to bottom · first match wins · unmatched → direct"))
+			} else if matchIdx >= 0 {
+				r := m.status.Routes[matchIdx]
+				via := r.Tunnel
+				if via == "" {
+					via = r.Via
+				}
+				fmt.Fprintf(&b, "  %s\n",
+					styleConnected.Render(fmt.Sprintf("✓ rule %d → %s", matchIdx+1, via)),
+				)
+			} else {
+				fmt.Fprintf(&b, "  %s\n", styleMuted.Render("no rule matched → direct (fallback)"))
+			}
+
+			fmt.Fprintf(&b, "\n")
+			fmt.Fprintf(&b, "  %s%s%s%s\n",
+				styleRouteNum.Render("#"),
+				styleRoutePattern.Foreground(colorMuted).Render("PATTERN"),
+				lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render("VIA"),
+				styleMuted.Render("STATUS"),
+			)
+			fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
+		}
 	default:
 		levelLabel := logLevelLabels[m.logLevel]
 		fmt.Fprintf(&b, "\n")
@@ -711,10 +1023,12 @@ func (m Model) renderHeader() string {
 func (m Model) renderFooter() string {
 	hints := "q quit  tab/s/l/p switch  ↑↓/jk scroll"
 	if m.activeTab == tabRoutes {
-		if m.routeFocused {
+		if m.editMode {
+			hints = "↑↓/jk=cursor  shift+↑↓=reorder  e/enter=edit  v=via  i=ins↑  a=add↓  d=del  ctrl+s=save  esc=cancel"
+		} else if m.routeFocused {
 			hints += "  esc unfocus"
 		} else {
-			hints += "  / test URL"
+			hints += "  / test URL  e edit"
 		}
 	}
 	if m.activeTab == tabLogs {
@@ -740,17 +1054,45 @@ func (m Model) renderFooter() string {
 		hints += "  ↓"
 	}
 
-	ports := fmt.Sprintf("PROXY :%d  ADMIN :%d", m.status.ProxyPort, m.status.AdminPort)
-	left := styleMuted.Render(hints)
-	right := styleMuted.Render(ports)
+	proxyStr := fmt.Sprintf("PROXY %s:%d", m.status.ProxyBind, m.status.ProxyPort)
+	if m.status.ProxyAuthEnabled {
+		proxyStr += " ⚿"
+	}
+	adminStr := fmt.Sprintf("ADMIN %s:%d", m.status.AdminBind, m.status.AdminPort)
+	if m.status.AdminAuthEnabled {
+		adminStr += " ⚿"
+	}
+	ports := proxyStr + "  " + adminStr
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
+	right := styleMuted.Render(ports)
+	rightW := lipgloss.Width(right)
+
+	editLabel := ""
+	if m.editMode {
+		editLabel = styleTabActive.Bold(true).Render("-- EDIT --") + "  "
+	}
+	// Reserve room for 2-char indent + editLabel + 2-char gap + right.
+	maxHintsW := m.width - 2 - lipgloss.Width(editLabel) - 2 - rightW
+	if maxHintsW < 0 {
+		maxHintsW = 0
+	}
+	hintsRunes := []rune(hints)
+	if maxHintsW > 0 && lipgloss.Width(hints) > maxHintsW {
+		for len(hintsRunes) > 0 && lipgloss.Width(string(hintsRunes)) > maxHintsW-1 {
+			hintsRunes = hintsRunes[:len(hintsRunes)-1]
+		}
+		hints = string(hintsRunes) + "…"
+	}
+	leftStr := editLabel + styleMuted.Render(hints)
+
+	gap := m.width - 2 - lipgloss.Width(leftStr) - rightW
 	if gap < 2 {
 		gap = 2
 	}
 
-	return "\n  " + left + strings.Repeat(" ", gap) + right + "\n"
+	return "\n  " + leftStr + strings.Repeat(" ", gap) + right
 }
+
 
 // findRouteMatch returns the index of the first rule matching the input value, or -1.
 func (m Model) findRouteMatch() int {
@@ -802,9 +1144,12 @@ func (m Model) buildRoutesContent() string {
 
 		var viaRendered string
 		var statusStr string
-		if via == "direct" || via == "" {
-			viaRendered = lipgloss.NewStyle().Foreground(colorMuted).Width(22).Render(via)
-		} else {
+		switch {
+		case via == config.ViaDirect || via == "":
+			viaRendered = lipgloss.NewStyle().Foreground(colorDirect).Width(22).Render(via)
+		case via == config.ViaBlock:
+			viaRendered = lipgloss.NewStyle().Foreground(colorDisconnected).Width(22).Render(via)
+		default:
 			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
 			if t, ok := m.status.Tunnels[via]; ok {
 				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures)
@@ -822,26 +1167,326 @@ func (m Model) buildRoutesContent() string {
 	return b.String()
 }
 
-// buildStatusContent renders the scrollable content for the status viewport.
-// fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
-const fixedColsWidth    = 2 + 26 + 22 + 14 + 7 + 20 + 10 + 5 + 15 + 15 + 8 // = 144
-const vpnFixedColsWidth = 2 + 26 + 29 + 14 + 20 + 10 + 5              // = 106
+// sortedTunnelNames returns tunnel names from the current status, sorted.
+func (m Model) sortedTunnelNames() []string {
+	names := make([]string, 0, len(m.status.Tunnels))
+	for n := range m.status.Tunnels {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// editInsertRule inserts a new empty rule at idx, sets cursor there, opens pattern input.
+func (m *Model) editInsertRule(idx int) {
+	if idx > len(m.editRules) {
+		idx = len(m.editRules)
+	}
+	newRule := editRule{isNew: true}
+	tail := make([]editRule, len(m.editRules[idx:]))
+	copy(tail, m.editRules[idx:])
+	m.editRules = append(m.editRules[:idx], append([]editRule{newRule}, tail...)...)
+	m.editCursor = idx
+	m.editPatInput.SetValue("")
+	m.editPatFocused = true
+	m.editPatInput.Focus()
+	if m.routeVPReady {
+		m.routeVP.SetContent(m.buildRoutesEditContent())
+	}
+}
+
+// editCycleVia cycles the via of the currently selected edit rule through
+// "direct" → tunnel names → "block".
+func (m *Model) editCycleVia() {
+	if m.editCursor >= len(m.editRules) {
+		return
+	}
+	r := &m.editRules[m.editCursor]
+	options := append([]string{config.ViaDirect}, append(m.sortedTunnelNames(), config.ViaBlock)...)
+	current := r.Via
+	if current == "" {
+		current = r.Tunnel
+	}
+	if current == "" {
+		current = config.ViaDirect
+	}
+	for i, opt := range options {
+		if opt == current {
+			next := options[(i+1)%len(options)]
+			switch next {
+			case config.ViaDirect:
+				r.Tunnel = ""
+				r.Via = config.ViaDirect
+			case config.ViaBlock:
+				r.Tunnel = ""
+				r.Via = config.ViaBlock
+			default:
+				r.Tunnel = next
+				r.Via = ""
+			}
+			r.recomputeModified()
+			return
+		}
+	}
+	r.Tunnel = ""
+	r.Via = config.ViaDirect
+	r.recomputeModified()
+}
+
+// buildRoutesEditContent renders the editable rule table for the routes viewport.
+func (m Model) buildRoutesEditContent() string {
+	if len(m.editRules) == 0 {
+		return "\n" + styleMuted.Render("  no rules — press a to add") + "\n"
+	}
+
+	var b strings.Builder
+	for i, r := range m.editRules {
+		via := r.Tunnel
+		if via == "" {
+			via = r.Via
+		}
+		if via == "" {
+			via = config.ViaDirect
+		}
+
+		selected := m.editCursor == i
+
+		// Prefix: cursor glyph with colour indicating row state
+		var prefix string
+		switch {
+		case selected && r.isNew:
+			prefix = styleEditNew.Bold(true).Render("> ")
+		case selected && r.isDeleted:
+			prefix = styleEditDeleted.Bold(true).Render("> ")
+		case selected:
+			prefix = styleTabActive.Render("> ")
+		case r.isNew:
+			prefix = styleEditNew.Render("+ ")
+		case r.isDeleted:
+			prefix = styleEditDeleted.Render("- ")
+		default:
+			prefix = "  "
+		}
+
+		// Pattern
+		var patRendered string
+		switch {
+		case selected && m.editPatFocused:
+			patRendered = styleRoutePattern.Render(m.editPatInput.View())
+		case r.isDeleted:
+			patRendered = styleRoutePattern.Foreground(colorDisconnected).Strikethrough(true).Render(r.Pattern)
+		case r.isNew:
+			patRendered = styleRoutePattern.Foreground(colorConnected).Render(r.Pattern)
+		case r.isModified && selected:
+			patRendered = styleRoutePattern.Foreground(colorConnecting).Render(r.Pattern)
+		case r.isModified:
+			patRendered = styleRoutePattern.Foreground(colorConnecting).Render(r.Pattern)
+		case selected:
+			patRendered = styleRoutePattern.Foreground(colorAccent).Render(r.Pattern)
+		default:
+			patRendered = styleRoutePattern.Render(r.Pattern)
+		}
+
+		// Via
+		var viaRendered string
+		viaW := lipgloss.NewStyle().Width(22)
+		switch {
+		case r.isDeleted:
+			viaRendered = viaW.Foreground(colorDisconnected).Strikethrough(true).Render(via)
+		case via == config.ViaBlock:
+			viaRendered = viaW.Foreground(colorDisconnected).Render(via)
+		case r.isNew:
+			viaRendered = viaW.Foreground(colorConnected).Render(via)
+		case r.isModified:
+			viaRendered = viaW.Foreground(colorConnecting).Render(via)
+		case r.Tunnel != "":
+			viaRendered = viaW.Foreground(colorAccent).Render(via)
+		default: // "direct"
+			viaRendered = viaW.Foreground(colorDirect).Render(via)
+		}
+
+		// Inline validation error — same line, after via, truncated to fit
+		var errStr string
+		if r.validErr != "" && !r.isDeleted {
+			// 2 prefix + 4 num + 32 pattern + 22 via = 60 used; leave 4 margin
+			avail := m.width - 60 - 4
+			if avail > 6 {
+				msg := "✗ " + r.validErr
+				if lipgloss.Width(msg) > avail {
+					msg = string([]rune(msg)[:avail-1]) + "…"
+				}
+				errStr = lipgloss.NewStyle().Foreground(colorDisconnected).Render(msg)
+			}
+		}
+
+		fmt.Fprintf(&b, "%s%s%s%s%s\n",
+			prefix,
+			styleRouteNum.Render(fmt.Sprintf("%d", i+1)),
+			patRendered,
+			viaRendered,
+			errStr,
+		)
+	}
+	return b.String()
+}
+
+// saveRulesCmd returns a Cmd that PUTs the current editRules to the admin API.
+func (m Model) saveRulesCmd() tea.Cmd {
+	var rules []admin.RouteJSON
+	for _, r := range m.editRules {
+		if !r.isDeleted {
+			rules = append(rules, r.RouteJSON)
+		}
+	}
+	if rules == nil {
+		rules = []admin.RouteJSON{}
+	}
+	rulesURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/rules"
+	client := m.httpClient
+	return func() tea.Msg {
+		body, err := json.Marshal(map[string]interface{}{"rules": rules})
+		if err != nil {
+			return rulesSaveErrMsg{err}
+		}
+		req, err := http.NewRequest(http.MethodPut, rulesURL, bytes.NewReader(body))
+		if err != nil {
+			return rulesSaveErrMsg{err}
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := client.Do(req)
+		if err != nil {
+			return rulesSaveErrMsg{err}
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			var msg [256]byte
+			n, _ := res.Body.Read(msg[:])
+			return rulesSaveErrMsg{fmt.Errorf("%s", strings.TrimSpace(string(msg[:n])))}
+		}
+		return rulesSavedMsg{}
+	}
+}
+
+// Fixed column widths that never change with terminal size.
+const (
+	colIndent  = 2
+	colVPNW    = 14 // VPN label col in tunnel rows; also IFACE col in VPN rows
+	colPortW   = 7
+	colStatusW = 20
+	colUptimeW = 10
+	colRCW     = 5
+	colBpsInW  = 15
+	colBpsOutW = 15
+	colConnW   = 8
+	colNameMin = 10
+	colHostMin = 10
+)
+
+// colLayout holds the computed visible-column set and elastic widths for one render pass.
+type colLayout struct {
+	nameW      int
+	hostW      int
+	showHost   bool
+	showPort   bool
+	showUptime bool
+	showRC     bool
+	showBPS    bool // bpsIn + bpsOut together
+	showConn   bool
+}
+
+// layoutTunnelCols derives which columns to show and name/host widths for tunnel rows.
+//
+//	w ≥ 144 → all cols, name+host elastic
+//	w ≥ 130 → drop conn
+//	w ≥ 110 → drop conn + bps
+//	w ≥  98 → drop conn + bps + rc
+//	w ≥  85 → drop conn + bps + rc + port
+//	w ≥  70 → drop conn + bps + rc + port + uptime
+//	w  < 70 → name + vpn + status only
+func layoutTunnelCols(width int) colLayout {
+	var l colLayout
+	l.showHost   = width >= 70
+	l.showPort   = width >= 85
+	l.showUptime = width >= 70
+	l.showRC     = width >= 98
+	l.showBPS    = width >= 110
+	l.showConn   = width >= 144
+
+	fixed := colIndent + colVPNW + colStatusW
+	if l.showPort   { fixed += colPortW }
+	if l.showUptime { fixed += colUptimeW }
+	if l.showRC     { fixed += colRCW }
+	if l.showBPS    { fixed += colBpsInW + colBpsOutW }
+	if l.showConn   { fixed += colConnW }
+
+	remaining := width - fixed
+	if l.showHost {
+		l.nameW = remaining * 55 / 100
+		if l.nameW < colNameMin {
+			l.nameW = colNameMin
+		}
+		l.hostW = remaining - l.nameW
+		if l.hostW < colHostMin {
+			l.hostW = colHostMin
+			l.nameW = remaining - l.hostW
+			if l.nameW < colNameMin {
+				l.nameW = colNameMin
+			}
+		}
+	} else {
+		l.nameW = remaining
+		if l.nameW < colNameMin {
+			l.nameW = colNameMin
+		}
+	}
+	return l
+}
+
+// layoutVPNCols derives column layout for VPN rows (no bps/conn).
+// nameW/hostW are taken from the tunnel layout so the two sections stay column-aligned.
+func layoutVPNCols(width int, tl colLayout) colLayout {
+	return colLayout{
+		nameW:      tl.nameW,
+		hostW:      tl.hostW,
+		showHost:   width >= 70,
+		showPort:   width >= 85,
+		showUptime: width >= 70,
+		showRC:     width >= 98,
+	}
+}
 
 func (m Model) sectionSep() string {
 	return "  " + styleMuted.Render(strings.Repeat("─", max(m.width-4, 10))) + "\n"
 }
 
 func (m Model) buildStatusContent() string {
+	tl := layoutTunnelCols(m.width)
+	vl := layoutVPNCols(m.width, tl)
+
 	sparkW := m.width - 4
 	if sparkW < 10 {
 		sparkW = 10
 	}
 
-	// Remaining space after fixed columns for the reason field.
-	reasonW := m.width - fixedColsWidth - 2
-	if reasonW < 8 {
-		reasonW = 0
-	}
+	// Per-render styles — widths computed from terminal size.
+	tName   := lipgloss.NewStyle().Foreground(colorBright).Width(tl.nameW)
+	tHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(tl.hostW)
+	tVPN    := lipgloss.NewStyle().Width(colVPNW)
+	tPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	tStatus := lipgloss.NewStyle().Width(colStatusW)
+	tUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
+	tRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
+	tBpsIn  := lipgloss.NewStyle().Foreground(colorBpsIn).Width(colBpsInW)
+	tBpsOut := lipgloss.NewStyle().Foreground(colorBpsOut).Width(colBpsOutW)
+	tConn   := lipgloss.NewStyle().Foreground(colorText).Width(colConnW)
+
+	vName   := lipgloss.NewStyle().Foreground(colorBright).Width(vl.nameW)
+	vHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(vl.hostW)
+	vIface  := lipgloss.NewStyle().Foreground(colorMuted).Width(colVPNW)
+	vPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	vStatus := lipgloss.NewStyle().Width(colStatusW)
+	vUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
+	vRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
 
 	hdr := func(s lipgloss.Style, label string) string {
 		return s.Foreground(colorMuted).Render(label)
@@ -851,24 +1496,15 @@ func (m Model) buildStatusContent() string {
 
 	// ── VPN section ───────────────────────────────────────────────────────────
 	if len(m.status.VPNs) > 0 {
-		vpnReasonW := m.width - vpnFixedColsWidth - 2
-		if vpnReasonW < 8 {
-			vpnReasonW = 0
-		}
-		vpnReasonHdr := ""
-		if vpnReasonW >= 8 {
-			vpnReasonHdr = hdr(styleMuted, "MESSAGE")
-		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
-			hdr(styleColName, "VPN"),
-			hdr(styleVPNColHost, "HOST"),
-			hdr(styleVPNColIface, "IFACE"),
-			hdr(styleColPort, ""),
-			hdr(styleColStatus, "STATUS"),
-			hdr(styleColUptime, "UPTIME"),
-			hdr(styleColRecon, "RC"),
-			vpnReasonHdr,
-		)
+		b.WriteString("  ")
+		b.WriteString(hdr(vName, "VPN"))
+		if vl.showHost   { b.WriteString(hdr(vHost, "HOST")) }
+		b.WriteString(hdr(vIface, "IFACE"))
+		if vl.showPort   { b.WriteString(hdr(vPort, "")) }
+		b.WriteString(hdr(vStatus, "STATUS"))
+		if vl.showUptime { b.WriteString(hdr(vUptime, "UPTIME")) }
+		if vl.showRC     { b.WriteString(hdr(vRC, "RC")) }
+		b.WriteString("\n")
 		b.WriteString(m.sectionSep())
 
 		vpnNames := make([]string, 0, len(m.status.VPNs))
@@ -891,59 +1527,44 @@ func (m Model) buildStatusContent() string {
 				uptime = fmtDuration(time.Duration(v.UptimeSeconds) * time.Second)
 			}
 
-			vpnReasonStr := ""
-			if vpnReasonW > 0 {
-				reason := "—"
-				var reasonStyle lipgloss.Style
-				if v.LastError != "" && (v.State != "connected" || isVPNProgressMsg(v.LastError)) {
-					reason = v.LastError
-					if isVPNProgressMsg(v.LastError) {
-						reasonStyle = styleConnecting
-					} else {
-						reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
-					}
-				} else {
-					reasonStyle = styleMuted
-				}
-				vpnReasonStr = renderReason(reason, reasonStyle, vpnReasonW, vpnFixedColsWidth+2)
-			}
-
 			iface := v.TunIface
 			if iface == "" {
 				iface = "—"
 			}
-			fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s\n",
-				styleColName.Render(name),
-				styleVPNColHost.Render(v.Host),
-				styleVPNColIface.Render(iface),
-				styleColPort.Render(""),
-				styleColStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)),
-				styleColUptime.Render(uptime),
-				styleColRecon.Render(fmt.Sprintf("%d", v.Reconnects)),
-				vpnReasonStr,
-			)
+
+			b.WriteString("  ")
+			b.WriteString(vName.Foreground(colorVPN).Render(name))
+			if vl.showHost   { b.WriteString(vHost.Render(v.Host)) }
+			b.WriteString(vIface.Render(iface))
+			if vl.showPort   { b.WriteString(vPort.Render("")) }
+			b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)))
+			if vl.showUptime { b.WriteString(vUptime.Render(uptime)) }
+			if vl.showRC     { b.WriteString(vRC.Render(fmt.Sprintf("%d", v.Reconnects))) }
+			b.WriteString("\n")
+
+			if v.LastError != "" && v.State != msgs.StatusConnected {
+				if isVPNProgressMsg(v.LastError) {
+					b.WriteString(renderErrMsg("◌ ", v.LastError, styleConnecting, m.width) + "\n")
+				} else {
+					b.WriteString(renderErrMsg("└ ✗ ", v.LastError, lipgloss.NewStyle().Foreground(colorDisconnected), m.width) + "\n")
+				}
+			}
 		}
 		b.WriteString("\n")
 	}
 
 	// ── Tunnel section ────────────────────────────────────────────────────────
-	reasonHdr := ""
-	if reasonW >= 8 {
-		reasonHdr = hdr(styleMuted, "MESSAGE")
-	}
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s%s\n",
-		hdr(styleColName, "TUNNEL"),
-		hdr(styleColHost, "HOST"),
-		hdr(styleColVPN, "VPN"),
-		hdr(styleColPort, "PORT"),
-		hdr(styleColStatus, "STATUS"),
-		hdr(styleColUptime, "UPTIME"),
-		hdr(styleColRecon, "RC"),
-		hdr(styleColBpsIn, "↓"),
-		hdr(styleColBpsOut, "↑"),
-		hdr(styleColConn, "CONN"),
-		reasonHdr,
-	)
+	b.WriteString("  ")
+	b.WriteString(hdr(tName, "TUNNEL"))
+	if tl.showHost   { b.WriteString(hdr(tHost, "HOST")) }
+	b.WriteString(hdr(tVPN, "VPN"))
+	if tl.showPort   { b.WriteString(hdr(tPort, "PORT")) }
+	b.WriteString(hdr(tStatus, "STATUS"))
+	if tl.showUptime { b.WriteString(hdr(tUptime, "UPTIME")) }
+	if tl.showRC     { b.WriteString(hdr(tRC, "RC")) }
+	if tl.showBPS    { b.WriteString(hdr(tBpsIn, "↓")); b.WriteString(hdr(tBpsOut, "↑")) }
+	if tl.showConn   { b.WriteString(hdr(tConn, "CONN")) }
+	b.WriteString("\n")
 	b.WriteString(m.sectionSep())
 
 	names := make([]string, 0, len(m.status.Tunnels))
@@ -971,58 +1592,63 @@ func (m Model) buildStatusContent() string {
 			active = w.active
 		}
 
-		reasonStr := ""
-		if reasonW > 0 {
-			reason := "—"
-			var reasonStyle lipgloss.Style
-			if t.LastError != "" && t.Status != "connected" {
-				reason = t.LastError
-				if strings.HasPrefix(t.LastError, "waiting for VPN") ||
-					t.LastError == "waiting for network" {
-					reasonStyle = styleConnecting // amber — informational, not an error
-				} else {
-					reasonStyle = lipgloss.NewStyle().Foreground(colorDisconnected)
-				}
-			} else {
-				reasonStyle = styleMuted
+		// error sub-line: propagate VPN root cause so "waiting for VPN: X" shows X's actual reason.
+		dispErr := t.LastError
+		if strings.HasPrefix(t.LastError, msgs.WaitingForVPNPrefix) {
+			vpnName := strings.TrimPrefix(t.LastError, msgs.WaitingForVPNPrefix)
+			if v, ok := m.status.VPNs[vpnName]; ok && v.LastError != "" {
+				dispErr = v.LastError
 			}
-			// fixedColsWidth+4 = 2 (row indent) + columns + 2 (separator before reason)
-			reasonStr = renderReason(reason, reasonStyle, reasonW, fixedColsWidth+2)
 		}
+		errLine := ""
+		if dispErr != "" && t.Status != msgs.StatusConnected {
+			if strings.HasPrefix(dispErr, msgs.WaitingForVPNPrefix) || dispErr == msgs.WaitingForNetwork {
+				errLine = renderErrMsg("◌ ", dispErr, styleConnecting, m.width)
+			} else {
+				errLine = renderErrMsg("└ ✗ ", dispErr, lipgloss.NewStyle().Foreground(colorDisconnected), m.width)
+			}
+		}
+
 		var tunnelStatusStr string
-		if strings.HasPrefix(t.LastError, "waiting for VPN") || strings.HasPrefix(t.LastError, "waiting for network") {
+		if strings.HasPrefix(t.LastError, msgs.WaitingForVPNPrefix) || t.LastError == msgs.WaitingForNetwork {
 			tunnelStatusStr = styleConnecting.Render("◌ pending")
 		} else {
 			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
 		}
+
 		vpnLabel := "—"
-		vpnStyle := styleColVPN.Foreground(colorMuted)
+		vpnColStyle := tVPN.Foreground(colorMuted)
 		if t.RequiresVPN != "" {
-			vpnLabel = t.RequiresVPN
+			bullet := "○"
 			if v, ok := m.status.VPNs[t.RequiresVPN]; ok {
 				switch v.State {
-				case "connected":
-					vpnStyle = styleColVPN.Foreground(colorConnected)
-				case "connecting":
-					vpnStyle = styleColVPN.Foreground(colorConnecting)
+				case msgs.StatusConnected:
+					bullet = "●"
+					vpnColStyle = tVPN.Foreground(colorConnected)
+				case msgs.StatusConnecting:
+					vpnColStyle = tVPN.Foreground(colorConnecting)
 				default:
-					vpnStyle = styleColVPN.Foreground(colorDisconnected)
+					vpnColStyle = tVPN.Foreground(colorDisconnected)
 				}
 			}
+			vpnLabel = bullet + " " + t.RequiresVPN
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s%s\n",
-			styleColName.Render(name),
-			styleColHost.Render(t.Host),
-			vpnStyle.Render(vpnLabel),
-			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
-			styleColStatus.Render(tunnelStatusStr),
-			styleColUptime.Render(uptime),
-			styleColRecon.Render(fmt.Sprintf("%d", t.ReconnectCount)),
-			styleColBpsIn.Render("↓ "+fmtBytes(bpsIn)),
-			styleColBpsOut.Render("↑ "+fmtBytes(bpsOut)),
-			styleColConn.Render(fmtActive(active)),
-			reasonStr,
-		)
+
+		b.WriteString("  ")
+		b.WriteString(tName.Foreground(colorAccent).Render(name))
+		if tl.showHost   { b.WriteString(tHost.Render(t.Host)) }
+		b.WriteString(vpnColStyle.Render(vpnLabel))
+		if tl.showPort   { b.WriteString(tPort.Render(fmt.Sprintf("%d", t.LocalPort))) }
+		b.WriteString(tStatus.Render(tunnelStatusStr))
+		if tl.showUptime { b.WriteString(tUptime.Render(uptime)) }
+		if tl.showRC     { b.WriteString(tRC.Render(fmt.Sprintf("%d", t.ReconnectCount))) }
+		if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtBytes(bpsIn))); b.WriteString(tBpsOut.Render("↑ "+fmtBytes(bpsOut))) }
+		if tl.showConn   { b.WriteString(tConn.Render(fmtActive(active))) }
+		b.WriteString("\n")
+
+		if errLine != "" {
+			fmt.Fprintf(&b, "%s\n", errLine)
+		}
 
 		if !m.compact && w != nil {
 			for _, line := range renderGraph(w.dataIn, w.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
@@ -1031,7 +1657,7 @@ func (m Model) buildStatusContent() string {
 		}
 	}
 
-	// direct
+	// direct row
 	dw := m.traffic["direct"]
 	var dBpsIn, dBpsOut uint64
 	var dActive int64
@@ -1040,18 +1666,18 @@ func (m Model) buildStatusContent() string {
 		dBpsOut = dw.bpsOut
 		dActive = dw.active
 	}
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
-		styleColName.Foreground(colorMuted).Render("direct"),
-		styleColHost.Render(""),
-		styleColVPN.Render(""),
-		styleColPort.Render(""),
-		styleColStatus.Render(""),
-		styleColUptime.Render(""),
-		styleColRecon.Render(""),
-		styleColBpsIn.Render("↓ "+fmtBytes(dBpsIn)),
-		styleColBpsOut.Render("↑ "+fmtBytes(dBpsOut)),
-		styleColConn.Render(fmtActive(dActive)),
-	)
+	b.WriteString("  ")
+	b.WriteString(tName.Foreground(colorDirect).Render("direct"))
+	if tl.showHost   { b.WriteString(tHost.Render("")) }
+	b.WriteString(tVPN.Render(""))
+	if tl.showPort   { b.WriteString(tPort.Render("")) }
+	b.WriteString(tStatus.Render(""))
+	if tl.showUptime { b.WriteString(tUptime.Render("")) }
+	if tl.showRC     { b.WriteString(tRC.Render("")) }
+	if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtBytes(dBpsIn))); b.WriteString(tBpsOut.Render("↑ "+fmtBytes(dBpsOut))) }
+	if tl.showConn   { b.WriteString(tConn.Render(fmtActive(dActive))) }
+	b.WriteString("\n")
+
 	if !m.compact && dw != nil {
 		for _, line := range renderGraph(dw.dataIn, dw.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
 			fmt.Fprintf(&b, "  %s\n", line)
@@ -1080,6 +1706,24 @@ func fmtActive(n int64) string {
 	return fmt.Sprintf("%d", n)
 }
 
+// renderErrMsg renders a prefixed error message with line-wrapping.
+// Continuation lines are indented to align with the message start.
+func renderErrMsg(prefix, msg string, style lipgloss.Style, termWidth int) string {
+	prefixRunes := len([]rune(prefix))
+	lineW := termWidth - 4 - prefixRunes // 4 = leading indent spaces
+	if lineW < 10 {
+		return "    " + style.Render(prefix+msg)
+	}
+	lines := wrapAt(msg, lineW)
+	contIndent := strings.Repeat(" ", 4+prefixRunes)
+	var b strings.Builder
+	b.WriteString("    " + style.Render(prefix+lines[0]))
+	for _, l := range lines[1:] {
+		b.WriteString("\n" + contIndent + style.Render(l))
+	}
+	return b.String()
+}
+
 // wrapAt breaks s into lines of at most width runes, splitting at spaces where possible.
 func wrapAt(s string, width int) []string {
 	if width <= 0 || len(s) <= width {
@@ -1102,22 +1746,6 @@ func wrapAt(s string, width int) []string {
 
 // renderReason returns the inline reason string (with possible embedded newlines for wrapping).
 // indent is the number of spaces to prepend on continuation lines.
-func renderReason(reason string, style lipgloss.Style, reasonW, indent int) string {
-	if reasonW <= 0 {
-		return ""
-	}
-	lines := wrapAt(reason, reasonW)
-	indentStr := strings.Repeat(" ", indent)
-	var parts []string
-	for i, l := range lines {
-		if i == 0 {
-			parts = append(parts, "  "+style.Render(l))
-		} else {
-			parts = append(parts, indentStr+style.Render(l))
-		}
-	}
-	return strings.Join(parts, "\n")
-}
 
 func renderBadge(status string) string {
 	switch status {
@@ -1132,23 +1760,23 @@ func renderBadge(status string) string {
 
 func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int) string {
 	switch status {
-	case "connected":
+	case msgs.StatusConnected:
 		if keepaliveFails > 0 {
-			return styleConnected.Render(fmt.Sprintf("● connected ⚠%d", keepaliveFails))
+			return styleConnecting.Render(fmt.Sprintf("● connected ⚠%d", keepaliveFails))
 		}
 		return styleConnected.Render("● connected")
-	case "connecting":
+	case msgs.StatusConnecting:
 		dot := "●"
 		if tick%2 == 0 {
 			dot = "○"
 		}
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("%s connecting %ds", dot, *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("%s next try: %ds", dot, *reconnectIn))
 		}
 		return styleConnecting.Render(dot + " connecting")
-	case "disconnected":
+	case msgs.StatusDisconnected:
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("○ connecting %ds", *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("○ next try: %ds", *reconnectIn))
 		}
 		return styleDisconnected.Render("○ disconnected")
 	default:
@@ -1178,8 +1806,8 @@ func isVPNProgressMsg(msg string) bool {
 		strings.HasPrefix(msg, "pre_connect: ") ||
 		strings.HasPrefix(msg, "probing ") ||
 		msg == "openconnect starting" ||
-		msg == "waiting for VPN tunnel" ||
-		msg == "waiting for network"
+		msg == msgs.WaitingForVPNTunnel ||
+		msg == msgs.WaitingForNetwork
 }
 
 func fmtDuration(d time.Duration) string {
@@ -1247,13 +1875,18 @@ func tickEvery() tea.Cmd {
 	})
 }
 
-func fetchStatus(url string) tea.Cmd {
+type loginRequiredMsg struct{}
+
+func fetchStatus(url string, client *http.Client) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := http.Get(url) //nolint:noctx
+		resp, err := client.Get(url) //nolint:noctx
 		if err != nil {
 			return errMsg(err)
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			return loginRequiredMsg{}
+		}
 		var st admin.StatusResponse
 		if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 			return errMsg(err)
@@ -1261,6 +1894,7 @@ func fetchStatus(url string) tea.Cmd {
 		return statusMsg(st)
 	}
 }
+
 
 func waitForSSE(ch <-chan ssePayload) tea.Cmd {
 	return func() tea.Msg {
@@ -1274,7 +1908,7 @@ func waitForLog(ch <-chan string) tea.Cmd {
 	}
 }
 
-func runSSE(url string, ch chan<- ssePayload, done <-chan struct{}) {
+func runSSE(url string, client *http.Client, ch chan<- ssePayload, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -1282,7 +1916,7 @@ func runSSE(url string, ch chan<- ssePayload, done <-chan struct{}) {
 		default:
 		}
 
-		resp, err := http.Get(url) //nolint:noctx
+		resp, err := client.Get(url) //nolint:noctx
 		if err != nil {
 			select {
 			case <-done:
@@ -1319,7 +1953,7 @@ func runSSE(url string, ch chan<- ssePayload, done <-chan struct{}) {
 	}
 }
 
-func runLogSSE(url string, ch chan<- string, done <-chan struct{}) {
+func runLogSSE(url string, client *http.Client, ch chan<- string, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -1327,7 +1961,7 @@ func runLogSSE(url string, ch chan<- string, done <-chan struct{}) {
 		default:
 		}
 
-		resp, err := http.Get(url) //nolint:noctx
+		resp, err := client.Get(url) //nolint:noctx
 		if err != nil {
 			select {
 			case <-done:

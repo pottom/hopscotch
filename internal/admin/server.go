@@ -3,11 +3,14 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -38,50 +41,124 @@ type VPNStatter interface {
 	AllStats() map[string]vpn.Stats
 }
 
+const sessionCookie = "hs_session"
+
 // Server is the HTTP admin server.
 type Server struct {
-	bind      string
-	port      int
-	proxyPort int
-	pid       int
-	readme    []byte
-	tunnels   TunnelStatter
-	vpns      VPNStatter // nil when no VPNs configured
-	direct    DirectStatter
-	routes    RouteStatter
-	logs      *logger.Broadcaster
-	startedAt time.Time
+	bind             string
+	port             int
+	proxyBind        string
+	proxyPort        int
+	proxyAuthEnabled bool
+	pid              int
+	readme           []byte
+	tunnels          TunnelStatter
+	vpns             VPNStatter // nil when no VPNs configured
+	direct           DirectStatter
+	routes           RouteStatter
+	logs             *logger.Broadcaster
+	startedAt        time.Time
+	cfg              *config.Config
+	cfgMu            sync.Mutex
+	ruleUpdater      RuleUpdater
+	// admin auth — empty means no auth required
+	adminUsername string
+	adminPassword string
+	sessionToken  string // random token set once at startup; matches cookie value
 }
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte) *Server {
-	return &Server{
-		bind:      bind,
-		port:      port,
-		proxyPort: proxyPort,
-		pid:       os.Getpid(),
-		readme:    readme,
-		tunnels:   tunnels,
-		vpns:      vpns,
-		direct:    direct,
-		routes:    routes,
-		logs:      logger.GetBroadcaster(),
-		startedAt: time.Now(),
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater, proxyAuthEnabled bool) *Server {
+	var sessionToken string
+	if cfg.Admin.Username != "" {
+		b := make([]byte, 32)
+		_, _ = rand.Read(b)
+		sessionToken = hex.EncodeToString(b)
 	}
+	return &Server{
+		bind:             bind,
+		port:             port,
+		proxyBind:        cfg.Proxy.Bind,
+		proxyPort:        proxyPort,
+		proxyAuthEnabled: proxyAuthEnabled,
+		pid:              os.Getpid(),
+		readme:           readme,
+		tunnels:          tunnels,
+		vpns:             vpns,
+		direct:           direct,
+		routes:           routes,
+		logs:             logger.GetBroadcaster(),
+		startedAt:        time.Now(),
+		cfg:              cfg,
+		ruleUpdater:      ruleUpdater,
+		adminUsername:    cfg.Admin.Username,
+		adminPassword:    cfg.Admin.Password,
+		sessionToken:     sessionToken,
+	}
+}
+
+func (s *Server) adminAuthEnabled() bool { return s.adminUsername != "" }
+
+// authenticated returns true if the request carries a valid session cookie,
+// or if no admin auth is configured.
+func (s *Server) authenticated(r *http.Request) bool {
+	if !s.adminAuthEnabled() {
+		return true
+	}
+	c, err := r.Cookie(sessionCookie)
+	return err == nil && c.Value == s.sessionToken
+}
+
+// requireAuth wraps h so that unauthenticated requests get a 401, except for
+// the root path which redirects to /login for browser navigation convenience.
+func (s *Server) requireAuth(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authenticated(r) {
+			h.ServeHTTP(w, r)
+			return
+		}
+		// Only redirect the root for browser navigation; everything else
+		// returns 401 so CLI tools and JS fetch() see a clear auth failure.
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	})
+}
+
+func noCacheFS(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
 }
 
 // ListenAndServe starts the admin HTTP server. Blocks until ctx is cancelled.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.handleHealth)
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
-	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /readme", s.handleReadme)
-	mux.HandleFunc("GET /traffic/stream", s.handleTrafficStream)
-	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
+
+	// Unauthenticated login endpoints.
+	if s.adminAuthEnabled() {
+		mux.HandleFunc("GET /login", s.handleLoginPage)
+		mux.HandleFunc("POST /api/login", s.handleLogin)
+		mux.HandleFunc("POST /api/logout", s.handleLogout)
+	}
+
+	protected := http.NewServeMux()
+	protected.HandleFunc("GET /health", s.handleHealth)
+	protected.HandleFunc("GET /metrics", s.handleMetrics)
+	protected.HandleFunc("GET /status", s.handleStatus)
+	protected.HandleFunc("GET /readme", s.handleReadme)
+	protected.HandleFunc("GET /traffic/stream", s.handleTrafficStream)
+	protected.HandleFunc("GET /logs/stream", s.handleLogStream)
+	protected.HandleFunc("PUT /api/rules", s.handleRules)
+	protected.HandleFunc("GET /api/validate-pattern", s.handleValidatePattern)
 	sub, _ := fs.Sub(uiFiles, "ui")
-	mux.Handle("GET /", http.FileServerFS(sub))
+	protected.Handle("GET /", noCacheFS(http.FileServerFS(sub)))
+
+	mux.Handle("/", s.requireAuth(protected))
 
 	addr := fmt.Sprintf("%s:%d", s.bind, s.port)
 	ln, err := net.Listen("tcp", addr)
@@ -109,4 +186,36 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("admin server: %w", err)
 	}
 	return nil
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	user := r.FormValue("username")
+	pass := r.FormValue("password")
+	if user == s.adminUsername && pass == s.adminPassword {
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookie,
+			Value:    s.sessionToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/login?error=1", http.StatusSeeOther)
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:    sessionCookie,
+		Value:   "",
+		Path:    "/",
+		MaxAge:  -1,
+		Expires: time.Unix(0, 0),
+	})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

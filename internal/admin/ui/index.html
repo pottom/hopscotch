@@ -37,13 +37,30 @@
   <div class="header-meta">
     <span x-text="$store.hop.meta.version"></span><template x-if="$store.hop.meta.latest_version"><span class="update-badge" x-text="'⚡' + $store.hop.meta.latest_version"></span></template>
     <span class="header-sep">·</span>
+    <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
+          x-text="$store.hop.meta.uplink ? '● ' + ($store.hop.meta.uplink_iface || 'link') + ($store.hop.meta.uplink_ip ? ' ' + $store.hop.meta.uplink_ip : '') : '○ no link'"></span>
+    <template x-if="$store.hop.meta.public_ip">
+      <span class="header-sep">·</span>
+    </template>
+    <template x-if="$store.hop.meta.public_ip">
+      <span class="internet-badge up" x-text="'⊕ internet ' + $store.hop.meta.public_ip"></span>
+    </template>
+    <template x-if="!$store.hop.meta.public_ip && $store.hop.meta.uplink && !$store.hop.meta.internet">
+      <span class="header-sep">·</span>
+    </template>
+    <template x-if="!$store.hop.meta.public_ip && $store.hop.meta.uplink && !$store.hop.meta.internet">
+      <span class="internet-badge down">○ no internet</span>
+    </template>
+    <span class="header-sep">·</span>
     <span x-text="'PID ' + $store.hop.meta.pid"></span>
     <span class="header-sep">·</span>
     <span x-text="'up ' + $store.hop.meta.uptime"></span>
-    <span class="header-sep">·</span>
-    <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
-          x-text="$store.hop.meta.uplink ? '● ' + ($store.hop.meta.uplink_iface || 'link') : '○ no link'"></span>
   </div>
+  <template x-if="$store.hop.meta.admin_auth_enabled">
+    <form method="POST" action="/api/logout">
+      <button type="submit" class="logout-btn">logout</button>
+    </form>
+  </template>
 </header>
 
 <nav class="tab-bar" id="tab-bar">
@@ -57,9 +74,9 @@
 <div id="panel-status" class="tab-panel active" style="flex-direction:column;">
 
   <div class="stats-bar">
-    <span class="stats-in"   x-text="'↓ ' + fmtBytes($store.hop.totalStats().bpsIn)  + '/s'"></span>
+    <span class="stats-in"   x-text="'↓ ' + fmtBytes($store.hop.totalStats().bpsIn)"></span>
     <span class="stats-sep">·</span>
-    <span class="stats-out"  x-text="'↑ ' + fmtBytes($store.hop.totalStats().bpsOut) + '/s'"></span>
+    <span class="stats-out"  x-text="'↑ ' + fmtBytes($store.hop.totalStats().bpsOut)"></span>
     <span class="stats-sep">·</span>
     <span class="stats-conn" x-text="$store.hop.totalStats().active + ' conn total'"></span>
   </div>
@@ -71,16 +88,16 @@
         <col class="col-name"><col class="col-host"><col class="col-vpn">
         <col class="col-port"><col class="col-status"><col class="col-uptime">
         <col class="col-rc"><col class="col-bps"><col class="col-bps">
-        <col class="col-conn"><col class="col-msg">
+        <col class="col-conn">
       </colgroup>
 
       <!-- VPN section -->
       <tbody id="vpn-section" style="display:none">
-        <tr class="sh-label-row"><td colspan="11">VPN</td></tr>
+        <tr class="sh-label-row"><td colspan="10">VPN</td></tr>
         <tr class="sh-head-row">
           <th>Name</th><th>Host</th><th>Iface</th><th></th>
           <th>Status</th><th>Uptime</th><th>RC</th>
-          <th></th><th></th><th></th><th>Message</th>
+          <th></th><th></th><th></th>
         </tr>
         <!-- rows injected by JS -->
       </tbody>
@@ -88,15 +105,15 @@
 
       <!-- Tunnels section -->
       <tbody>
-        <tr class="sh-label-row"><td colspan="11">Tunnels</td></tr>
+        <tr class="sh-label-row"><td colspan="10">Tunnels</td></tr>
         <tr class="sh-head-row">
           <th>Name</th><th>Host</th><th>VPN</th><th>Port</th>
           <th>Status</th><th>Uptime</th><th>RC</th>
-          <th>↓</th><th>↑</th><th>Conn</th><th>Message</th>
+          <th>↓</th><th>↑</th><th>Conn</th>
         </tr>
       </tbody>
       <tbody id="tunnel-tbody">
-        <tr><td colspan="11" class="st-loading">loading…</td></tr>
+        <tr><td colspan="10" class="st-loading">loading…</td></tr>
       </tbody>
     </table>
 
@@ -122,28 +139,41 @@
 <!-- ── ROUTES TAB ─────────────────────────────────────────────────────────── -->
 <div id="panel-patterns" class="tab-panel">
   <div class="routes-wrap">
-    <div class="routes-label">URL → Tunnel routing rules</div>
-
-    <div class="routes-tester">
-      <input type="text" id="routes-tester-input" class="routes-tester-input"
-             placeholder="test a URL or hostname, e.g. api.example.com"
-             oninput="routesTesterUpdate(this.value)">
-      <div class="routes-tester-result" id="routes-tester-result"></div>
+    <div class="routes-top-bar">
+      <div class="routes-label">URL → Tunnel routing rules</div>
+      <div class="routes-toolbar">
+        <span id="routes-save-status" class="routes-save-status"></span>
+        <button id="routes-edit-btn"   class="routes-btn" onclick="rulesStartEdit()">Edit rules</button>
+        <button id="routes-save-btn"   class="routes-btn routes-btn-primary" style="display:none" onclick="rulesSave()">Save</button>
+        <button id="routes-cancel-btn" class="routes-btn" style="display:none" onclick="rulesCancel()">Cancel</button>
+      </div>
     </div>
 
-    <table class="routes-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Pattern</th>
-          <th>Via</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="routes-tbody">
-        <tr><td colspan="4" class="routes-empty">Loading…</td></tr>
-      </tbody>
-    </table>
+    <div class="routes-hint">Rules are matched top to bottom — first match wins. Unmatched traffic goes to direct.</div>
+
+    <div class="routes-scroll">
+      <div class="routes-tester">
+        <input type="text" id="routes-tester-input" class="routes-tester-input"
+               placeholder="test a URL or hostname — Ctrl+N to clear"
+               oninput="routesTesterUpdate(this.value)">
+        <div class="routes-tester-result" id="routes-tester-result"></div>
+      </div>
+
+      <table class="routes-table">
+        <thead id="routes-thead">
+          <tr>
+            <th style="width:1.2rem"></th>
+            <th class="routes-num-h">#</th>
+            <th>Pattern</th>
+            <th>Via</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="routes-tbody">
+          <tr><td colspan="5" class="routes-empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -160,11 +190,11 @@
   <div class="footer-ports">
     <div class="port-item">
       <span>SOCKS5</span>
-      <span x-text="':' + $store.hop.meta.proxy_port"></span>
+      <span x-text="$store.hop.meta.proxy_bind + ':' + $store.hop.meta.proxy_port + ($store.hop.meta.proxy_auth_enabled ? ' ⚿' : '')"></span>
     </div>
     <div class="port-item">
       <span>ADMIN</span>
-      <span x-text="':' + $store.hop.meta.admin_port"></span>
+      <span x-text="$store.hop.meta.admin_bind + ':' + $store.hop.meta.admin_port + ($store.hop.meta.admin_auth_enabled ? ' ⚿' : '')"></span>
     </div>
   </div>
   <div id="footer-ts"></div>

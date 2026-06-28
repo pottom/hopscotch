@@ -15,10 +15,15 @@ import (
 type ConfigError struct {
 	Field   string
 	Message string
+	Hint    string // optional fix suggestion shown to the user
 }
 
 func (e *ConfigError) Error() string {
-	return fmt.Sprintf("config: field %q: %s", e.Field, e.Message)
+	s := fmt.Sprintf("config: field %q: %s", e.Field, e.Message)
+	if e.Hint != "" {
+		s += "\n  → " + e.Hint
+	}
+	return s
 }
 
 // TunnelConfig describes a single SSH jump-host tunnel.
@@ -62,6 +67,12 @@ type VPNConfig struct {
 	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
 }
 
+// ViaDirect and ViaBlock are the special via values for routing rules.
+const (
+	ViaDirect = "direct"
+	ViaBlock  = "block"
+)
+
 // Rule maps a host pattern to a tunnel name or "direct".
 type Rule struct {
 	Pattern string `yaml:"pattern"`
@@ -73,6 +84,8 @@ type Rule struct {
 type ProxyConfig struct {
 	Port      int    `yaml:"port"`
 	Bind      string `yaml:"bind"`       // listen address; default 0.0.0.0
+	Username  string `yaml:"username"`   // SOCKS5 auth username; leave empty to disable auth
+	Password  string `yaml:"password"`   // SOCKS5 auth password; required when username is set
 	Rules     []Rule `yaml:"rules"`
 	NoProxy   string `yaml:"no_proxy"`   // passed to NO_PROXY / no_proxy on shell enable
 	ShellIcon string `yaml:"shell_icon"` // icon shown in HOPSCOTCH_ACTIVE; default ⇢
@@ -80,8 +93,11 @@ type ProxyConfig struct {
 
 // AdminConfig controls the HTTP admin server.
 type AdminConfig struct {
-	Port int    `yaml:"port"`
-	Bind string `yaml:"bind"`
+	Port         int    `yaml:"port"`
+	Bind         string `yaml:"bind"`
+	Username     string `yaml:"username"`     // HTTP Basic Auth username; leave empty to disable
+	Password     string `yaml:"password"`     // HTTP Basic Auth password; required when username is set
+	ShowPublicIP bool   `yaml:"show_public_ip"` // periodically fetch and display public IP; default false
 }
 
 // Config is the root configuration object.
@@ -294,6 +310,13 @@ func validate(cfg *Config) error {
 		return &ConfigError{Field: "proxy.port / admin.port", Message: "proxy and admin ports must differ"}
 	}
 
+	if (cfg.Proxy.Username == "") != (cfg.Proxy.Password == "") {
+		return &ConfigError{Field: "proxy.username / proxy.password", Message: "both username and password must be set together"}
+	}
+	if (cfg.Admin.Username == "") != (cfg.Admin.Password == "") {
+		return &ConfigError{Field: "admin.username / admin.password", Message: "both username and password must be set together"}
+	}
+
 	// Validate VPN definitions.
 	vpnNames := make(map[string]bool, len(cfg.VPNs))
 	for _, v := range cfg.VPNs {
@@ -325,14 +348,44 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	for _, rule := range cfg.Proxy.Rules {
+	for i, rule := range cfg.Proxy.Rules {
 		if rule.Pattern == "" {
-			return &ConfigError{Field: "proxy.rules[].pattern", Message: "pattern is required"}
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].pattern", i+1), Message: "pattern is required"}
 		}
 		if rule.Tunnel == "" && rule.Via == "" {
-			return &ConfigError{Field: "proxy.rules[].tunnel", Message: "either tunnel or via is required"}
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].tunnel", i+1), Message: "either tunnel or via is required"}
+		}
+		if rule.Via != "" && rule.Via != ViaDirect && rule.Via != ViaBlock && rule.Tunnel != "" {
+			// via is only for special values; tunnel name goes in tunnel field
+		}
+		if rule.Via != "" && rule.Via != ViaDirect && rule.Via != ViaBlock {
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].via", i+1), Message: fmt.Sprintf("via must be %q, %q, or empty (use tunnel field for tunnel names)", ViaDirect, ViaBlock)}
+		}
+		if err := ValidatePattern(rule.Pattern); err != nil {
+			hint := patternErrorHint(cfg.Path, rule.Pattern, i+1)
+			return &ConfigError{
+				Field:   fmt.Sprintf("proxy.rules[%d]", i+1),
+				Message: fmt.Sprintf("invalid pattern %q: %s", rule.Pattern, err.Error()),
+				Hint:    hint,
+			}
 		}
 	}
 
 	return nil
+}
+
+// patternErrorHint builds a user-friendly fix hint for a bad routing pattern.
+// It tries to locate the exact line number in the config file.
+func patternErrorHint(path, pattern string, ruleNum int) string {
+	if path == "" {
+		return fmt.Sprintf("fix rule %d in your config file and restart hopscotch", ruleNum)
+	}
+	if data, err := os.ReadFile(path); err == nil {
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "pattern:") && strings.Contains(line, pattern) {
+				return fmt.Sprintf("line %d in %s — fix the pattern and restart hopscotch", i+1, path)
+			}
+		}
+	}
+	return fmt.Sprintf("fix rule %d in %s and restart hopscotch", ruleNum, path)
 }

@@ -1,0 +1,113 @@
+<svg width="1000" height="380" viewBox="0 0 1000 380" xmlns="http://www.w3.org/2000/svg">
+  <!-- bg -->
+  <rect width="1000" height="380" fill="#080c14"/>
+
+  <!-- ══ STATS BAR ══ -->
+  <rect width="1000" height="36" fill="#0a1220"/>
+  <text x="28"  y="23" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#38bdf8">↓ 3.2 KB/s</text>
+  <text x="116" y="23" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#334155">·</text>
+  <text x="128" y="23" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#818cf8">↑ 980 B/s</text>
+  <text x="214" y="23" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#334155">·</text>
+  <text x="226" y="23" font-family="'JetBrains Mono','Courier New',monospace" font-size="11.5" fill="#475569">2 conn total</text>
+  <line x1="0" y1="36" x2="1000" y2="36" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ SECTION LABEL ══ -->
+  <text x="28" y="58" font-family="'JetBrains Mono','Courier New',monospace"
+        font-size="10" font-weight="600" fill="#475569" letter-spacing="2">TUNNELS</text>
+  <line x1="0" y1="66" x2="1000" y2="66" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ TABLE HEADER ══ -->
+  <rect y="66" width="1000" height="28" fill="#0a1220"/>
+  <!-- col x: Name=28, Host=190, VPN=338, Port=436, Status=482, Uptime=600, RC=670, ↓=710, ↑=796, Conn=882 -->
+  <text x="28"  y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">NAME</text>
+  <text x="190" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">HOST</text>
+  <text x="338" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">VPN</text>
+  <text x="436" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">PORT</text>
+  <text x="482" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">STATUS</text>
+  <text x="600" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">UPTIME</text>
+  <text x="670" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">RC</text>
+  <text x="710" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">↓</text>
+  <text x="796" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">↑</text>
+  <text x="882" y="85" font-family="'JetBrains Mono','Courier New',monospace" font-size="10" fill="#334155" letter-spacing="1">CONN</text>
+  <line x1="0" y1="94" x2="1000" y2="94" stroke="#1a2535" stroke-width="1"/>
+
+  <!-- ══ ROW 1 — go-a-scb (connected) ══ -->
+  <rect y="94" width="1000" height="34" fill="#080c14"/>
+  <text x="28"  y="116" font-family="'Space Grotesk',system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#e2e8f0">go-a-scb</text>
+  <text x="190" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">10.1.0.5:22</text>
+  <text x="338" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">—</text>
+  <text x="436" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#cbd5e1">1080</text>
+  <!-- status dot -->
+  <circle cx="487" cy="112" r="3.5" fill="#34d399"/>
+  <circle cx="487" cy="112" r="3.5" fill="#34d399" opacity=".3">
+    <animate attributeName="r" values="3.5;6;3.5" dur="2.4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0;0.3" dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+  <text x="496" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#34d399">connected</text>
+  <text x="600" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">8h 46m</text>
+  <text x="670" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">0</text>
+  <text x="710" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">2.1 KB/s</text>
+  <text x="796" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">640 B/s</text>
+  <text x="882" y="116" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">3</text>
+  <line x1="0" y1="128" x2="1000" y2="128" stroke="rgba(255,255,255,.025)" stroke-width="1"/>
+
+  <!-- ══ ROW 2 — go-b-scb (connecting / error) ══ -->
+  <rect y="128" width="1000" height="34" fill="#080c14"/>
+  <text x="28"  y="150" font-family="'Space Grotesk',system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#e2e8f0">go-b-scb</text>
+  <text x="190" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">10.2.0.8:22</text>
+  <text x="338" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">corp-vpn</text>
+  <text x="436" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#cbd5e1">1081</text>
+  <circle cx="487" cy="146" r="3.5" fill="#fbbf24">
+    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite"/>
+  </circle>
+  <text x="496" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#fbbf24">connecting</text>
+  <text x="600" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#fbbf24">in 28s</text>
+  <text x="670" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">3</text>
+  <text x="710" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">0 B/s</text>
+  <text x="796" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">0 B/s</text>
+  <text x="882" y="150" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">0</text>
+
+  <!-- ══ SUB-ROW — error message ══ -->
+  <rect y="162" width="1000" height="26" fill="rgba(248,113,113,0.05)"/>
+  <line x1="0" y1="162" x2="1000" y2="162" stroke="rgba(248,113,113,0.15)" stroke-width="1"/>
+  <text x="28" y="179" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#f87171" opacity=".85">✗  SSH handshake timeout after 15s: dial tcp 10.2.0.8:22: i/o timeout</text>
+  <line x1="0" y1="188" x2="1000" y2="188" stroke="rgba(255,255,255,.025)" stroke-width="1"/>
+
+  <!-- ══ ROW 3 — go-c-scb (offline, block via rule) ══ -->
+  <rect y="188" width="1000" height="34" fill="#080c14"/>
+  <text x="28"  y="210" font-family="'Space Grotesk',system-ui,sans-serif" font-size="12.5" font-weight="600" fill="#e2e8f0">go-c-scb</text>
+  <text x="190" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">10.3.0.2:22</text>
+  <text x="338" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">—</text>
+  <text x="436" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#cbd5e1">1082</text>
+  <circle cx="487" cy="206" r="3.5" fill="#f87171"/>
+  <text x="496" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#f87171">connecting</text>
+  <text x="600" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#f87171">in 5m 12s</text>
+  <text x="670" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">11</text>
+  <text x="710" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">0 B/s</text>
+  <text x="796" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">0 B/s</text>
+  <text x="882" y="210" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">0</text>
+
+  <!-- ══ SUB-ROW — auth error ══ -->
+  <rect y="222" width="1000" height="26" fill="rgba(248,113,113,0.05)"/>
+  <line x1="0" y1="222" x2="1000" y2="222" stroke="rgba(248,113,113,0.15)" stroke-width="1"/>
+  <text x="28" y="239" font-family="'JetBrains Mono','Courier New',monospace" font-size="10.5" fill="#f87171" opacity=".85">✗  ssh: unable to authenticate — no supported methods remain [publickey]</text>
+  <line x1="0" y1="248" x2="1000" y2="248" stroke="rgba(255,255,255,.025)" stroke-width="1"/>
+
+  <!-- ══ ROW 4 — direct ══ -->
+  <rect y="248" width="1000" height="34" fill="#080c14"/>
+  <text x="28"  y="270" font-family="'Space Grotesk',system-ui,sans-serif" font-size="12.5" font-weight="500" fill="#a78bfa">direct</text>
+  <text x="190" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#334155">—</text>
+  <text x="338" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#334155">—</text>
+  <text x="436" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#334155">—</text>
+  <text x="482" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#334155">—</text>
+  <text x="600" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#334155">—</text>
+  <text x="670" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#334155">—</text>
+  <text x="710" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#38bdf8">1.1 KB/s</text>
+  <text x="796" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#818cf8">340 B/s</text>
+  <text x="882" y="270" font-family="'JetBrains Mono','Courier New',monospace" font-size="11" fill="#475569">1</text>
+  <line x1="0" y1="282" x2="1000" y2="282" stroke="rgba(255,255,255,.025)" stroke-width="1"/>
+
+  <!-- caption -->
+  <text x="500" y="356" font-family="'Space Grotesk',system-ui,sans-serif" font-size="11"
+        fill="#334155" text-anchor="middle">web UI — Message oszlop eltávolítva, hibaüzenet sub-row-ban jelenik meg</text>
+</svg>

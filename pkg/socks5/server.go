@@ -12,8 +12,9 @@ import (
 
 // Server is a SOCKS5 proxy server that delegates dialing to a Dialer.
 type Server struct {
-	Addr   string
-	Dialer Dialer
+	Addr        string
+	Dialer      Dialer
+	Credentials *Credentials // nil = no auth required
 }
 
 // ListenAndServe starts accepting connections on s.Addr.
@@ -43,7 +44,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 
 		go func(c net.Conn) {
-			if err := handle(ctx, c, s.Dialer); err != nil {
+			if err := handle(ctx, c, s.Dialer, s.Credentials); err != nil {
 				log.Debug("socks5 connection closed", "err", err)
 			}
 		}(conn)

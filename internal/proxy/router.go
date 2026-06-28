@@ -2,15 +2,18 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/charmbracelet/log"
 
 	"hopscotch/internal/config"
 	"hopscotch/internal/tunnel"
 )
+
+// errBlocked is returned when a via:block rule matches.
+var errBlocked = errors.New("blocked")
 
 // TunnelLookup finds a Tunnel by name.
 type TunnelLookup interface {
@@ -62,6 +65,11 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 
 	label, dialer, tunnelStatus, pattern, err := r.resolve(ctx, host)
 	if err != nil {
+		if errors.Is(err, errBlocked) {
+			log.Warn("proxy blocked", "host", host, "proto", inferProto(port), "err", err)
+		} else {
+			log.Warn("proxy refused", "host", host, "proto", inferProto(port), "err", err)
+		}
 		return nil, err
 	}
 
@@ -111,8 +119,12 @@ func (r *Router) resolve(ctx context.Context, host string) (label string, dialer
 			continue
 		}
 
-		if rule.Via == "direct" {
-			return "direct", &r.direct, "", rule.Pattern, nil
+		if rule.Via == config.ViaDirect {
+			return config.ViaDirect, &r.direct, "", rule.Pattern, nil
+		}
+
+		if rule.Via == config.ViaBlock {
+			return "", nil, "", "", fmt.Errorf("%w: connection to %s blocked by rule (pattern: %s)", errBlocked, host, rule.Pattern)
 		}
 
 		t := r.tunnels.Get(rule.Tunnel)
@@ -132,29 +144,16 @@ func (r *Router) resolve(ctx context.Context, host string) (label string, dialer
 
 	// No matching rule — use direct as fallback.
 	log.Warn("no routing rule matched, using direct", "host", host)
-	return "direct", &r.direct, "", "", nil
+	return config.ViaDirect, &r.direct, "", "", nil
 }
 
-// waitForTunnel blocks until the tunnel is connected or the wait window expires.
-func (r *Router) waitForTunnel(ctx context.Context, t *tunnel.Tunnel) error {
+// waitForTunnel returns immediately with an error if the tunnel is not connected.
+// We fail fast instead of waiting so callers get instant feedback rather than
+// sitting through a 30-second timeout.
+func (r *Router) waitForTunnel(_ context.Context, t *tunnel.Tunnel) error {
 	if t.Stats().Status == tunnel.StatusConnected {
 		return nil
 	}
-
-	// Wait up to 30 seconds for the tunnel to come up.
-	deadline := time.Now().Add(time.Duration(config.DefaultTunnelWaitTimeout) * time.Second)
-	ctx, cancel := context.WithDeadline(ctx, deadline)
-	defer cancel()
-
-	for {
-		if t.Stats().Status == tunnel.StatusConnected {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("tunnel %q is not connected (waited %ds)", t.Name(), config.DefaultTunnelWaitTimeout)
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
+	return fmt.Errorf("tunnel %q is offline (status: %s) — connection refused", t.Name(), t.Stats().Status)
 }
 

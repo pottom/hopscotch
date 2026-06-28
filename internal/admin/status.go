@@ -48,10 +48,17 @@ type StatusResponse struct {
 	LatestVersion string                      `json:"latest_version,omitempty"`
 	Uptime        string                      `json:"uptime"`
 	PID           int                         `json:"pid"`
-	ProxyPort     int                         `json:"proxy_port"`
-	AdminPort     int                         `json:"admin_port"`
+	ProxyPort        int    `json:"proxy_port"`
+	ProxyBind        string `json:"proxy_bind"`
+	ProxyAuthEnabled bool   `json:"proxy_auth_enabled,omitempty"`
+	AdminPort        int    `json:"admin_port"`
+	AdminBind        string `json:"admin_bind"`
+	AdminAuthEnabled bool   `json:"admin_auth_enabled,omitempty"`
 	Uplink        bool                        `json:"uplink"`
 	UplinkIface   string                      `json:"uplink_iface,omitempty"`
+	UplinkIP      string                      `json:"uplink_ip,omitempty"`
+	Internet      bool                        `json:"internet"`
+	PublicIP      string                      `json:"public_ip,omitempty"`
 	Tunnels       map[string]TunnelStatusJSON `json:"tunnels"`
 	VPNs          map[string]VPNStatusJSON    `json:"vpns,omitempty"`
 	Routes        []RouteJSON                 `json:"routes"`
@@ -125,16 +132,28 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		routes[i] = RouteJSON{Pattern: r.Pattern, Tunnel: r.Tunnel, Via: r.Via}
 	}
 
+	uplink := netcheck.HasUplink()
+	publicIP := ""
+	if uplink {
+		publicIP = netcheck.PublicIP()
+	}
 	resp := StatusResponse{
 		Status:        overall,
 		Version:       version.Version,
 		LatestVersion: version.LatestVersion,
 		Uptime:        time.Since(s.startedAt).Round(time.Second).String(),
 		PID:           s.pid,
-		ProxyPort:     s.proxyPort,
-		AdminPort:     s.port,
-		Uplink:        netcheck.HasUplink(),
+		ProxyPort:        s.proxyPort,
+		ProxyBind:        s.proxyBind,
+		ProxyAuthEnabled: s.proxyAuthEnabled,
+		AdminPort:        s.port,
+		AdminBind:        s.bind,
+		AdminAuthEnabled: s.adminAuthEnabled(),
+		Uplink:        uplink,
 		UplinkIface:   netcheck.UplinkInterface(),
+		UplinkIP:      netcheck.UplinkIP(),
+		Internet:      uplink && netcheck.HasInternet(),
+		PublicIP:      publicIP,
 		Tunnels:       tunnels,
 		VPNs:          vpnMap,
 		Routes:        routes,

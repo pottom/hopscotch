@@ -293,6 +293,8 @@ tunnels:
 proxy:
   port: 8080
   no_proxy: "localhost,127.0.0.1,::1"   # excluded from HTTP_PROXY when using `hopscotch enable`
+  # username: alice                      # optional: require SOCKS5 authentication
+  # password: secret
   rules:
     - pattern: "*.prod.internal"
       tunnel: prod-jump
@@ -304,6 +306,8 @@ proxy:
 admin:
   port: 9090
   bind: "127.0.0.1"    # set to 0.0.0.0 to expose in containers
+  # username: alice    # optional: protect the web UI and TUI with a password
+  # password: secret
 ```
 
 ### Tunnel options
@@ -402,8 +406,10 @@ hopscotch start                    # start daemon (detaches from terminal)
 hopscotch start --foreground       # stay in foreground (for Docker, systemd)
 hopscotch start --restart          # replace running instance; finds stale processes by admin port if PID file is missing
 hopscotch stop                     # stop the daemon
-hopscotch status                   # open interactive TUI (plain text when piped)
-hopscotch status --plain           # force plain text (useful for scripts, watch)
+hopscotch status                             # open interactive TUI (plain text when piped)
+hopscotch status --plain                     # force plain text (useful for scripts, watch)
+hopscotch status --username alice            # authenticate if admin auth is enabled
+hopscotch status --username alice --password secret  # non-interactive (or pipe password via stdin)
 hopscotch logs                     # stream live log output from the daemon
 hopscotch enable                   # activate proxy in current shell
 hopscotch disable                  # deactivate proxy, restore previous env

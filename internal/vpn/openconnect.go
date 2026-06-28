@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/log"
 
 	"hopscotch/internal/keychain"
+	"hopscotch/internal/msgs"
 	"hopscotch/internal/netcheck"
 )
 
@@ -368,7 +369,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 
 	var ok, fail int
 
-	c.lastError.Store("waiting for VPN tunnel")
+	c.lastError.Store(msgs.WaitingForVPNTunnel)
 	log.Info("vpn: waiting for VPN tunnel", "vpn", c.cfg.Name, "host", host)
 
 	// Poll every 1s until connected for fast detection; switch to 3s for keepalive.
@@ -637,7 +638,7 @@ func (c *Connection) watchUplink(ctx context.Context, cmd *exec.Cmd, died <-chan
 			log.Debug("vpn: uplink check", "vpn", c.cfg.Name, "up", up)
 			if !up {
 				log.Info("vpn: network down, stopping subprocess", "vpn", c.cfg.Name)
-				c.lastError.Store("waiting for network")
+				c.lastError.Store(msgs.WaitingForNetwork)
 				killProcGroup(cmd)
 				close(killedByUplink)
 				return
