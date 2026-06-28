@@ -3,7 +3,7 @@ package main
 import (
 	_ "embed"
 
-	"hopscotch/cmd"
+	"github.com/pottom/hopscotch/cmd"
 )
 
 //go:embed README.md

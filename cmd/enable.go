@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 // shellVars are the proxy env vars we manage, uppercase and lowercase pairs.

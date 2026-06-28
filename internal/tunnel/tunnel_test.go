@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 func TestBackoff(t *testing.T) {

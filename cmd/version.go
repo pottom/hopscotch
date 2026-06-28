@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/version"
+	"github.com/pottom/hopscotch/internal/version"
 )
 
 var versionCmd = &cobra.Command{

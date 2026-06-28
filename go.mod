@@ -1,4 +1,4 @@
-module hopscotch
+module github.com/pottom/hopscotch
 
 go 1.25.0
 

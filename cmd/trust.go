@@ -16,7 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 var (

@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/proxy"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/proxy"
 )
 
 var sshConfigWrite bool

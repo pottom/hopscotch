@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 func baseTunnel(name string, port int) config.TunnelConfig {

@@ -19,9 +19,9 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/msgs"
-	"hopscotch/internal/netcheck"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/msgs"
+	"github.com/pottom/hopscotch/internal/netcheck"
 )
 
 // Clock abstracts time to allow synctest-based testing of reconnect logic.

@@ -8,8 +8,8 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/tunnel"
 )
 
 // errBlocked is returned when a via:block rule matches.

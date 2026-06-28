@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/security"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/security"
 )
 
 var validateCmd = &cobra.Command{

@@ -16,9 +16,9 @@ import (
 	"github.com/spf13/cobra"
 	xterm "golang.org/x/term"
 
-	"hopscotch/internal/admin"
-	"hopscotch/internal/config"
-	"hopscotch/internal/tui"
+	"github.com/pottom/hopscotch/internal/admin"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/tui"
 )
 
 var (

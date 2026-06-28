@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/tunnel"
 )
 
 var (

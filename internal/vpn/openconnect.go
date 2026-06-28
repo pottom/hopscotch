@@ -17,9 +17,9 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"hopscotch/internal/keychain"
-	"hopscotch/internal/msgs"
-	"hopscotch/internal/netcheck"
+	"github.com/pottom/hopscotch/internal/keychain"
+	"github.com/pottom/hopscotch/internal/msgs"
+	"github.com/pottom/hopscotch/internal/netcheck"
 )
 
 // runOnce starts the openconnect subprocess and blocks until it exits or ctx is cancelled.

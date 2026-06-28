@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/updater"
-	"hopscotch/internal/version"
+	"github.com/pottom/hopscotch/internal/updater"
+	"github.com/pottom/hopscotch/internal/version"
 )
 
 var checkOnly bool

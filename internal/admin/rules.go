@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 // RuleUpdater applies a new rule set to the running proxy router.

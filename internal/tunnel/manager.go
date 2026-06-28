@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/log"
 	"golang.org/x/sync/errgroup"
 
-	"hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/config"
 )
 
 // VPNGater is implemented by vpn.Manager. Defined here as an interface

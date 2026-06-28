@@ -11,8 +11,8 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"hopscotch/internal/msgs"
-	"hopscotch/internal/netcheck"
+	"github.com/pottom/hopscotch/internal/msgs"
+	"github.com/pottom/hopscotch/internal/netcheck"
 )
 
 // Stats is a point-in-time snapshot of one VPN connection.

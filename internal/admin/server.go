@@ -15,10 +15,10 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"hopscotch/internal/config"
-	"hopscotch/internal/logger"
-	"hopscotch/internal/tunnel"
-	"hopscotch/internal/vpn"
+	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/logger"
+	"github.com/pottom/hopscotch/internal/tunnel"
+	"github.com/pottom/hopscotch/internal/vpn"
 )
 
 // TunnelStatter exposes tunnel statistics to the admin server.

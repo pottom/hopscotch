@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hopscotch/internal/logger"
+	"github.com/pottom/hopscotch/internal/logger"
 )
 
 var (
