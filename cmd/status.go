@@ -18,7 +18,11 @@ import (
 	"hopscotch/internal/tui"
 )
 
-var plainStatus bool
+var (
+	plainStatus    bool
+	statusUsername string
+	statusPassword string
+)
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -29,6 +33,8 @@ var statusCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(statusCmd)
 	statusCmd.Flags().BoolVar(&plainStatus, "plain", false, "print plain text instead of opening the TUI")
+	statusCmd.Flags().StringVar(&statusUsername, "username", "", "admin username (required when admin auth is enabled)")
+	statusCmd.Flags().StringVar(&statusPassword, "password", "", "admin password (required when admin auth is enabled)")
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
@@ -38,10 +44,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/status", adminPort)
-	username, password := resolveAdminCredentials()
 
 	if !plainStatus && term.IsTerminal(os.Stdout.Fd()) {
-		m := tui.New(url, username, password)
+		m := tui.New(url, statusUsername, statusPassword)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		_, err := p.Run()
 		return err
@@ -150,13 +155,6 @@ func resolveAdminPort() (int, error) {
 	return config.DefaultAdminPort, nil
 }
 
-func resolveAdminCredentials() (username, password string) {
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return "", ""
-	}
-	return cfg.Admin.Username, cfg.Admin.Password
-}
 
 func formatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
