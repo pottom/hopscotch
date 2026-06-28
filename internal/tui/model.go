@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -374,20 +373,18 @@ type Model struct {
 	ready       bool
 }
 
-// New creates a TUI Model. If username and password are non-empty (passed via
-// --username/--password flags) they are used to authenticate before the UI
-// starts. On 401 the TUI shows an error message and quits.
-func New(adminURL, username, password string) Model {
+// New creates a TUI Model using the provided pre-authenticated http.Client.
+// The caller (cmd/status.go) is responsible for resolving credentials and
+// performing login before calling New.
+func New(adminURL string, client *http.Client) Model {
 	base := strings.TrimSuffix(adminURL, "/status")
 	sseCh := make(chan ssePayload, 8)
 	logCh := make(chan string, 64)
 	done := make(chan struct{})
 
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar}
-
-	if username != "" && password != "" {
-		_ = doLogin(client, base+"/api/login", username, password)
+	if client == nil {
+		jar, _ := cookiejar.New(nil)
+		client = &http.Client{Jar: jar}
 	}
 
 	ti := textinput.New()
@@ -416,19 +413,6 @@ func New(adminURL, username, password string) Model {
 		routeInput:  ti,
 		editPatInput: ep,
 	}
-}
-
-// doLogin POSTs credentials to /api/login; the session cookie is stored in client.Jar.
-func doLogin(client *http.Client, loginURL, username, password string) error {
-	resp, err := client.PostForm(loginURL, url.Values{
-		"username": {username},
-		"password": {password},
-	})
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
 }
 
 func (m Model) Init() tea.Cmd {
