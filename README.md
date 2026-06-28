@@ -399,6 +399,26 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |
 
+### Sharing the proxy on your network
+
+Run hopscotch on one machine with `proxy.bind: 0.0.0.0` and every other device on your network can use it as a shared SOCKS5 proxy — no VPN client or SSH config needed on each device.
+
+![Shared proxy for the whole network](docs/shared-proxy.svg)
+
+```yaml
+proxy:
+  port: 1080
+  bind: 0.0.0.0   # accept LAN connections, not just localhost
+```
+
+On each other machine:
+
+```bash
+export ALL_PROXY=socks5h://192.168.1.10:1080
+```
+
+Replace `192.168.1.10` with the local IP of the machine running hopscotch.
+
 ## Commands
 
 ```
