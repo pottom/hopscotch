@@ -401,7 +401,9 @@ document.addEventListener('alpine:init', () => {
 
 async function refreshStatus() {
   try {
-    const st = await fetch('/status').then(r => r.json());
+    const r = await fetch('/status');
+    if (r.status === 401) { window.location.href = '/login'; return; }
+    const st = await r.json();
     const store = Alpine.store('hop');
 
     store.meta = {

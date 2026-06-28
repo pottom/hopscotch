@@ -110,22 +110,21 @@ func (s *Server) authenticated(r *http.Request) bool {
 	return err == nil && c.Value == s.sessionToken
 }
 
-// requireAuth wraps h so that unauthenticated requests are redirected to /login.
-// API requests (Accept: application/json or /api/* paths) get a 401 instead.
+// requireAuth wraps h so that unauthenticated requests get a 401, except for
+// the root path which redirects to /login for browser navigation convenience.
 func (s *Server) requireAuth(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authenticated(r) {
 			h.ServeHTTP(w, r)
 			return
 		}
-		// API paths → 401, browser paths → redirect
-		if r.Header.Get("Accept") == "text/event-stream" ||
-			len(r.URL.Path) > 4 && r.URL.Path[:4] == "/api" ||
-			r.Header.Get("Accept") == "application/json" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		// Only redirect the root for browser navigation; everything else
+		// returns 401 so CLI tools and JS fetch() see a clear auth failure.
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	})
 }
 
