@@ -63,9 +63,8 @@ var (
 	styleRouteNum     = lipgloss.NewStyle().Foreground(colorMuted).Width(4)
 	styleRoutePattern = lipgloss.NewStyle().Foreground(colorBright).Width(32)
 
-	styleEditNew      = lipgloss.NewStyle().Foreground(colorConnected)
-	styleEditDeleted  = lipgloss.NewStyle().Foreground(colorDisconnected)
-	styleEditModified = lipgloss.NewStyle().Foreground(colorConnecting)
+	styleEditNew     = lipgloss.NewStyle().Foreground(colorConnected)
+	styleEditDeleted = lipgloss.NewStyle().Foreground(colorDisconnected)
 )
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
