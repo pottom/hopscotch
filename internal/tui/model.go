@@ -57,19 +57,6 @@ var (
 	styleBadgeDegraded = lipgloss.NewStyle().Foreground(colorConnecting).Bold(true)
 	styleBadgeOffline  = lipgloss.NewStyle().Foreground(colorDisconnected).Bold(true)
 
-	styleColName    = lipgloss.NewStyle().Foreground(colorBright).Width(26)
-	styleColHost    = lipgloss.NewStyle().Foreground(colorMuted).Width(22)
-	styleColVPN     = lipgloss.NewStyle().Width(14)
-	styleColPort    = lipgloss.NewStyle().Foreground(colorText).Width(7)
-	styleVPNColHost  = lipgloss.NewStyle().Foreground(colorMuted).Width(22) // HOST — same as TUNNEL HOST
-	styleVPNColIface = lipgloss.NewStyle().Foreground(colorMuted).Width(14) // IFACE — same width as TUNNEL VPN col
-	styleColStatus = lipgloss.NewStyle().Width(20)
-	styleColUptime = lipgloss.NewStyle().Foreground(colorText).Width(10)
-	styleColRecon  = lipgloss.NewStyle().Foreground(colorMuted).Width(5)
-	styleColBpsIn  = lipgloss.NewStyle().Foreground(colorBpsIn).Width(15)
-	styleColBpsOut = lipgloss.NewStyle().Foreground(colorBpsOut).Width(15)
-	styleColConn   = lipgloss.NewStyle().Foreground(colorText).Width(8)
-
 	styleTabActive   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleTabInactive = lipgloss.NewStyle().Foreground(colorMuted)
 
@@ -90,7 +77,14 @@ const (
 	numTabs   = 3
 )
 
-const headerHeight = 3 // title+tabs · stats · blank
+// headerLines returns the number of header lines for the current terminal width.
+// Normally 3 (title+tabs · stats · blank); becomes 4 when the title meta wraps.
+func (m Model) headerLines() int {
+	if m.width > 0 && lipgloss.Width(m.titleLeft())+lipgloss.Width(m.renderTabBar())+6 > m.width {
+		return 4
+	}
+	return 3
+}
 
 const footerHeight = 2 // separator newline + hints+ports line
 
@@ -780,7 +774,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // resizeViewports recalculates both viewports for the current terminal size
 // and active tab. Called on WindowSizeMsg and when switching tabs.
 func (m Model) resizeViewports() Model {
-	vpH := m.height - headerHeight - footerHeight
+	vpH := m.height - m.headerLines() - footerHeight
 	if vpH < 1 {
 		vpH = 1
 	}
@@ -838,6 +832,15 @@ func (m Model) View() string {
 	if m.err != nil {
 		return styleDisconnected.Render("\n  hopscotch is not running") + "\n"
 	}
+	if m.width < 80 {
+		msg := "↔  Terminal too narrow — please resize to at least 80 columns"
+		pad := strings.Repeat("\n", max(0, m.height/2))
+		indentW := (m.width - lipgloss.Width(msg)) / 2
+		if indentW < 2 {
+			indentW = 2
+		}
+		return pad + styleMuted.Render(strings.Repeat(" ", indentW)+msg) + "\n"
+	}
 
 	vp := m.vp.View()
 	switch m.activeTab {
@@ -851,7 +854,8 @@ func (m Model) View() string {
 
 // ── Header renderers ──────────────────────────────────────────────────────────
 
-func (m Model) renderTitleLine() string {
+// titleLeft returns the rendered meta portion of the title line (badge, uplink, PID, uptime).
+func (m Model) titleLeft() string {
 	versionStr := m.status.Version
 	if v := m.status.LatestVersion; v != "" {
 		versionStr += " " + styleConnecting.Render("⚡"+v)
@@ -872,22 +876,42 @@ func (m Model) renderTitleLine() string {
 	if m.status.PublicIP != "" {
 		internetStr = "  " + styleConnected.Render("⊕ internet "+m.status.PublicIP)
 	} else if m.status.Uplink && !m.status.Internet {
-		internetStr = "  " + styleMuted.Foreground(colorDisconnected).Render("○ no internet")
+		internetStr = "  " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("○ no internet")
 	}
-	left := fmt.Sprintf("  %s  %s  %s%s  %s  %s",
-		styleHeader.Render("hopscotch "+versionStr),
+	return fmt.Sprintf("%s  %s%s  %s  %s",
 		renderBadge(m.status.Status),
 		uplinkStr,
 		internetStr,
 		styleMuted.Render(fmt.Sprintf("PID %d", m.status.PID)),
 		styleMuted.Render("up "+m.status.Uptime),
 	)
-	right := m.renderTabBar() + "  "
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 2 {
-		gap = 2
+}
+
+func (m Model) renderTitleLine() string {
+	versionStr := m.status.Version
+	if v := m.status.LatestVersion; v != "" {
+		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
-	return left + strings.Repeat(" ", gap) + right + "\n"
+	appStr := "  " + styleHeader.Render("hopscotch "+versionStr)
+	meta    := m.titleLeft()
+	right   := m.renderTabBar() + "  "
+	rightW  := lipgloss.Width(right)
+
+	fullLeft := appStr + "  " + meta
+	if lipgloss.Width(fullLeft)+rightW <= m.width {
+		// Single line: everything fits.
+		gap := m.width - lipgloss.Width(fullLeft) - rightW
+		if gap < 1 {
+			gap = 1
+		}
+		return fullLeft + strings.Repeat(" ", gap) + right + "\n"
+	}
+	// Two lines: app name + tabs on line 1, meta on line 2.
+	gap := m.width - lipgloss.Width(appStr) - rightW
+	if gap < 1 {
+		gap = 1
+	}
+	return appStr + strings.Repeat(" ", gap) + right + "\n" + "  " + meta + "\n"
 }
 
 func (m Model) renderStatsLine() string {
@@ -1041,15 +1065,28 @@ func (m Model) renderFooter() string {
 	}
 	ports := proxyStr + "  " + adminStr
 
-	var leftStr string
-	if m.editMode {
-		modeLabel := styleTabActive.Bold(true).Render("-- EDIT --")
-		leftStr = modeLabel + "  " + styleMuted.Render(hints)
-	} else {
-		leftStr = styleMuted.Render(hints)
-	}
 	right := styleMuted.Render(ports)
-	gap := m.width - lipgloss.Width(leftStr) - lipgloss.Width(right) - 4
+	rightW := lipgloss.Width(right)
+
+	editLabel := ""
+	if m.editMode {
+		editLabel = styleTabActive.Bold(true).Render("-- EDIT --") + "  "
+	}
+	// Reserve room for 2-char indent + editLabel + 2-char gap + right.
+	maxHintsW := m.width - 2 - lipgloss.Width(editLabel) - 2 - rightW
+	if maxHintsW < 0 {
+		maxHintsW = 0
+	}
+	hintsRunes := []rune(hints)
+	if maxHintsW > 0 && lipgloss.Width(hints) > maxHintsW {
+		for len(hintsRunes) > 0 && lipgloss.Width(string(hintsRunes)) > maxHintsW-1 {
+			hintsRunes = hintsRunes[:len(hintsRunes)-1]
+		}
+		hints = string(hintsRunes) + "…"
+	}
+	leftStr := editLabel + styleMuted.Render(hints)
+
+	gap := m.width - 2 - lipgloss.Width(leftStr) - rightW
 	if gap < 2 {
 		gap = 2
 	}
@@ -1331,20 +1368,126 @@ func (m Model) saveRulesCmd() tea.Cmd {
 	}
 }
 
-// buildStatusContent renders the scrollable content for the status viewport.
-// fixedColsWidth is the sum of all fixed-width column chars (indent + all styled cols).
-const fixedColsWidth    = 2 + 26 + 22 + 14 + 7 + 20 + 10 + 5 + 15 + 15 + 8 // = 144
+// Fixed column widths that never change with terminal size.
+const (
+	colIndent  = 2
+	colVPNW    = 14 // VPN label col in tunnel rows; also IFACE col in VPN rows
+	colPortW   = 7
+	colStatusW = 20
+	colUptimeW = 10
+	colRCW     = 5
+	colBpsInW  = 15
+	colBpsOutW = 15
+	colConnW   = 8
+	colNameMin = 10
+	colHostMin = 10
+)
+
+// colLayout holds the computed visible-column set and elastic widths for one render pass.
+type colLayout struct {
+	nameW      int
+	hostW      int
+	showHost   bool
+	showPort   bool
+	showUptime bool
+	showRC     bool
+	showBPS    bool // bpsIn + bpsOut together
+	showConn   bool
+}
+
+// layoutTunnelCols derives which columns to show and name/host widths for tunnel rows.
+//
+//	w ≥ 144 → all cols, name+host elastic
+//	w ≥ 130 → drop conn
+//	w ≥ 110 → drop conn + bps
+//	w ≥  98 → drop conn + bps + rc
+//	w ≥  85 → drop conn + bps + rc + port
+//	w ≥  70 → drop conn + bps + rc + port + uptime
+//	w  < 70 → name + vpn + status only
+func layoutTunnelCols(width int) colLayout {
+	var l colLayout
+	l.showHost   = width >= 70
+	l.showPort   = width >= 85
+	l.showUptime = width >= 70
+	l.showRC     = width >= 98
+	l.showBPS    = width >= 110
+	l.showConn   = width >= 144
+
+	fixed := colIndent + colVPNW + colStatusW
+	if l.showPort   { fixed += colPortW }
+	if l.showUptime { fixed += colUptimeW }
+	if l.showRC     { fixed += colRCW }
+	if l.showBPS    { fixed += colBpsInW + colBpsOutW }
+	if l.showConn   { fixed += colConnW }
+
+	remaining := width - fixed
+	if l.showHost {
+		l.nameW = remaining * 55 / 100
+		if l.nameW < colNameMin {
+			l.nameW = colNameMin
+		}
+		l.hostW = remaining - l.nameW
+		if l.hostW < colHostMin {
+			l.hostW = colHostMin
+			l.nameW = remaining - l.hostW
+			if l.nameW < colNameMin {
+				l.nameW = colNameMin
+			}
+		}
+	} else {
+		l.nameW = remaining
+		if l.nameW < colNameMin {
+			l.nameW = colNameMin
+		}
+	}
+	return l
+}
+
+// layoutVPNCols derives column layout for VPN rows (no bps/conn).
+// nameW/hostW are taken from the tunnel layout so the two sections stay column-aligned.
+func layoutVPNCols(width int, tl colLayout) colLayout {
+	return colLayout{
+		nameW:      tl.nameW,
+		hostW:      tl.hostW,
+		showHost:   width >= 70,
+		showPort:   width >= 85,
+		showUptime: width >= 70,
+		showRC:     width >= 98,
+	}
+}
 
 func (m Model) sectionSep() string {
 	return "  " + styleMuted.Render(strings.Repeat("─", max(m.width-4, 10))) + "\n"
 }
 
 func (m Model) buildStatusContent() string {
+	tl := layoutTunnelCols(m.width)
+	vl := layoutVPNCols(m.width, tl)
+
 	sparkW := m.width - 4
 	if sparkW < 10 {
 		sparkW = 10
 	}
 
+	// Per-render styles — widths computed from terminal size.
+	tName   := lipgloss.NewStyle().Foreground(colorBright).Width(tl.nameW)
+	tHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(tl.hostW)
+	tVPN    := lipgloss.NewStyle().Width(colVPNW)
+	tPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	tStatus := lipgloss.NewStyle().Width(colStatusW)
+	tUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
+	tRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
+	tBpsIn  := lipgloss.NewStyle().Foreground(colorBpsIn).Width(colBpsInW)
+	tBpsOut := lipgloss.NewStyle().Foreground(colorBpsOut).Width(colBpsOutW)
+	tConn   := lipgloss.NewStyle().Foreground(colorText).Width(colConnW)
+
+	vName   := lipgloss.NewStyle().Foreground(colorBright).Width(vl.nameW)
+	vHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(vl.hostW)
+	vIface  := lipgloss.NewStyle().Foreground(colorMuted).Width(colVPNW)
+	vPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	vStatus := lipgloss.NewStyle().Width(colStatusW)
+	vUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
+	vRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
 
 	hdr := func(s lipgloss.Style, label string) string {
 		return s.Foreground(colorMuted).Render(label)
@@ -1354,15 +1497,15 @@ func (m Model) buildStatusContent() string {
 
 	// ── VPN section ───────────────────────────────────────────────────────────
 	if len(m.status.VPNs) > 0 {
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s\n",
-			hdr(styleColName, "VPN"),
-			hdr(styleVPNColHost, "HOST"),
-			hdr(styleVPNColIface, "IFACE"),
-			hdr(styleColPort, ""),
-			hdr(styleColStatus, "STATUS"),
-			hdr(styleColUptime, "UPTIME"),
-			hdr(styleColRecon, "RC"),
-		)
+		b.WriteString("  ")
+		b.WriteString(hdr(vName, "VPN"))
+		if vl.showHost   { b.WriteString(hdr(vHost, "HOST")) }
+		b.WriteString(hdr(vIface, "IFACE"))
+		if vl.showPort   { b.WriteString(hdr(vPort, "")) }
+		b.WriteString(hdr(vStatus, "STATUS"))
+		if vl.showUptime { b.WriteString(hdr(vUptime, "UPTIME")) }
+		if vl.showRC     { b.WriteString(hdr(vRC, "RC")) }
+		b.WriteString("\n")
 		b.WriteString(m.sectionSep())
 
 		vpnNames := make([]string, 0, len(m.status.VPNs))
@@ -1389,25 +1532,22 @@ func (m Model) buildStatusContent() string {
 			if iface == "" {
 				iface = "—"
 			}
-			fmt.Fprintf(&b, "  %s%s%s%s%s%s%s\n",
-				styleColName.Foreground(colorVPN).Render(name),
-				styleVPNColHost.Render(v.Host),
-				styleVPNColIface.Render(iface),
-				styleColPort.Render(""),
-				styleColStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)),
-				styleColUptime.Render(uptime),
-				styleColRecon.Render(fmt.Sprintf("%d", v.Reconnects)),
-			)
+
+			b.WriteString("  ")
+			b.WriteString(vName.Foreground(colorVPN).Render(name))
+			if vl.showHost   { b.WriteString(vHost.Render(v.Host)) }
+			b.WriteString(vIface.Render(iface))
+			if vl.showPort   { b.WriteString(vPort.Render("")) }
+			b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)))
+			if vl.showUptime { b.WriteString(vUptime.Render(uptime)) }
+			if vl.showRC     { b.WriteString(vRC.Render(fmt.Sprintf("%d", v.Reconnects))) }
+			b.WriteString("\n")
+
 			if v.LastError != "" && v.State != msgs.StatusConnected {
-				msg := v.LastError
-				avail := m.width - 6
-				if lipgloss.Width(msg) > avail && avail > 8 {
-					msg = string([]rune(msg)[:avail-1]) + "…"
-				}
 				if isVPNProgressMsg(v.LastError) {
-					b.WriteString("    " + styleConnecting.Render("◌ "+msg) + "\n")
+					b.WriteString(renderErrMsg("◌ ", v.LastError, styleConnecting, m.width) + "\n")
 				} else {
-					b.WriteString("    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("└ ✗ "+msg) + "\n")
+					b.WriteString(renderErrMsg("└ ✗ ", v.LastError, lipgloss.NewStyle().Foreground(colorDisconnected), m.width) + "\n")
 				}
 			}
 		}
@@ -1415,18 +1555,17 @@ func (m Model) buildStatusContent() string {
 	}
 
 	// ── Tunnel section ────────────────────────────────────────────────────────
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
-		hdr(styleColName, "TUNNEL"),
-		hdr(styleColHost, "HOST"),
-		hdr(styleColVPN, "VPN"),
-		hdr(styleColPort, "PORT"),
-		hdr(styleColStatus, "STATUS"),
-		hdr(styleColUptime, "UPTIME"),
-		hdr(styleColRecon, "RC"),
-		hdr(styleColBpsIn, "↓"),
-		hdr(styleColBpsOut, "↑"),
-		hdr(styleColConn, "CONN"),
-	)
+	b.WriteString("  ")
+	b.WriteString(hdr(tName, "TUNNEL"))
+	if tl.showHost   { b.WriteString(hdr(tHost, "HOST")) }
+	b.WriteString(hdr(tVPN, "VPN"))
+	if tl.showPort   { b.WriteString(hdr(tPort, "PORT")) }
+	b.WriteString(hdr(tStatus, "STATUS"))
+	if tl.showUptime { b.WriteString(hdr(tUptime, "UPTIME")) }
+	if tl.showRC     { b.WriteString(hdr(tRC, "RC")) }
+	if tl.showBPS    { b.WriteString(hdr(tBpsIn, "↓")); b.WriteString(hdr(tBpsOut, "↑")) }
+	if tl.showConn   { b.WriteString(hdr(tConn, "CONN")) }
+	b.WriteString("\n")
 	b.WriteString(m.sectionSep())
 
 	names := make([]string, 0, len(m.status.Tunnels))
@@ -1464,52 +1603,50 @@ func (m Model) buildStatusContent() string {
 		}
 		errLine := ""
 		if dispErr != "" && t.Status != msgs.StatusConnected {
-			msg := dispErr
-			avail := m.width - 6
-			if lipgloss.Width(msg) > avail && avail > 8 {
-				msg = string([]rune(msg)[:avail-1]) + "…"
-			}
 			if strings.HasPrefix(dispErr, msgs.WaitingForVPNPrefix) || dispErr == msgs.WaitingForNetwork {
-				errLine = "    " + styleConnecting.Render("◌ "+msg)
+				errLine = renderErrMsg("◌ ", dispErr, styleConnecting, m.width)
 			} else {
-				errLine = "    " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("└ ✗ "+msg)
+				errLine = renderErrMsg("└ ✗ ", dispErr, lipgloss.NewStyle().Foreground(colorDisconnected), m.width)
 			}
 		}
+
 		var tunnelStatusStr string
 		if strings.HasPrefix(t.LastError, msgs.WaitingForVPNPrefix) || t.LastError == msgs.WaitingForNetwork {
 			tunnelStatusStr = styleConnecting.Render("◌ pending")
 		} else {
 			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
 		}
+
 		vpnLabel := "—"
-		vpnStyle := styleColVPN.Foreground(colorMuted)
+		vpnColStyle := tVPN.Foreground(colorMuted)
 		if t.RequiresVPN != "" {
 			bullet := "○"
 			if v, ok := m.status.VPNs[t.RequiresVPN]; ok {
 				switch v.State {
 				case msgs.StatusConnected:
 					bullet = "●"
-					vpnStyle = styleColVPN.Foreground(colorConnected)
+					vpnColStyle = tVPN.Foreground(colorConnected)
 				case msgs.StatusConnecting:
-					vpnStyle = styleColVPN.Foreground(colorConnecting)
+					vpnColStyle = tVPN.Foreground(colorConnecting)
 				default:
-					vpnStyle = styleColVPN.Foreground(colorDisconnected)
+					vpnColStyle = tVPN.Foreground(colorDisconnected)
 				}
 			}
 			vpnLabel = bullet + " " + t.RequiresVPN
 		}
-		fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
-			styleColName.Foreground(colorAccent).Render(name),
-			styleColHost.Render(t.Host),
-			vpnStyle.Render(vpnLabel),
-			styleColPort.Render(fmt.Sprintf("%d", t.LocalPort)),
-			styleColStatus.Render(tunnelStatusStr),
-			styleColUptime.Render(uptime),
-			styleColRecon.Render(fmt.Sprintf("%d", t.ReconnectCount)),
-			styleColBpsIn.Render("↓ "+fmtBytes(bpsIn)),
-			styleColBpsOut.Render("↑ "+fmtBytes(bpsOut)),
-			styleColConn.Render(fmtActive(active)),
-		)
+
+		b.WriteString("  ")
+		b.WriteString(tName.Foreground(colorAccent).Render(name))
+		if tl.showHost   { b.WriteString(tHost.Render(t.Host)) }
+		b.WriteString(vpnColStyle.Render(vpnLabel))
+		if tl.showPort   { b.WriteString(tPort.Render(fmt.Sprintf("%d", t.LocalPort))) }
+		b.WriteString(tStatus.Render(tunnelStatusStr))
+		if tl.showUptime { b.WriteString(tUptime.Render(uptime)) }
+		if tl.showRC     { b.WriteString(tRC.Render(fmt.Sprintf("%d", t.ReconnectCount))) }
+		if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtBytes(bpsIn))); b.WriteString(tBpsOut.Render("↑ "+fmtBytes(bpsOut))) }
+		if tl.showConn   { b.WriteString(tConn.Render(fmtActive(active))) }
+		b.WriteString("\n")
+
 		if errLine != "" {
 			fmt.Fprintf(&b, "%s\n", errLine)
 		}
@@ -1521,7 +1658,7 @@ func (m Model) buildStatusContent() string {
 		}
 	}
 
-	// direct
+	// direct row
 	dw := m.traffic["direct"]
 	var dBpsIn, dBpsOut uint64
 	var dActive int64
@@ -1530,18 +1667,18 @@ func (m Model) buildStatusContent() string {
 		dBpsOut = dw.bpsOut
 		dActive = dw.active
 	}
-	fmt.Fprintf(&b, "  %s%s%s%s%s%s%s%s%s%s\n",
-		styleColName.Foreground(colorDirect).Render("direct"),
-		styleColHost.Render(""),
-		styleColVPN.Render(""),
-		styleColPort.Render(""),
-		styleColStatus.Render(""),
-		styleColUptime.Render(""),
-		styleColRecon.Render(""),
-		styleColBpsIn.Render("↓ "+fmtBytes(dBpsIn)),
-		styleColBpsOut.Render("↑ "+fmtBytes(dBpsOut)),
-		styleColConn.Render(fmtActive(dActive)),
-	)
+	b.WriteString("  ")
+	b.WriteString(tName.Foreground(colorDirect).Render("direct"))
+	if tl.showHost   { b.WriteString(tHost.Render("")) }
+	b.WriteString(tVPN.Render(""))
+	if tl.showPort   { b.WriteString(tPort.Render("")) }
+	b.WriteString(tStatus.Render(""))
+	if tl.showUptime { b.WriteString(tUptime.Render("")) }
+	if tl.showRC     { b.WriteString(tRC.Render("")) }
+	if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtBytes(dBpsIn))); b.WriteString(tBpsOut.Render("↑ "+fmtBytes(dBpsOut))) }
+	if tl.showConn   { b.WriteString(tConn.Render(fmtActive(dActive))) }
+	b.WriteString("\n")
+
 	if !m.compact && dw != nil {
 		for _, line := range renderGraph(dw.dataIn, dw.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
 			fmt.Fprintf(&b, "  %s\n", line)
@@ -1568,6 +1705,24 @@ func (m Model) totalStats() (bpsIn, bpsOut uint64, active int64) {
 
 func fmtActive(n int64) string {
 	return fmt.Sprintf("%d", n)
+}
+
+// renderErrMsg renders a prefixed error message with line-wrapping.
+// Continuation lines are indented to align with the message start.
+func renderErrMsg(prefix, msg string, style lipgloss.Style, termWidth int) string {
+	prefixRunes := len([]rune(prefix))
+	lineW := termWidth - 4 - prefixRunes // 4 = leading indent spaces
+	if lineW < 10 {
+		return "    " + style.Render(prefix+msg)
+	}
+	lines := wrapAt(msg, lineW)
+	contIndent := strings.Repeat(" ", 4+prefixRunes)
+	var b strings.Builder
+	b.WriteString("    " + style.Render(prefix+lines[0]))
+	for _, l := range lines[1:] {
+		b.WriteString("\n" + contIndent + style.Render(l))
+	}
+	return b.String()
 }
 
 // wrapAt breaks s into lines of at most width runes, splitting at spaces where possible.
