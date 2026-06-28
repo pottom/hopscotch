@@ -38,12 +38,12 @@
     <span x-text="$store.hop.meta.version"></span><template x-if="$store.hop.meta.latest_version"><span class="update-badge" x-text="'⚡' + $store.hop.meta.latest_version"></span></template>
     <span class="header-sep">·</span>
     <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
-          x-text="$store.hop.meta.uplink ? '● ' + ($store.hop.meta.uplink_iface || 'link') : '○ no link'"></span>
+          x-text="$store.hop.meta.uplink ? '● ' + ($store.hop.meta.uplink_iface || 'link') + ($store.hop.meta.uplink_ip ? ' ' + $store.hop.meta.uplink_ip : '') : '○ no link'"></span>
     <template x-if="$store.hop.meta.public_ip">
       <span class="header-sep">·</span>
     </template>
     <template x-if="$store.hop.meta.public_ip">
-      <span class="internet-badge up" x-text="'⊕ ' + $store.hop.meta.public_ip"></span>
+      <span class="internet-badge up" x-text="'⊕ internet ' + $store.hop.meta.public_ip"></span>
     </template>
     <template x-if="!$store.hop.meta.public_ip && $store.hop.meta.uplink && !$store.hop.meta.internet">
       <span class="header-sep">·</span>

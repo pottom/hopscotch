@@ -847,11 +847,15 @@ func (m Model) renderTitleLine() string {
 		if uplinkLabel == "" {
 			uplinkLabel = "link"
 		}
-		uplinkStr = styleConnected.Render("● " + uplinkLabel)
+		label := "● " + uplinkLabel
+		if m.status.UplinkIP != "" {
+			label += " " + m.status.UplinkIP
+		}
+		uplinkStr = styleConnected.Render(label)
 	}
 	var internetStr string
 	if m.status.PublicIP != "" {
-		internetStr = "  " + styleConnected.Render("⊕ "+m.status.PublicIP)
+		internetStr = "  " + styleConnected.Render("⊕ internet "+m.status.PublicIP)
 	} else if m.status.Uplink && !m.status.Internet {
 		internetStr = "  " + styleMuted.Foreground(colorDisconnected).Render("○ no internet")
 	}

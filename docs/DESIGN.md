@@ -26,7 +26,7 @@ Ez a dokumentum a kanonikus referencia. Ha valami itt nincs leírva de eltérés
 **Kanonikus sorrend (bal → jobb):**
 
 ```
-hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface / ○ no link]  [⊕ IP / ○ no internet]  PID XXXXX  up Xh Xm
+hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface localIP / ○ no link]  [⊕ internet publicIP / ○ no internet]  PID XXXXX  up Xh Xm
 ```
 
 | Elem | Mindig látható | Feltétel |
@@ -34,8 +34,8 @@ hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface / ○ no link]  [⊕ IP 
 | `hopscotch vX.Y.Z` | igen | — |
 | `⚡X.Y.Z` (update badge) | nem | ha elérhető újabb verzió |
 | status badge (`healthy` / `degraded` / ...) | igen | — |
-| `● iface` / `○ no link` | igen | uplink állapot alapján, piros ha nincs link |
-| `⊕ IP` | nem | ha `admin.show_public_ip: true` és van internet |
+| `● iface localIP` / `○ no link` | igen | uplink állapot alapján; localIP = az interface helyi IP-je; piros ha nincs link |
+| `⊕ internet publicIP` | nem | ha `admin.show_public_ip: true` és van internet |
 | `○ no internet` | nem | ha link van de internet nincs (`admin.show_public_ip: true`) |
 | `PID XXXXX` | igen | — |
 | `up Xh Xm` | igen | — |

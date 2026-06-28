@@ -350,7 +350,7 @@ document.addEventListener('alpine:init', () => {
     vpns:    {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
-    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', admin_port: 0, admin_bind: '', status: '…', internet: false, public_ip: '' },
+    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', admin_port: 0, admin_bind: '', status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
 
     tunnelList() {
       return Object.keys(this.tunnels).sort();
@@ -416,6 +416,7 @@ async function refreshStatus() {
       status:         st.status,
       uplink:         st.uplink ?? true,
       uplink_iface:   st.uplink_iface || '',
+      uplink_ip:      st.uplink_ip || '',
       internet:       st.internet ?? true,
       public_ip:      st.public_ip || '',
     };

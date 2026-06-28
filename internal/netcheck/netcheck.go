@@ -57,6 +57,16 @@ func HasUplink() bool {
 	return false
 }
 
+// UplinkIP returns the local IP address assigned to the default-route interface,
+// or empty string if there is no uplink.
+func UplinkIP() string {
+	ip := defaultRouteIP()
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
+}
+
 // UplinkInterface returns the name of the network interface that would be used
 // to reach the internet (e.g. "en0", "eth0"). Returns empty string on failure.
 func UplinkInterface() string {

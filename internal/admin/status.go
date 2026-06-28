@@ -54,6 +54,7 @@ type StatusResponse struct {
 	AdminBind     string                      `json:"admin_bind"`
 	Uplink        bool                        `json:"uplink"`
 	UplinkIface   string                      `json:"uplink_iface,omitempty"`
+	UplinkIP      string                      `json:"uplink_ip,omitempty"`
 	Internet      bool                        `json:"internet"`
 	PublicIP      string                      `json:"public_ip,omitempty"`
 	Tunnels       map[string]TunnelStatusJSON `json:"tunnels"`
@@ -146,6 +147,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		AdminBind:     s.bind,
 		Uplink:        uplink,
 		UplinkIface:   netcheck.UplinkInterface(),
+		UplinkIP:      netcheck.UplinkIP(),
 		Internet:      uplink && netcheck.HasInternet(),
 		PublicIP:      publicIP,
 		Tunnels:       tunnels,
