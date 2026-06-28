@@ -10,11 +10,14 @@ import (
 	"github.com/charmbracelet/log"
 )
 
-// Server is a SOCKS5 proxy server that delegates dialing to a Dialer.
+// Server is a SOCKS5 proxy server that delegates dialing to a [Dialer].
 type Server struct {
-	Addr        string
-	Dialer      Dialer
-	Credentials *Credentials // nil = no auth required
+	// Addr is the TCP address to listen on, e.g. "0.0.0.0:8888".
+	Addr string
+	// Dialer selects and opens the upstream connection for each CONNECT request.
+	Dialer Dialer
+	// Credentials enables RFC 1929 username/password auth. Nil means no auth.
+	Credentials *Credentials
 }
 
 // ListenAndServe starts accepting connections on s.Addr.

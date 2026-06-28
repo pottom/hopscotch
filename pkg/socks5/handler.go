@@ -25,12 +25,15 @@ const (
 
 // Request holds the parsed SOCKS5 CONNECT request.
 type Request struct {
+	// Host is the destination hostname or IP address.
 	Host string
+	// Port is the destination TCP port.
 	Port int
 }
 
 // Dialer dials a network connection for the given address.
-// The proxy router implements this interface to select the right tunnel.
+// Implement this interface to control how the proxy reaches upstream hosts —
+// for example to route through an SSH tunnel based on the target address.
 type Dialer interface {
 	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 }
