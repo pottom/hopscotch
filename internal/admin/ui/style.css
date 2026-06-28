@@ -84,6 +84,19 @@ body {
 
 .header-sep { opacity: 0.4; }
 
+.logout-btn {
+  background: none;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.68rem;
+  padding: 0.1rem 0.5rem;
+  margin-left: 0.5rem;
+}
+.logout-btn:hover { color: var(--text); border-color: #475569; }
+
 .update-badge {
   color: var(--connecting);
   font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;

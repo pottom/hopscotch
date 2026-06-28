@@ -122,6 +122,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 		"tunnels", len(cfg.Tunnels),
 		"vpns", len(cfg.VPNs),
 	)
+	if cfg.Proxy.Username != "" {
+		log.Info("proxy auth enabled", "user", cfg.Proxy.Username)
+	}
+	if cfg.Admin.Username != "" {
+		log.Info("admin auth enabled", "user", cfg.Admin.Username)
+	}
 	config.LogConfig(cfg)
 
 	if updater.InContainer() {

@@ -38,9 +38,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/status", adminPort)
+	username, password := resolveAdminCredentials()
 
 	if !plainStatus && term.IsTerminal(os.Stdout.Fd()) {
-		m := tui.New(url)
+		m := tui.New(url, username, password)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		_, err := p.Run()
 		return err
@@ -147,6 +148,14 @@ func resolveAdminPort() (int, error) {
 		return cfg.Admin.Port, nil
 	}
 	return config.DefaultAdminPort, nil
+}
+
+func resolveAdminCredentials() (username, password string) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return "", ""
+	}
+	return cfg.Admin.Username, cfg.Admin.Password
 }
 
 func formatDuration(d time.Duration) string {

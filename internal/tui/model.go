@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -335,12 +337,21 @@ type Model struct {
 	traffic map[string]*trafficWindow
 	err     error
 
-	adminURL string
-	sseURL   string
-	logURL   string
-	sseCh    chan ssePayload
-	logCh    chan string
-	done     chan struct{}
+	adminURL   string
+	sseURL     string
+	logURL     string
+	sseCh      chan ssePayload
+	logCh      chan string
+	done       chan struct{}
+	httpClient *http.Client
+
+	// login state — shown when admin requires auth
+	loginRequired bool
+	loginUser     textinput.Model
+	loginPass     textinput.Model
+	loginFocus    int // 0=user 1=pass
+	loginErr      string
+	loginBase     string // base admin URL for POST /api/login
 
 	activeTab    int
 	logLines     []string
@@ -371,11 +382,24 @@ type Model struct {
 	ready       bool
 }
 
-func New(adminURL string) Model {
+// New creates a TUI Model. If username and password are non-empty they are used
+// to automatically authenticate against a protected admin server. If they are
+// empty and the server returns 401, an interactive login prompt is shown.
+func New(adminURL, username, password string) Model {
 	base := strings.TrimSuffix(adminURL, "/status")
 	sseCh := make(chan ssePayload, 8)
 	logCh := make(chan string, 64)
 	done := make(chan struct{})
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
+
+	// If credentials are provided, attempt login immediately (synchronous,
+	// before Tea starts) so all subsequent requests carry the session cookie.
+	if username != "" && password != "" {
+		loginURL := base + "/api/login"
+		_ = doLogin(client, loginURL, username, password)
+	}
 
 	ti := textinput.New()
 	ti.Placeholder = "hostname or URL — Ctrl+N to clear"
@@ -387,13 +411,30 @@ func New(adminURL string) Model {
 	ep.CharLimit = 256
 	ep.Width = 32
 
+	lu := textinput.New()
+	lu.Placeholder = "username"
+	lu.CharLimit = 128
+	lu.Width = 28
+	lu.Focus()
+
+	lp := textinput.New()
+	lp.Placeholder = "password"
+	lp.CharLimit = 128
+	lp.Width = 28
+	lp.EchoMode = textinput.EchoPassword
+	lp.EchoCharacter = '•'
+
 	return Model{
-		adminURL: adminURL,
-		sseURL:   base + "/traffic/stream",
-		logURL:   base + "/logs/stream",
-		sseCh:    sseCh,
-		logCh:    logCh,
-		done:     done,
+		adminURL:    adminURL,
+		sseURL:      base + "/traffic/stream",
+		logURL:      base + "/logs/stream",
+		sseCh:       sseCh,
+		logCh:       logCh,
+		done:        done,
+		httpClient:  client,
+		loginBase:   base,
+		loginUser:   lu,
+		loginPass:   lp,
 		traffic:     make(map[string]*trafficWindow),
 		compact:     true,
 		mirrorGraph: true,
@@ -404,10 +445,26 @@ func New(adminURL string) Model {
 	}
 }
 
+// doLogin POSTs credentials to /api/login; the session cookie is stored in client.Jar.
+func doLogin(client *http.Client, loginURL, username, password string) error {
+	resp, err := client.PostForm(loginURL, url.Values{
+		"username": {username},
+		"password": {password},
+	})
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusSeeOther {
+		return fmt.Errorf("login failed: %s", resp.Status)
+	}
+	return nil
+}
+
 func (m Model) Init() tea.Cmd {
-	go runSSE(m.sseURL, m.sseCh, m.done)
-	go runLogSSE(m.logURL, m.logCh, m.done)
-	return tea.Batch(fetchStatus(m.adminURL), tickEvery(), waitForSSE(m.sseCh), waitForLog(m.logCh))
+	go runSSE(m.sseURL, m.httpClient, m.sseCh, m.done)
+	go runLogSSE(m.logURL, m.httpClient, m.logCh, m.done)
+	return tea.Batch(fetchStatus(m.adminURL, m.httpClient), tickEvery(), waitForSSE(m.sseCh), waitForLog(m.logCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -416,6 +473,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		// Login form takes priority over all other key handling.
+		if m.loginRequired {
+			switch msg.String() {
+			case "ctrl+c", "q":
+				close(m.done)
+				return m, tea.Quit
+			case "tab", "down":
+				if m.loginFocus == 0 {
+					m.loginFocus = 1
+					m.loginUser.Blur()
+					m.loginPass.Focus()
+				} else {
+					m.loginFocus = 0
+					m.loginPass.Blur()
+					m.loginUser.Focus()
+				}
+			case "enter":
+				if m.loginFocus == 0 {
+					m.loginFocus = 1
+					m.loginUser.Blur()
+					m.loginPass.Focus()
+				} else {
+					u := m.loginUser.Value()
+					p := m.loginPass.Value()
+					return m, loginCmd(m.httpClient, m.loginBase+"/api/login", u, p)
+				}
+			default:
+				if m.loginFocus == 0 {
+					m.loginUser, cmd = m.loginUser.Update(msg)
+				} else {
+					m.loginPass, cmd = m.loginPass.Update(msg)
+				}
+				return m, cmd
+			}
+			return m, nil
+		}
+
 		// Pattern edit input (inside edit mode) — most keys go to textinput.
 		if m.editPatFocused {
 			switch msg.String() {
@@ -689,6 +783,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.routeVP.SetContent(m.buildRoutesEditContent())
 		}
 
+	case loginRequiredMsg:
+		m.loginRequired = true
+		m.loginErr = ""
+		m.loginFocus = 0
+		m.loginUser.Focus()
+		m.loginPass.Blur()
+		return m, nil
+
+	case loginOKMsg:
+		m.loginRequired = false
+		m.loginErr = ""
+		return m, tea.Batch(fetchStatus(m.adminURL, m.httpClient), tickEvery())
+
+	case loginErrMsg:
+		m.loginErr = "Invalid username or password."
+		m.loginPass.SetValue("")
+		m.loginFocus = 0
+		m.loginUser.Focus()
+		m.loginPass.Blur()
+		return m, nil
+
 	case statusMsg:
 		m.status = admin.StatusResponse(msg)
 		m.err = nil
@@ -756,7 +871,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.vpReady {
 			m.vp.SetContent(m.buildStatusContent())
 		}
-		return m, tea.Batch(fetchStatus(m.adminURL), tickEvery())
+		return m, tea.Batch(fetchStatus(m.adminURL, m.httpClient), tickEvery())
 	}
 
 	return m, cmd
@@ -817,6 +932,9 @@ func (m Model) resizeViewports() Model {
 }
 
 func (m Model) View() string {
+	if m.loginRequired {
+		return m.renderLoginForm()
+	}
 	if !m.ready {
 		return styleMuted.Render("\n  connecting…") + "\n"
 	}
@@ -1040,6 +1158,45 @@ func (m Model) renderFooter() string {
 	}
 
 	return "\n  " + leftStr + strings.Repeat(" ", gap) + right
+}
+
+func (m Model) renderLoginForm() string {
+	w := m.width
+	if w < 40 {
+		w = 40
+	}
+	cardW := 36
+	pad := (w - cardW) / 2
+	if pad < 2 {
+		pad = 2
+	}
+	indent := strings.Repeat(" ", pad)
+
+	logo := styleConnected.Render("⬡") + " " + styleHeader.Render("hopscotch")
+	title := styleMuted.Render("admin sign in")
+
+	userLabel := styleMuted.Render("username")
+	passLabel := styleMuted.Render("password")
+
+	var errLine string
+	if m.loginErr != "" {
+		errLine = "\n" + indent + styleDisconnected.Render("  "+m.loginErr)
+	}
+
+	lines := []string{
+		"",
+		indent + logo,
+		indent + title,
+		"",
+		indent + userLabel,
+		indent + "  " + m.loginUser.View(),
+		indent + passLabel,
+		indent + "  " + m.loginPass.View(),
+		errLine,
+		"",
+		indent + styleMuted.Render("tab/↓ next field  enter confirm  q quit"),
+	}
+	return strings.Join(lines, "\n")
 }
 
 // findRouteMatch returns the index of the first rule matching the input value, or -1.
@@ -1289,18 +1446,19 @@ func (m Model) saveRulesCmd() tea.Cmd {
 	if rules == nil {
 		rules = []admin.RouteJSON{}
 	}
-	url := strings.TrimSuffix(m.adminURL, "/status") + "/api/rules"
+	rulesURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/rules"
+	client := m.httpClient
 	return func() tea.Msg {
 		body, err := json.Marshal(map[string]interface{}{"rules": rules})
 		if err != nil {
 			return rulesSaveErrMsg{err}
 		}
-		resp, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPut, rulesURL, bytes.NewReader(body))
 		if err != nil {
 			return rulesSaveErrMsg{err}
 		}
-		resp.Header.Set("Content-Type", "application/json")
-		res, err := http.DefaultClient.Do(resp)
+		req.Header.Set("Content-Type", "application/json")
+		res, err := client.Do(req)
 		if err != nil {
 			return rulesSaveErrMsg{err}
 		}
@@ -1704,18 +1862,34 @@ func tickEvery() tea.Cmd {
 	})
 }
 
-func fetchStatus(url string) tea.Cmd {
+type loginRequiredMsg struct{}
+type loginErrMsg struct{ err error }
+type loginOKMsg struct{}
+
+func fetchStatus(url string, client *http.Client) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := http.Get(url) //nolint:noctx
+		resp, err := client.Get(url) //nolint:noctx
 		if err != nil {
 			return errMsg(err)
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			return loginRequiredMsg{}
+		}
 		var st admin.StatusResponse
 		if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 			return errMsg(err)
 		}
 		return statusMsg(st)
+	}
+}
+
+func loginCmd(client *http.Client, loginURL, username, password string) tea.Cmd {
+	return func() tea.Msg {
+		if err := doLogin(client, loginURL, username, password); err != nil {
+			return loginErrMsg{err}
+		}
+		return loginOKMsg{}
 	}
 }
 
@@ -1731,7 +1905,7 @@ func waitForLog(ch <-chan string) tea.Cmd {
 	}
 }
 
-func runSSE(url string, ch chan<- ssePayload, done <-chan struct{}) {
+func runSSE(url string, client *http.Client, ch chan<- ssePayload, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -1739,7 +1913,7 @@ func runSSE(url string, ch chan<- ssePayload, done <-chan struct{}) {
 		default:
 		}
 
-		resp, err := http.Get(url) //nolint:noctx
+		resp, err := client.Get(url) //nolint:noctx
 		if err != nil {
 			select {
 			case <-done:
@@ -1776,7 +1950,7 @@ func runSSE(url string, ch chan<- ssePayload, done <-chan struct{}) {
 	}
 }
 
-func runLogSSE(url string, ch chan<- string, done <-chan struct{}) {
+func runLogSSE(url string, client *http.Client, ch chan<- string, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -1784,7 +1958,7 @@ func runLogSSE(url string, ch chan<- string, done <-chan struct{}) {
 		default:
 		}
 
-		resp, err := http.Get(url) //nolint:noctx
+		resp, err := client.Get(url) //nolint:noctx
 		if err != nil {
 			select {
 			case <-done:
