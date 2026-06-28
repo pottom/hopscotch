@@ -841,7 +841,7 @@ func (m Model) renderTitleLine() string {
 	if v := m.status.LatestVersion; v != "" {
 		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
-	uplinkStr := styleMuted.Render("○ no link")
+	uplinkStr := lipgloss.NewStyle().Foreground(colorDisconnected).Render("○ no link")
 	if m.status.Uplink {
 		uplinkLabel := m.status.UplinkIface
 		if uplinkLabel == "" {
@@ -849,10 +849,17 @@ func (m Model) renderTitleLine() string {
 		}
 		uplinkStr = styleConnected.Render("● " + uplinkLabel)
 	}
-	left := fmt.Sprintf("  %s  %s  %s  %s  %s",
+	var internetStr string
+	if m.status.PublicIP != "" {
+		internetStr = "  " + styleConnected.Render("⊕ "+m.status.PublicIP)
+	} else if m.status.Uplink && !m.status.Internet {
+		internetStr = "  " + styleMuted.Foreground(colorDisconnected).Render("○ no internet")
+	}
+	left := fmt.Sprintf("  %s  %s  %s%s  %s  %s",
 		styleHeader.Render("hopscotch "+versionStr),
 		renderBadge(m.status.Status),
 		uplinkStr,
+		internetStr,
 		styleMuted.Render(fmt.Sprintf("PID %d", m.status.PID)),
 		styleMuted.Render("up "+m.status.Uptime),
 	)
@@ -1572,7 +1579,7 @@ func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int)
 	switch status {
 	case msgs.StatusConnected:
 		if keepaliveFails > 0 {
-			return styleConnected.Render(fmt.Sprintf("● connected ⚠%d", keepaliveFails))
+			return styleConnecting.Render(fmt.Sprintf("● connected ⚠%d", keepaliveFails))
 		}
 		return styleConnected.Render("● connected")
 	case msgs.StatusConnecting:

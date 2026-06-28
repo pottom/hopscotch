@@ -17,6 +17,7 @@ import (
 	"hopscotch/internal/admin"
 	"hopscotch/internal/config"
 	"hopscotch/internal/proxy"
+	"hopscotch/internal/netcheck"
 	"hopscotch/internal/security"
 	"hopscotch/internal/state"
 	"hopscotch/internal/tunnel"
@@ -144,6 +145,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
+
+	if cfg.Admin.ShowPublicIP {
+		netcheck.StartPublicIPWatcher(ctx, 60*time.Second)
+	}
 
 	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
 		g.Go(func() error { return vpnMgr.Run(ctx) })

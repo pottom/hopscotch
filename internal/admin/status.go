@@ -54,6 +54,8 @@ type StatusResponse struct {
 	AdminBind     string                      `json:"admin_bind"`
 	Uplink        bool                        `json:"uplink"`
 	UplinkIface   string                      `json:"uplink_iface,omitempty"`
+	Internet      bool                        `json:"internet"`
+	PublicIP      string                      `json:"public_ip,omitempty"`
 	Tunnels       map[string]TunnelStatusJSON `json:"tunnels"`
 	VPNs          map[string]VPNStatusJSON    `json:"vpns,omitempty"`
 	Routes        []RouteJSON                 `json:"routes"`
@@ -127,6 +129,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		routes[i] = RouteJSON{Pattern: r.Pattern, Tunnel: r.Tunnel, Via: r.Via}
 	}
 
+	uplink := netcheck.HasUplink()
+	publicIP := ""
+	if uplink {
+		publicIP = netcheck.PublicIP()
+	}
 	resp := StatusResponse{
 		Status:        overall,
 		Version:       version.Version,
@@ -137,8 +144,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ProxyBind:     s.proxyBind,
 		AdminPort:     s.port,
 		AdminBind:     s.bind,
-		Uplink:        netcheck.HasUplink(),
+		Uplink:        uplink,
 		UplinkIface:   netcheck.UplinkInterface(),
+		Internet:      uplink && netcheck.HasInternet(),
+		PublicIP:      publicIP,
 		Tunnels:       tunnels,
 		VPNs:          vpnMap,
 		Routes:        routes,

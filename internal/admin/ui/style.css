@@ -96,6 +96,12 @@ body {
 }
 .uplink-badge.up   { color: var(--connected); }
 .uplink-badge.down { color: var(--disconnected); }
+.internet-badge {
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.72rem;
+}
+.internet-badge.up   { color: var(--connected); }
+.internet-badge.down { color: var(--disconnected); }
 
 /* ── TAB BAR ──────────────────────────────── */
 .tab-bar {

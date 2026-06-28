@@ -37,12 +37,24 @@
   <div class="header-meta">
     <span x-text="$store.hop.meta.version"></span><template x-if="$store.hop.meta.latest_version"><span class="update-badge" x-text="'⚡' + $store.hop.meta.latest_version"></span></template>
     <span class="header-sep">·</span>
+    <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
+          x-text="$store.hop.meta.uplink ? '● ' + ($store.hop.meta.uplink_iface || 'link') : '○ no link'"></span>
+    <template x-if="$store.hop.meta.public_ip">
+      <span class="header-sep">·</span>
+    </template>
+    <template x-if="$store.hop.meta.public_ip">
+      <span class="internet-badge up" x-text="'⊕ ' + $store.hop.meta.public_ip"></span>
+    </template>
+    <template x-if="!$store.hop.meta.public_ip && $store.hop.meta.uplink && !$store.hop.meta.internet">
+      <span class="header-sep">·</span>
+    </template>
+    <template x-if="!$store.hop.meta.public_ip && $store.hop.meta.uplink && !$store.hop.meta.internet">
+      <span class="internet-badge down">○ no internet</span>
+    </template>
+    <span class="header-sep">·</span>
     <span x-text="'PID ' + $store.hop.meta.pid"></span>
     <span class="header-sep">·</span>
     <span x-text="'up ' + $store.hop.meta.uptime"></span>
-    <span class="header-sep">·</span>
-    <span class="uplink-badge" :class="$store.hop.meta.uplink ? 'up' : 'down'"
-          x-text="$store.hop.meta.uplink ? '● ' + ($store.hop.meta.uplink_iface || 'link') : '○ no link'"></span>
   </div>
 </header>
 
@@ -57,9 +69,9 @@
 <div id="panel-status" class="tab-panel active" style="flex-direction:column;">
 
   <div class="stats-bar">
-    <span class="stats-in"   x-text="'↓ ' + fmtBytes($store.hop.totalStats().bpsIn)  + '/s'"></span>
+    <span class="stats-in"   x-text="'↓ ' + fmtBytes($store.hop.totalStats().bpsIn)"></span>
     <span class="stats-sep">·</span>
-    <span class="stats-out"  x-text="'↑ ' + fmtBytes($store.hop.totalStats().bpsOut) + '/s'"></span>
+    <span class="stats-out"  x-text="'↑ ' + fmtBytes($store.hop.totalStats().bpsOut)"></span>
     <span class="stats-sep">·</span>
     <span class="stats-conn" x-text="$store.hop.totalStats().active + ' conn total'"></span>
   </div>

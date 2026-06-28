@@ -19,18 +19,18 @@ window.isTunnelProgressMsg = function(msg) {
 };
 
 window.fmtBytes = function(n) {
-  if (!n) return '0 B';
-  if (n < 1024)    return n + ' B';
-  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-  return (n / 1048576).toFixed(2) + ' MB';
+  if (!n) return '0 B/s';
+  if (n < 1024)    return n + ' B/s';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB/s';
+  return (n / 1048576).toFixed(2) + ' MB/s';
 };
 
 window.fmtUptime = function(sec) {
   if (!sec) return '—';
   sec = Math.floor(sec);
   if (sec < 60)   return sec + 's';
-  if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
-  return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm' + (sec % 60) + 's';
+  return Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm';
 };
 
 // ── Chart management ─────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ window.initChart = function(name, canvas) {
             color:         '#475569',
             maxTicksLimit: 3,
             font:          { size: 9, family: "'JetBrains Mono', monospace" },
-            callback:      v => v === 0 ? '' : fmtBytes(Math.abs(v)) + '/s',
+            callback:      v => v === 0 ? '' : fmtBytes(Math.abs(v)),
           },
         },
       },
@@ -130,7 +130,7 @@ function tunnelStatusHtml(t) {
   const s = t.status, ri = t.reconnect_in;
   if (s === 'connected') {
     return t.keepalive_failures > 0
-      ? `<span class="st-warning">⚠ connected (${t.keepalive_failures})</span>`
+      ? `<span class="st-warning">● connected ⚠${t.keepalive_failures}</span>`
       : '<span class="st-connected">● connected</span>';
   }
   if (s === 'connecting' || s === 'disconnected') {
@@ -250,8 +250,8 @@ function buildTunnelRows(names) {
         `<td data-col="status"><span class="st-muted">—</span></td>` +
         `<td data-col="uptime"><span class="st-muted">—</span></td>` +
         `<td data-col="rc"><span class="st-muted">—</span></td>` +
-        `<td class="bps-in"  data-col="bps-in">${fmtBytes(d.bps_in  || 0) + '/s'}</td>` +
-        `<td class="bps-out" data-col="bps-out">${fmtBytes(d.bps_out || 0) + '/s'}</td>` +
+        `<td class="bps-in"  data-col="bps-in">${fmtBytes(d.bps_in  || 0)}</td>` +
+        `<td class="bps-out" data-col="bps-out">${fmtBytes(d.bps_out || 0)}</td>` +
         `<td data-col="active">${d.active || 0}</td>`;
     } else {
       const t = store.tunnels[name];
@@ -265,8 +265,8 @@ function buildTunnelRows(names) {
         `<td data-col="status">${tunnelStatusHtml(t)}</td>` +
         `<td data-col="uptime">${fmtUptime(t.uptime_seconds)}</td>` +
         `<td data-col="rc">${t.reconnect_count || 0}</td>` +
-        `<td class="bps-in"  data-col="bps-in">${fmtBytes(t.bps_in  || 0) + '/s'}</td>` +
-        `<td class="bps-out" data-col="bps-out">${fmtBytes(t.bps_out || 0) + '/s'}</td>` +
+        `<td class="bps-in"  data-col="bps-in">${fmtBytes(t.bps_in  || 0)}</td>` +
+        `<td class="bps-out" data-col="bps-out">${fmtBytes(t.bps_out || 0)}</td>` +
         `<td data-col="active">${t.active || 0}</td>`;
     }
     tbody.appendChild(tr);
@@ -295,8 +295,8 @@ function updateTunnelRows() {
     const name = row.dataset.name;
     if (name === 'direct') {
       const d = store.direct;
-      setCell(row, 'bps-in',  fmtBytes(d.bps_in  || 0) + '/s');
-      setCell(row, 'bps-out', fmtBytes(d.bps_out || 0) + '/s');
+      setCell(row, 'bps-in',  fmtBytes(d.bps_in  || 0));
+      setCell(row, 'bps-out', fmtBytes(d.bps_out || 0));
       setCell(row, 'active', d.active || 0);
       continue;
     }
@@ -307,8 +307,8 @@ function updateTunnelRows() {
     setCell(row, 'status', tunnelStatusHtml(t), true);
     setCell(row, 'uptime', fmtUptime(t.uptime_seconds));
     setCell(row, 'rc', t.reconnect_count || 0);
-    setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0) + '/s');
-    setCell(row, 'bps-out', fmtBytes(t.bps_out || 0) + '/s');
+    setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0));
+    setCell(row, 'bps-out', fmtBytes(t.bps_out || 0));
     setCell(row, 'active', t.active || 0);
     // update msg sub-row
     const mRow = row.nextElementSibling?.classList.contains('msg-row') ? row.nextElementSibling : null;
@@ -350,7 +350,7 @@ document.addEventListener('alpine:init', () => {
     vpns:    {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
-    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', admin_port: 0, admin_bind: '', status: '…' },
+    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', admin_port: 0, admin_bind: '', status: '…', internet: false, public_ip: '' },
 
     tunnelList() {
       return Object.keys(this.tunnels).sort();
@@ -416,6 +416,8 @@ async function refreshStatus() {
       status:         st.status,
       uplink:         st.uplink ?? true,
       uplink_iface:   st.uplink_iface || '',
+      internet:       st.internet ?? true,
+      public_ip:      st.public_ip || '',
     };
 
     // Rebuild tunnel map, preserving live bps/active values from SSE.
@@ -488,8 +490,8 @@ function connectSSE() {
       pushChart(name, t.bps_in, t.bps_out);
       const row = findTunnelRow(name);
       if (row) {
-        setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0) + '/s');
-        setCell(row, 'bps-out', fmtBytes(t.bps_out || 0) + '/s');
+        setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0));
+        setCell(row, 'bps-out', fmtBytes(t.bps_out || 0));
         setCell(row, 'active', t.active || 0);
         if (store.tunnels[name]) setCell(row, 'status', tunnelStatusHtml(store.tunnels[name]), true);
       }
@@ -512,8 +514,8 @@ function connectSSE() {
     const directRow = findTunnelRow('direct');
     if (directRow) {
       const dr = store.direct;
-      setCell(directRow, 'bps-in',  fmtBytes(dr.bps_in  || 0) + '/s');
-      setCell(directRow, 'bps-out', fmtBytes(dr.bps_out || 0) + '/s');
+      setCell(directRow, 'bps-in',  fmtBytes(dr.bps_in  || 0));
+      setCell(directRow, 'bps-out', fmtBytes(dr.bps_out || 0));
       setCell(directRow, 'active', dr.active || 0);
     }
   };

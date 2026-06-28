@@ -91,8 +91,9 @@ type ProxyConfig struct {
 
 // AdminConfig controls the HTTP admin server.
 type AdminConfig struct {
-	Port int    `yaml:"port"`
-	Bind string `yaml:"bind"`
+	Port         int    `yaml:"port"`
+	Bind         string `yaml:"bind"`
+	ShowPublicIP bool   `yaml:"show_public_ip"` // periodically fetch and display public IP; default false
 }
 
 // Config is the root configuration object.
