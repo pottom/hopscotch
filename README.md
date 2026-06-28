@@ -13,7 +13,7 @@
 
 > The name comes from the children's game: just as a player hops from square to square along a fixed path, hopscotch routes each connection through the right tunnel — automatically, one hop at a time.
 
-![hopscotch TUI dashboard](docs/tui-status.svg)
+![hopscotch TUI dashboard](docs/tui-status.png)
 
 ---
 
@@ -82,9 +82,9 @@ hopscotch sits between your tools and your jump hosts. Apps connect to a single 
 
 `hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Patterns**, **Logs**, **Docs**.
 
-![TUI status tab](docs/tui-status.svg)
+![TUI status tab](docs/tui-status.png)
 
-Each tunnel card shows: connection status, host, local port, uptime, reconnect counter, live per-second throughput (↓ in / ↑ out), active connection count, and a reason line when something's wrong — like `waiting for VPN: corp-vpn`. Traffic graphs update every second. A `⚡v0.5.1` badge appears next to the version when an update is available.
+Each tunnel shows: connection status, host, local port, uptime, reconnect counter, live per-second throughput (↓ in / ↑ out), and active connection count. A reason line appears when something's wrong — like `waiting for VPN: corp-vpn`. A `⚡v0.8.0` badge appears next to the version when an update is available.
 
 ### TUI key bindings
 
@@ -102,7 +102,9 @@ Each tunnel card shows: connection status, host, local port, uptime, reconnect c
 
 The **Patterns tab** shows exactly which hostnames route where. Press `/` to focus the URL tester — type any hostname or URL and hopscotch highlights the matching rule in real time.
 
-![TUI routes tab with URL tester](docs/tui-routes.svg)
+The **Logs tab** shows a live stream of structured log lines, filterable by level with `f`.
+
+![TUI logs tab](docs/tui-logs.png)
 
 Rules evaluate top-to-bottom; first match wins. Patterns support:
 
@@ -191,7 +193,9 @@ The generated file stays in sync: hopscotch refreshes it automatically on every 
 
 The **Logs tab** has level filter buttons (ALL / INFO / WARN / ERR) that reconnect the SSE stream so only matching lines are sent from the server. The active tab and selected log level are saved in `localStorage` and restored on reload.
 
-![Admin web UI](docs/ui-preview.svg)
+![Admin web UI — Status](docs/ui-status.png)
+
+![Admin web UI — Logs](docs/ui-logs.png)
 
 ## Installation
 
