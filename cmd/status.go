@@ -24,6 +24,7 @@ import (
 var (
 	plainStatus    bool
 	statusUsername string
+	statusPassword string
 )
 
 var statusCmd = &cobra.Command{
@@ -36,6 +37,7 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	statusCmd.Flags().BoolVar(&plainStatus, "plain", false, "print plain text instead of opening the TUI")
 	statusCmd.Flags().StringVar(&statusUsername, "username", "", "admin username (prompted if omitted and auth is required)")
+	statusCmd.Flags().StringVar(&statusPassword, "password", "", "admin password (use stdin pipe for safer input)")
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
@@ -47,7 +49,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	base := fmt.Sprintf("http://127.0.0.1:%d", adminPort)
 	statusURL := base + "/status"
 
-	client, err := resolveAdminClient(base, statusUsername)
+	client, err := resolveAdminClient(base, statusUsername, statusPassword)
 	if err != nil {
 		return err
 	}
@@ -76,9 +78,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 }
 
 // resolveAdminClient returns an authenticated *http.Client ready to use.
-// If the admin requires auth it prompts interactively; on failure it returns
-// an error so the TUI is never started.
-func resolveAdminClient(baseURL, username string) (*http.Client, error) {
+// Password resolution order: --password flag → stdin pipe → interactive prompt.
+func resolveAdminClient(baseURL, username, password string) (*http.Client, error) {
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
 
@@ -102,11 +103,22 @@ func resolveAdminClient(baseURL, username string) (*http.Client, error) {
 		fmt.Fscan(os.Stdin, &username)
 	}
 
-	fmt.Fprint(os.Stderr, "Password: ")
-	passwordBytes, err := xterm.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Fprintln(os.Stderr) // newline after hidden input
-	if err != nil {
-		return nil, fmt.Errorf("reading password: %w", err)
+	var passwordBytes []byte
+	if password != "" {
+		// Provided via --password flag.
+		passwordBytes = []byte(password)
+	} else if !xterm.IsTerminal(int(os.Stdin.Fd())) {
+		// Stdin is a pipe — read password from it.
+		fmt.Fscan(os.Stdin, &password)
+		passwordBytes = []byte(password)
+	} else {
+		// Interactive prompt — hide input.
+		fmt.Fprint(os.Stderr, "Password: ")
+		passwordBytes, err = xterm.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr) // newline after hidden input
+		if err != nil {
+			return nil, fmt.Errorf("reading password: %w", err)
+		}
 	}
 
 	// Attempt login.
