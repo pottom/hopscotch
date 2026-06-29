@@ -163,17 +163,17 @@ func (r *Router) resolve(ctx context.Context, host string) (label string, dialer
 			continue
 		}
 
-		if rule.Via == config.ViaDirect {
-			return config.ViaDirect, &r.direct, "", rule.Pattern, nil
+		if rule.Target == config.TargetDirect {
+			return config.TargetDirect, &r.direct, "", rule.Pattern, nil
 		}
 
-		if rule.Via == config.ViaBlock {
+		if rule.Target == config.TargetBlock {
 			return "", nil, "", "", fmt.Errorf("%w: connection to %s blocked by rule (pattern: %s)", errBlocked, host, rule.Pattern)
 		}
 
-		t := r.tunnels.Get(rule.Tunnel)
+		t := r.tunnels.Get(rule.Target)
 		if t == nil {
-			return "", nil, "", "", fmt.Errorf("rule refers to unknown tunnel %q", rule.Tunnel)
+			return "", nil, "", "", fmt.Errorf("rule refers to unknown tunnel %q", rule.Target)
 		}
 
 		// Snapshot status before waiting so the log reflects what the caller saw.
@@ -183,12 +183,12 @@ func (r *Router) resolve(ctx context.Context, host string) (label string, dialer
 			return "", nil, "", "", err
 		}
 
-		return rule.Tunnel, t, initialStatus, rule.Pattern, nil
+		return rule.Target, t, initialStatus, rule.Pattern, nil
 	}
 
 	// No matching rule — use direct as fallback.
 	log.Warn("no routing rule matched, using direct", "host", host)
-	return config.ViaDirect, &r.direct, "", "", nil
+	return config.TargetDirect, &r.direct, "", "", nil
 }
 
 // waitForTunnel returns immediately with an error if the tunnel is not connected.

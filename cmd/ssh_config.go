@@ -73,8 +73,8 @@ func runSSHConfig(_ *cobra.Command, _ []string) error {
 func printSSHConfigSummary(cfg *config.Config) {
 	tunnelPatterns := map[string][]string{}
 	for _, rule := range cfg.Proxy.Rules {
-		if rule.Tunnel != "" {
-			tunnelPatterns[rule.Tunnel] = append(tunnelPatterns[rule.Tunnel], rule.Pattern)
+		if rule.Target != config.TargetDirect && rule.Target != config.TargetBlock {
+			tunnelPatterns[rule.Target] = append(tunnelPatterns[rule.Target], rule.Pattern)
 		}
 	}
 	for _, t := range cfg.Tunnels {
@@ -162,16 +162,16 @@ func buildSSHConfig(cfg *config.Config) string {
 	}
 	entries := map[string]*tunnelEntries{}
 	for _, rule := range cfg.Proxy.Rules {
-		if rule.Tunnel == "" {
+		if rule.Target == config.TargetDirect || rule.Target == config.TargetBlock {
 			continue
 		}
-		if entries[rule.Tunnel] == nil {
-			entries[rule.Tunnel] = &tunnelEntries{}
+		if entries[rule.Target] == nil {
+			entries[rule.Target] = &tunnelEntries{}
 		}
 		if proxy.IsCIDR(rule.Pattern) {
-			entries[rule.Tunnel].cidrs = append(entries[rule.Tunnel].cidrs, rule.Pattern)
+			entries[rule.Target].cidrs = append(entries[rule.Target].cidrs, rule.Pattern)
 		} else {
-			entries[rule.Tunnel].globs = append(entries[rule.Tunnel].globs, rule.Pattern)
+			entries[rule.Target].globs = append(entries[rule.Target].globs, rule.Pattern)
 		}
 	}
 

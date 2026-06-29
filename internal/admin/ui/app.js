@@ -781,7 +781,7 @@ function renderRoutesTable(highlightIdx) {
 
   tbody.innerHTML = '';
   routes.forEach((r, i) => {
-    const via = r.tunnel || r.via || 'direct';
+    const via = r.target || 'direct';
     const t = tunnels[via];
     const vs = tunnelVisualStatus(t);
 
@@ -834,8 +834,7 @@ function rulesStartEdit() {
     ...r,
     _new: false, _deleted: false, _modified: false,
     _origPattern: r.pattern,
-    _origTunnel:  r.tunnel || '',
-    _origVia:     r.via    || 'direct',
+    _origTarget:  r.target || 'direct',
   }));
   document.getElementById('routes-edit-btn').style.display   = 'none';
   document.getElementById('routes-save-btn').style.display   = '';
@@ -858,7 +857,7 @@ function rulesCancel() {
 
 function rulesInsertAfter(i) {
   rulesCollectFromDOM();
-  rulesEditData.splice(i + 1, 0, {pattern: '', tunnel: '', via: 'direct', _new: true, _deleted: false});
+  rulesEditData.splice(i + 1, 0, {pattern: '', target: 'direct', _new: true, _deleted: false});
   renderEditTable(i + 1);
   const rows = document.querySelectorAll('#routes-tbody tr[data-idx]');
   if (rows[i + 1]) rows[i + 1].querySelector('.rules-edit-pattern')?.focus();
@@ -894,14 +893,14 @@ function rulesMoveDown(i) {
   renderEditTable();
 }
 
-function rulesEffectiveVia(r) {
-  return r.tunnel || r.via || 'direct';
+function rulesEffectiveTarget(r) {
+  return r.target || 'direct';
 }
 
 function rulesComputeModified(r) {
   if (r._new || r._deleted) return false;
   return r.pattern !== (r._origPattern || '') ||
-         rulesEffectiveVia(r) !== (r._origTunnel || r._origVia || 'direct');
+         rulesEffectiveTarget(r) !== (r._origTarget || 'direct');
 }
 
 function rulesCollectFromDOM() {
@@ -909,12 +908,11 @@ function rulesCollectFromDOM() {
     const idx = parseInt(tr.dataset.idx);
     if (rulesEditData[idx]?._deleted) return; // deleted rows keep their original data
     const pattern = tr.querySelector('.rules-edit-pattern')?.value || '';
-    const via     = tr.querySelector('.rules-via-picker')?.dataset.value || 'direct';
+    const target  = tr.querySelector('.rules-via-picker')?.dataset.value || 'direct';
     rulesEditData[idx] = {
       ...rulesEditData[idx],
       pattern,
-      tunnel: (via === 'direct' || via === 'block') ? '' : via,
-      via:    (via === 'direct' || via === 'block') ? via : '',
+      target,
     };
     rulesEditData[idx]._modified = rulesComputeModified(rulesEditData[idx]);
   });
@@ -933,8 +931,7 @@ window.rulesPickerSelect = function(rowIdx, value, event) {
   event.stopPropagation();
   rulesCollectFromDOM();
   if (rowIdx < rulesEditData.length) {
-    rulesEditData[rowIdx].tunnel = (value === 'direct' || value === 'block') ? '' : value;
-    rulesEditData[rowIdx].via    = (value === 'direct' || value === 'block') ? value : '';
+    rulesEditData[rowIdx].target = value;
     rulesEditData[rowIdx]._pickerValue = value;
     rulesEditData[rowIdx]._modified = rulesComputeModified(rulesEditData[rowIdx]);
     const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
@@ -1031,7 +1028,7 @@ async function rulesSave() {
     // Strip UI-only metadata and filter out soft-deleted rows before sending
     const payload = rulesEditData
       .filter(r => !r._deleted)
-      .map(({_new, _deleted, _modified, _origPattern, _origTunnel, _origVia, _pickerValue, ...r}) => r);
+      .map(({_new, _deleted, _modified, _origPattern, _origTarget, _pickerValue, ...r}) => r);
     const res = await fetch('/api/rules', {
       method:  'PUT',
       headers: {'Content-Type': 'application/json'},
@@ -1095,7 +1092,7 @@ function renderEditTable(newRowIdx) {
   rulesEditData.forEach((r, i) => {
     const isNew     = !!r._new;
     const isDeleted = !!r._deleted;
-    const currentVia = r.tunnel || (r.via || 'direct');
+    const currentVia = r.target || 'direct';
 
     const isModified = !!r._modified && !isNew && !isDeleted;
 

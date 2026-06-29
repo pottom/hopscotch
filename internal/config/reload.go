@@ -102,11 +102,7 @@ func LogConfig(cfg *Config) {
 		)
 	}
 	for _, r := range cfg.Proxy.Rules {
-		via := r.Tunnel
-		if r.Via != "" {
-			via = r.Via
-		}
-		log.Info("route", "pattern", r.Pattern, "via", via)
+		log.Info("route", "pattern", r.Pattern, "target", r.Target)
 	}
 }
 

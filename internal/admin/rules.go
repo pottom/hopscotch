@@ -26,8 +26,8 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "pattern is required for every rule", http.StatusBadRequest)
 			return
 		}
-		if rule.Tunnel == "" && rule.Via == "" {
-			http.Error(w, "tunnel or via is required for every rule", http.StatusBadRequest)
+		if rule.Target == "" {
+			http.Error(w, "target is required for every rule", http.StatusBadRequest)
 			return
 		}
 		if err := config.ValidatePattern(rule.Pattern); err != nil {

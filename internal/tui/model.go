@@ -303,8 +303,7 @@ type reconnectResultMsg struct{}
 type editRule struct {
 	admin.RouteJSON
 	origPattern string // for change detection
-	origTunnel  string
-	origVia     string
+	origTarget  string
 	isNew       bool
 	isDeleted   bool
 	isModified  bool
@@ -312,7 +311,7 @@ type editRule struct {
 }
 
 func (r *editRule) recomputeModified() {
-	r.isModified = r.Pattern != r.origPattern || r.Tunnel != r.origTunnel || r.Via != r.origVia
+	r.isModified = r.Pattern != r.origPattern || r.Target != r.origTarget
 }
 
 func (r *editRule) validate() {
@@ -629,8 +628,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.editRules[i] = editRule{
 						RouteJSON:   r,
 						origPattern: r.Pattern,
-						origTunnel:  r.Tunnel,
-						origVia:     r.Via,
+						origTarget:  r.Target,
 					}
 				}
 				if m.routeVPReady {
@@ -1086,10 +1084,7 @@ func (m Model) renderHeader() string {
 				fmt.Fprintf(&b, "  %s\n", styleMuted.Render("top to bottom · first match wins · unmatched → direct"))
 			} else if matchIdx >= 0 {
 				r := m.status.Routes[matchIdx]
-				via := r.Tunnel
-				if via == "" {
-					via = r.Via
-				}
+				via := r.Target
 				fmt.Fprintf(&b, "  %s\n",
 					styleConnected.Render(fmt.Sprintf("✓ rule %d → %s", matchIdx+1, via)),
 				)
@@ -1225,10 +1220,7 @@ func (m Model) buildRoutesContent() string {
 
 	var b strings.Builder
 	for i, r := range m.status.Routes {
-		via := r.Tunnel
-		if via == "" {
-			via = r.Via
-		}
+		via := r.Target
 
 		matched := matchIdx == i
 		prefix := "  "
@@ -1244,9 +1236,9 @@ func (m Model) buildRoutesContent() string {
 		var viaRendered string
 		var statusStr string
 		switch {
-		case via == config.ViaDirect || via == "":
+		case via == config.TargetDirect || via == "":
 			viaRendered = lipgloss.NewStyle().Foreground(colorDirect).Width(22).Render(via)
-		case via == config.ViaBlock:
+		case via == config.TargetBlock:
 			viaRendered = lipgloss.NewStyle().Foreground(colorDisconnected).Width(22).Render(via)
 		default:
 			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
@@ -1301,34 +1293,19 @@ func (m *Model) editCycleVia() {
 		return
 	}
 	r := &m.editRules[m.editCursor]
-	options := append([]string{config.ViaDirect}, append(m.sortedTunnelNames(), config.ViaBlock)...)
-	current := r.Via
+	options := append([]string{config.TargetDirect}, append(m.sortedTunnelNames(), config.TargetBlock)...)
+	current := r.Target
 	if current == "" {
-		current = r.Tunnel
-	}
-	if current == "" {
-		current = config.ViaDirect
+		current = config.TargetDirect
 	}
 	for i, opt := range options {
 		if opt == current {
-			next := options[(i+1)%len(options)]
-			switch next {
-			case config.ViaDirect:
-				r.Tunnel = ""
-				r.Via = config.ViaDirect
-			case config.ViaBlock:
-				r.Tunnel = ""
-				r.Via = config.ViaBlock
-			default:
-				r.Tunnel = next
-				r.Via = ""
-			}
+			r.Target = options[(i+1)%len(options)]
 			r.recomputeModified()
 			return
 		}
 	}
-	r.Tunnel = ""
-	r.Via = config.ViaDirect
+	r.Target = config.TargetDirect
 	r.recomputeModified()
 }
 
@@ -1340,12 +1317,9 @@ func (m Model) buildRoutesEditContent() string {
 
 	var b strings.Builder
 	for i, r := range m.editRules {
-		via := r.Tunnel
+		via := r.Target
 		if via == "" {
-			via = r.Via
-		}
-		if via == "" {
-			via = config.ViaDirect
+			via = config.TargetDirect
 		}
 
 		selected := m.editCursor == i
@@ -1392,13 +1366,13 @@ func (m Model) buildRoutesEditContent() string {
 		switch {
 		case r.isDeleted:
 			viaRendered = viaW.Foreground(colorDisconnected).Strikethrough(true).Render(via)
-		case via == config.ViaBlock:
+		case via == config.TargetBlock:
 			viaRendered = viaW.Foreground(colorDisconnected).Render(via)
 		case r.isNew:
 			viaRendered = viaW.Foreground(colorConnected).Render(via)
 		case r.isModified:
 			viaRendered = viaW.Foreground(colorConnecting).Render(via)
-		case r.Tunnel != "":
+		case via != config.TargetDirect:
 			viaRendered = viaW.Foreground(colorAccent).Render(via)
 		default: // "direct"
 			viaRendered = viaW.Foreground(colorDirect).Render(via)

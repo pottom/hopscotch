@@ -32,7 +32,7 @@ proxy:
   port: 8080
   rules:
     - pattern: "*.example.com"
-      tunnel: prod
+      target: prod
 `)
 
 	cfg, err := Load(path)
@@ -187,7 +187,7 @@ proxy:
   port: 8080
   rules:
     - pattern: ""
-      tunnel: prod
+      target: prod
 `)
 	_, err := Load(path)
 	if err == nil {
@@ -209,7 +209,7 @@ proxy:
 `)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected error for rule with no tunnel or via, got nil")
+		t.Fatal("expected error for rule with no target, got nil")
 	}
 }
 
