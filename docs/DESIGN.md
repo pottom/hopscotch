@@ -68,6 +68,39 @@ Szín: a VPN aktuális állapota alapján (`colorConnected` / `colorConnecting` 
 
 ---
 
+## Status tábla — Cursor és reconnect
+
+A status táblában van egy cursor (`statusCursor`), ami megmutatja, melyik tunnel van kiválasztva az `r` (reconnect) akcióhoz.
+
+| Elem | Megjelenés |
+|------|-----------|
+| Kiválasztott sor prefix | `> ` amber / `colorConnecting (#fbbf24)` |
+| Nem kiválasztott prefix | `  ` (két szóköz) |
+
+A viewport automatikusan scrollozik a cursor pozícióhoz (`lineOffsetForCursor()`). A cursor nem teker: az első tunnelnél `k`/`↑` nem csinál semmit, az utolsónál `j`/`↓` sem.
+
+Web UI-ban: ↻ gomb, hover-reveal (soronként, jobb szélén). Szín: `var(--muted)` alapból, `var(--accent)` hoveroláskor.
+
+---
+
+## Status tábla — ↓ / ↑ oszlopok (forgalom)
+
+A táblában a ↓/↑ oszlopok **kumulatív összeget** mutatnak (process start óta):
+
+| Érték | Megjelenítés |
+|-------|-------------|
+| 0 | `—` |
+| < 1 KB | `X B` |
+| < 1 MB | `X.X KB` |
+| < 1 GB | `X.X MB` |
+| ≥ 1 GB | `X.X GB` |
+
+Oszlopfejléc: `↓ TOTAL` / `↑ TOTAL`.
+
+A másodpercenkénti sebesség (bps) kizárólag a grafikonterületen jelenik meg — a grafikon első sora (non-compact módban) a `↓ X B/s  ↑ X B/s` sor a braille grafikon felett. Web UI-ban a kibontott graph-row-ban `#bps-bar-{name}` div. Szín: `colorBpsIn (#38bdf8)` / `colorBpsOut (#818cf8)`.
+
+---
+
 ## Status tábla — Error/progress sub-row
 
 Minden tunnel és VPN sor alatt jelenik meg ha `last_error` nem üres és az állapot nem `connected`.

@@ -68,7 +68,8 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 | **VPN integration** | Manages openconnect as a subprocess; tunnels wait for VPN before connecting, show reason in UI. |
 | **Hot reload** | Config reloads on `SIGHUP` or file change, tunnels re-configured in place, no restart. |
 | **Self-update** | `hopscotch update` atomically replaces the binary. Container-aware — prints a notice instead of updating inside Docker. |
-| **Prometheus metrics** | `/metrics` endpoint with per-tunnel bytes, connections, reconnects, uptime. |
+| **Force reconnect** | `r` in TUI or ↻ button in web UI reconnects a tunnel immediately, skipping the backoff timer. |
+| **Prometheus metrics** | `/metrics` endpoint with per-tunnel bytes, connections, reconnects, keepalive failures, uptime. |
 
 One binary. Zero services. Zero background daemons beyond itself.
 
@@ -84,14 +85,15 @@ hopscotch sits between your tools and your jump hosts. Apps connect to a single 
 
 ![TUI status tab](docs/tui-status.png)
 
-Each tunnel shows: connection status, host, local port, uptime, reconnect counter, live per-second throughput (↓ in / ↑ out), and active connection count. A reason line appears when something's wrong — like `waiting for VPN: corp-vpn`. A `⚡v0.8.0` badge appears next to the version when an update is available.
+Each tunnel shows: connection status, host, local port, uptime, reconnect counter, cumulative bytes transferred (↓ in / ↑ out since process start), and active connection count. When a graph is open, the live per-second rate appears above the braille graph. A reason line appears when something's wrong — like `waiting for VPN: corp-vpn`. A `⚡v0.8.0` badge appears next to the version when an update is available.
 
 ### TUI key bindings
 
 | Key | Action |
 |-----|--------|
 | `Tab` / `s` / `l` / `p` | Switch tabs: Status → Logs → Patterns → Docs |
-| `↑` `↓` / `j` `k` | Scroll |
+| `↑` `↓` / `j` `k` | **Status tab:** move cursor between tunnels (viewport follows) · **Other tabs:** scroll |
+| `r` | **Status tab:** force reconnect selected tunnel immediately (skips backoff) |
 | `/` | Focus URL tester (Patterns tab) |
 | `Esc` | Unfocus tester |
 | `f` | **Status tab:** toggle graphs on/off (compact mode) · **Logs tab:** cycle log level filter (ALL → INFO+ → WARN+ → ERR) |
@@ -116,7 +118,7 @@ Rules evaluate top-to-bottom; first match wins. Patterns support:
 | Exact | `db.internal` | `db.internal` only |
 | Catch-all | `*` | everything |
 
-`via: direct` bypasses all tunnels. Put it last as the fallback.
+`target: direct` bypasses all tunnels. `target: block` refuses the connection. Put a catch-all last as the fallback.
 
 ![Connection flow](docs/flow-connection.svg)
 
@@ -301,11 +303,11 @@ proxy:
   # password: secret
   rules:
     - pattern: "*.prod.internal"
-      tunnel: prod-jump
+      target: prod-jump
     - pattern: "*.staging.internal"
-      tunnel: staging-jump
+      target: staging-jump
     - pattern: "*"
-      via: direct
+      target: direct
 
 admin:
   port: 9090
@@ -479,6 +481,7 @@ Metrics at `/metrics` in Prometheus text format:
 | `hopscotch_tunnel_bytes_in_total` | counter | Cumulative bytes received |
 | `hopscotch_tunnel_bytes_out_total` | counter | Cumulative bytes sent |
 | `hopscotch_tunnel_active_connections` | gauge | Current open connections |
+| `hopscotch_tunnel_keepalive_failures` | gauge | Consecutive keepalive failures (resets on success/reconnect) |
 | `hopscotch_direct_bytes_in_total` | counter | Bytes via direct path |
 | `hopscotch_direct_bytes_out_total` | counter | Bytes via direct path |
 | `hopscotch_direct_active_connections` | gauge | Current direct connections |

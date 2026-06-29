@@ -126,7 +126,7 @@ subgraph TUN["🔑  SSH TUNNEL — Tunnel.Run (minden tunnel-re külön goroutin
   tn2 -->|igen| tn5
   tn1 -->|nem| tn5[runPreConnect parancsok]
   tn5 --> tn6["NextReconnectAt = zero"]
-  tn6 --> tn7["dial ctx:\n1. buildSSHConfig:\n   identity_file → ssh-agent → default key\n2. net.Dial TCP, KeepAlive 15s\n3. ssh.NewClientConn handshake\n4. force_pty: openPTYSession + agent -A"]
+  tn6 --> tn7["dial ctx:\n1. buildSSHConfig:\n   identity_file → ssh-agent → default key\n2. net.Dial TCP, KeepAlive 15s\n3. ssh.NewClientConn handshake\n4. force_pty: openPTYSession + agent -A\n5. probeTCPForwarding: dial 127.0.0.1:1 through SSH\n   hiba → isTCPForwardingDenied → lastError"]
   tn7 --> tn7e{dial OK?}
   tn7e -->|hiba| tn7b["lastError = err\nlog Warn tunnel dial failed"]
   tn7b --> tn8
@@ -146,6 +146,9 @@ subgraph TUN["🔑  SSH TUNNEL — Tunnel.Run (minden tunnel-re külön goroutin
     ka6 -->|nem| ka1
     ka6 -->|igen| ka7["client.Close, exit keepalive"]
     ka7 --> kaex([reconnect loop])
+    ka1 --> kafc{forceReconnect\nchannel?}
+    kafc -->|igen| kafcx["client.Close\nre-signal channel (buffered 1)\nexit keepalive"]
+    kafcx --> kaex
     kad -->|network lost| kadl["depLost: waiting for network"]
     kad -->|VPN lost| kadl2["depLost: waiting for VPN"]
     kadl --> kadx["client.Close, exit keepalive"]
@@ -182,10 +185,10 @@ subgraph PR["🌐  PROXY KÉRÉS — Router.DialContext"]
   pr0([SOCKS5 kliens kapcsolódik]) --> pr1["net.SplitHostPort → host, port"]
   pr1 --> pr2["inferProto: ssh/tcp/22, https/tcp/443, tcp/9999 ..."]
   pr2 --> pr3["resolve host: szabályok top→bottom, first match wins"]
-  pr3 --> pr4{rule.Via}
-  pr4 -->|direct| pr5["DirectCounter dialer\nlog proto host pattern via"]
+  pr3 --> pr4{rule.Target}
+  pr4 -->|direct| pr5["DirectCounter dialer\nlog proto host pattern target"]
   pr4 -->|block| pr6["log Warn proxy blocked\nerrBlocked → connection refused"]
-  pr4 -->|tunnel| pr7{tunnel létezik?}
+  pr4 -->|tunnel név| pr7{tunnel létezik?}
   pr7 -->|nem| pr7e([config hiba])
   pr7 -->|igen| pr9["tunnelStatus snapshot"]
   pr9 --> pr10{tunnel Connected?}
@@ -255,8 +258,8 @@ class tn3,tn4,tn5,tn6,tn7,tn7b,tn7ok,tn7ok2,tn8,tn10,tn10r,tn13,tn15,tn16 proc_t
 class tn_end0,tn_end1,tn_end2,tn_end3 term_ok
 
 class ka0 term_neu
-class kad,ka2,ka4,ka5,ka7,kadl,kadl2,kadx proc_ka
-class ka1,ka3,ka6 dec
+class kad,ka2,ka4,ka5,ka7,kadl,kadl2,kadx,kafcx proc_ka
+class ka1,ka3,ka6,kafc dec
 class kaex term_neu
 
 class pr0 term_neu
