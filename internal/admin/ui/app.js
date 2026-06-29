@@ -204,7 +204,7 @@ function renderVPNTable() {
       `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
-      `<td></td><td></td><td></td>`;
+      `<td></td><td></td><td></td><td></td>`;
     tbody.appendChild(tr);
     // message sub-row — only when not connected and last_error is set
     const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
@@ -213,7 +213,7 @@ function renderVPNTable() {
     vmtr.className = 'msg-row'; vmtr.dataset.name = name;
     vmtr.style.display = vpnMsg ? '' : 'none';
     const vpnPrefix = vpnIsProgress ? '◌ ' : '└ ✗ ';
-    vmtr.innerHTML = `<td colspan="10" class="msg-row-cell${vpnIsProgress ? ' msg-row-progress' : ''}">${vpnMsg ? escHtml(vpnPrefix + vpnMsg) : ''}</td>`;
+    vmtr.innerHTML = `<td colspan="11" class="msg-row-cell${vpnIsProgress ? ' msg-row-progress' : ''}">${vpnMsg ? escHtml(vpnPrefix + vpnMsg) : ''}</td>`;
     tbody.appendChild(vmtr);
   }
 }
@@ -252,7 +252,8 @@ function buildTunnelRows(names) {
         `<td data-col="rc"><span class="st-muted">—</span></td>` +
         `<td class="bps-in"  data-col="bps-in">${fmtBytes(d.bps_in  || 0)}</td>` +
         `<td class="bps-out" data-col="bps-out">${fmtBytes(d.bps_out || 0)}</td>` +
-        `<td data-col="active">${d.active || 0}</td>`;
+        `<td data-col="active">${d.active || 0}</td>` +
+        `<td></td>`;
     } else {
       const t = store.tunnels[name];
       if (!t) continue;
@@ -267,7 +268,8 @@ function buildTunnelRows(names) {
         `<td data-col="rc">${t.reconnect_count || 0}</td>` +
         `<td class="bps-in"  data-col="bps-in">${fmtBytes(t.bps_in  || 0)}</td>` +
         `<td class="bps-out" data-col="bps-out">${fmtBytes(t.bps_out || 0)}</td>` +
-        `<td data-col="active">${t.active || 0}</td>`;
+        `<td data-col="active">${t.active || 0}</td>` +
+        `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectTunnel('${escHtml(name)}')">↻</button></td>`;
     }
     tbody.appendChild(tr);
     // message sub-row — shown for errors (red └ ✗) and progress msgs (amber ◌)
@@ -277,11 +279,11 @@ function buildTunnelRows(names) {
     mtr.className = 'msg-row'; mtr.dataset.name = name;
     mtr.style.display = msg ? '' : 'none';
     const prefix = isProgress ? '◌ ' : '└ ✗ ';
-    mtr.innerHTML = `<td colspan="10" class="msg-row-cell${isProgress ? ' msg-row-progress' : ''}">${msg ? escHtml(prefix + msg) : ''}</td>`;
+    mtr.innerHTML = `<td colspan="11" class="msg-row-cell${isProgress ? ' msg-row-progress' : ''}">${msg ? escHtml(prefix + msg) : ''}</td>`;
     tbody.appendChild(mtr);
     const gtr = document.createElement('tr');
     gtr.className = 'graph-row'; gtr.dataset.name = name;
-    gtr.innerHTML = `<td colspan="10"><div class="graph-cell"><canvas id="${chartId(name)}"></canvas></div></td>`;
+    gtr.innerHTML = `<td colspan="11"><div class="graph-cell"><canvas id="${chartId(name)}"></canvas></div></td>`;
     tbody.appendChild(gtr);
   }
   if (document.body.classList.contains('graphs-on')) requestAnimationFrame(initAllCharts);
@@ -328,6 +330,13 @@ function renderStatusTables() {
   renderVPNTable();
   syncTunnelTable();
 }
+
+window.reconnectTunnel = async function(name) {
+  try {
+    await fetch('/api/tunnels/' + encodeURIComponent(name) + '/reconnect', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
 
 window.toggleRowGraph = function(row) {
   const expanded = row.classList.toggle('expanded');

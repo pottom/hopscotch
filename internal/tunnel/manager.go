@@ -77,6 +77,19 @@ func (m *Manager) Get(name string) *Tunnel {
 	return m.tunnels[name]
 }
 
+// ForceReconnect triggers an immediate reconnect for the named tunnel.
+// Returns false if no tunnel with that name exists.
+func (m *Manager) ForceReconnect(name string) bool {
+	m.mu.RLock()
+	t := m.tunnels[name]
+	m.mu.RUnlock()
+	if t == nil {
+		return false
+	}
+	t.ForceReconnect()
+	return true
+}
+
 // AllStats returns a snapshot of every tunnel's stats keyed by name.
 func (m *Manager) AllStats() map[string]Stats {
 	m.mu.RLock()

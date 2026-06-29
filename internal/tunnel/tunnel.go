@@ -45,9 +45,10 @@ type Tunnel struct {
 	client         *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
 	ptySession     *ssh.Session // held open when force_pty is set; closed after keepalive exits
 	// Traffic counters — always-incrementing, read by Stats().
-	bytesIn     atomic.Uint64
-	bytesOut    atomic.Uint64
-	activeConns atomic.Int64
+	bytesIn        atomic.Uint64
+	bytesOut       atomic.Uint64
+	activeConns    atomic.Int64
+	forceReconnect chan struct{} // buffered(1); signals immediate reconnect
 }
 
 // New creates a Tunnel with a real system clock.
@@ -59,9 +60,24 @@ func New(cfg config.TunnelConfig) *Tunnel {
 // gate is called at the start of every connect attempt; a non-nil return aborts the tunnel.
 // isConnected is polled while the tunnel is connected to detect gate loss immediately.
 func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error, isConnected func() bool) *Tunnel {
-	t := &Tunnel{cfg: cfg, clock: realClock{}, vpnGate: gate, vpnIsConnected: isConnected}
+	t := &Tunnel{
+		cfg:            cfg,
+		clock:          realClock{},
+		vpnGate:        gate,
+		vpnIsConnected: isConnected,
+		forceReconnect: make(chan struct{}, 1),
+	}
 	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
 	return t
+}
+
+// ForceReconnect interrupts the current backoff wait or active keepalive loop,
+// triggering an immediate reconnect attempt.
+func (t *Tunnel) ForceReconnect() {
+	select {
+	case t.forceReconnect <- struct{}{}:
+	default:
+	}
 }
 
 // Stats returns a snapshot of the tunnel's current metrics including traffic.
@@ -255,6 +271,8 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		case <-agentChanged:
 			log.Info("SSH agent keys changed, retrying immediately", "tunnel", t.cfg.Name)
 		case <-t.clock.After(delay):
+		case <-t.forceReconnect:
+			log.Info("force reconnect requested, skipping delay", "tunnel", t.cfg.Name)
 		}
 	}
 }
@@ -294,6 +312,13 @@ func (t *Tunnel) dial(ctx context.Context) error {
 			t.client = nil
 			return fmt.Errorf("PTY session: %w", err)
 		}
+	}
+
+	// Probe whether the SSH server allows TCP forwarding before declaring connected.
+	if err := t.probeTCPForwarding(); err != nil {
+		t.client.Close()
+		t.client = nil
+		return err
 	}
 
 	now := t.clock.Now()
@@ -368,6 +393,15 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 			s.LastError = reason
 			t.stats.Store(s)
 			t.client.Close()
+			return
+		case <-t.forceReconnect:
+			log.Info("force reconnect requested", "tunnel", t.cfg.Name)
+			t.client.Close()
+			// Re-signal so Run()'s backoff select also skips the delay.
+			select {
+			case t.forceReconnect <- struct{}{}:
+			default:
+			}
 			return
 		case <-t.clock.After(interval):
 		}
@@ -563,6 +597,42 @@ func loadSigner(path string) (ssh.Signer, error) {
 	return ssh.ParsePrivateKey(data)
 }
 
+
+// probeTCPForwarding opens a test direct-tcpip channel immediately after
+// connecting to detect AllowTcpForwarding=no (or PermitOpen=none) on the server.
+// Any error that is not a forwarding-denied error is ignored (e.g. connection
+// refused to the probe target means forwarding works).
+func (t *Tunnel) probeTCPForwarding() error {
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		// Port 1 (tcpmux) is virtually never listening; we expect "connection refused"
+		// on a healthy server. If AllowTcpForwarding is off we get "administratively
+		// prohibited" before the remote even tries to connect.
+		conn, err := t.client.Dial("tcp", "127.0.0.1:1")
+		ch <- result{conn, err}
+	}()
+	select {
+	case r := <-ch:
+		if r.conn != nil {
+			r.conn.Close()
+		}
+		if isTCPForwardingDenied(r.err) {
+			log.Warn("TCP forwarding denied by SSH server",
+				"tunnel", t.cfg.Name,
+				"hint", "set AllowTcpForwarding yes (and check PermitOpen) in sshd_config",
+			)
+			return fmt.Errorf("SSH server denied TCP forwarding — tunnel cannot proxy connections (check AllowTcpForwarding / PermitOpen in sshd_config)")
+		}
+		return nil
+	case <-time.After(5 * time.Second):
+		// If the probe hangs (unexpected), assume forwarding works.
+		return nil
+	}
+}
 
 // runPreConnect executes each pre_connect command before a dial attempt.
 func (t *Tunnel) runPreConnect(ctx context.Context) error {

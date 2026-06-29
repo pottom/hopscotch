@@ -286,13 +286,14 @@ type ssePayload struct {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type statusMsg    admin.StatusResponse
-type sseMsg       ssePayload
-type logLineMsg   string
-type errMsg       error
-type tickMsg      time.Time
-type rulesSavedMsg   struct{}
-type rulesSaveErrMsg struct{ err error }
+type statusMsg         admin.StatusResponse
+type sseMsg            ssePayload
+type logLineMsg        string
+type errMsg            error
+type tickMsg           time.Time
+type rulesSavedMsg     struct{}
+type rulesSaveErrMsg   struct{ err error }
+type reconnectResultMsg struct{}
 
 // editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
 type editRule struct {
@@ -361,9 +362,10 @@ type Model struct {
 	height  int
 	vp      viewport.Model
 	vpReady bool
-	compact     bool
-	mirrorGraph bool
-	ready       bool
+	compact      bool
+	mirrorGraph  bool
+	statusCursor int // index into sorted tunnel names on the status tab
+	ready        bool
 }
 
 // New creates a TUI Model using the provided pre-authenticated http.Client.
@@ -588,7 +590,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "q", "Q", "ctrl+c", "esc":
+		case "q", "Q", "ctrl+c":
 			close(m.done)
 			return m, tea.Quit
 
@@ -663,6 +665,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "up", "k":
+			if m.activeTab == tabStatus {
+				if n := len(m.status.Tunnels); n > 0 {
+					m.statusCursor = (m.statusCursor - 1 + n) % n
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, nil
+				}
+			}
+			if m.activeTab == tabLogs && m.logVPReady {
+				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.vpReady {
+				m.vp, cmd = m.vp.Update(msg)
+			}
+			return m, cmd
+
+		case "down", "j":
+			if m.activeTab == tabStatus {
+				if n := len(m.status.Tunnels); n > 0 {
+					m.statusCursor = (m.statusCursor + 1) % n
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, nil
+				}
+			}
+			if m.activeTab == tabLogs && m.logVPReady {
+				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.vpReady {
+				m.vp, cmd = m.vp.Update(msg)
+			}
+			return m, cmd
+
+		case "r", "R":
+			if m.activeTab == tabStatus && len(m.status.Tunnels) > 0 {
+				names := make([]string, 0, len(m.status.Tunnels))
+				for name := range m.status.Tunnels {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				if m.statusCursor < len(names) {
+					name := names[m.statusCursor]
+					// Optimistic update: show connecting immediately before the HTTP round-trip.
+					if t, ok := m.status.Tunnels[name]; ok {
+						t.Status = "connecting"
+						t.LastError = ""
+						m.status.Tunnels[name] = t
+					}
+					if w := m.traffic[name]; w != nil {
+						w.reconnectIn = nil
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, m.reconnectTunnelCmd(name)
+				}
+			}
+			return m, nil
+
 		default:
 			if m.activeTab == tabStatus && m.vpReady {
 				m.vp, cmd = m.vp.Update(msg)
@@ -698,10 +764,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = fmt.Errorf("unauthorized — use: hopscotch status --username USER --password PASS")
 		return m, tea.Quit
 
+	case reconnectResultMsg:
+		// Fetch status immediately so the real state (connecting/connected) is shown without waiting for the next tick.
+		return m, fetchStatus(m.adminURL, m.httpClient)
+
 	case statusMsg:
 		m.status = admin.StatusResponse(msg)
 		m.err = nil
 		m.ready = true
+		// Clamp cursor to valid range when tunnels change.
+		if n := len(m.status.Tunnels); n > 0 && m.statusCursor >= n {
+			m.statusCursor = n - 1
+		}
 		for name := range m.status.Tunnels {
 			if m.traffic[name] == nil {
 				m.traffic[name] = &trafficWindow{}
@@ -1042,6 +1116,9 @@ func (m Model) renderFooter() string {
 		} else {
 			hints += "  g mirror"
 		}
+		if len(m.status.Tunnels) > 0 {
+			hints += "  ↑↓/jk cursor  r reconnect"
+		}
 	}
 
 	activeVP := m.vp
@@ -1331,6 +1408,24 @@ func (m Model) buildRoutesEditContent() string {
 	return b.String()
 }
 
+// reconnectTunnelCmd returns a Cmd that POSTs a reconnect request for the given tunnel.
+func (m Model) reconnectTunnelCmd(name string) tea.Cmd {
+	reconnectURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/tunnels/" + name + "/reconnect"
+	client := m.httpClient
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPost, reconnectURL, nil)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res.Body.Close()
+		return reconnectResultMsg{}
+	}
+}
+
 // saveRulesCmd returns a Cmd that PUTs the current editRules to the admin API.
 func (m Model) saveRulesCmd() tea.Cmd {
 	var rules []admin.RouteJSON
@@ -1574,7 +1669,7 @@ func (m Model) buildStatusContent() string {
 	}
 	sort.Strings(names)
 
-	for _, name := range names {
+	for tunnelIdx, name := range names {
 		t := m.status.Tunnels[name]
 		w := m.traffic[name]
 
@@ -1635,7 +1730,11 @@ func (m Model) buildStatusContent() string {
 			vpnLabel = bullet + " " + t.RequiresVPN
 		}
 
-		b.WriteString("  ")
+		prefix := "  "
+		if tunnelIdx == m.statusCursor {
+			prefix = styleConnecting.Render(">") + " "
+		}
+		b.WriteString(prefix)
 		b.WriteString(tName.Foreground(colorAccent).Render(name))
 		if tl.showHost   { b.WriteString(tHost.Render(t.Host)) }
 		b.WriteString(vpnColStyle.Render(vpnLabel))
