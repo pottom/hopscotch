@@ -304,6 +304,7 @@ type editRule struct {
 	admin.RouteJSON
 	origPattern string // for change detection
 	origTarget  string
+	origComment string
 	isNew       bool
 	isDeleted   bool
 	isModified  bool
@@ -311,7 +312,7 @@ type editRule struct {
 }
 
 func (r *editRule) recomputeModified() {
-	r.isModified = r.Pattern != r.origPattern || r.Target != r.origTarget
+	r.isModified = r.Pattern != r.origPattern || r.Target != r.origTarget || r.Comment != r.origComment
 }
 
 func (r *editRule) validate() {
@@ -352,13 +353,15 @@ type Model struct {
 	routeFocused bool
 
 	// edit mode (Patterns tab)
-	editMode      bool
-	editRules     []editRule
-	editCursor    int
-	editPatInput  textinput.Model
+	editMode       bool
+	editRules      []editRule
+	editCursor     int
+	editPatInput   textinput.Model
 	editPatFocused bool
-	editError     string
-	editSaving    bool
+	editCmtInput   textinput.Model
+	editCmtFocused bool
+	editError      string
+	editSaving     bool
 
 	tick    int
 	width   int
@@ -395,6 +398,11 @@ func New(adminURL string, client *http.Client) Model {
 	ep.CharLimit = 256
 	ep.Width = 32
 
+	ec := textinput.New()
+	ec.Placeholder = "note…"
+	ec.CharLimit = 256
+	ec.Width = 30
+
 	return Model{
 		adminURL:    adminURL,
 		sseURL:      base + "/traffic/stream",
@@ -410,6 +418,7 @@ func New(adminURL string, client *http.Client) Model {
 		height:      24,
 		routeInput:   ti,
 		editPatInput: ep,
+		editCmtInput: ec,
 		logLevel:     1, // default: INFO+
 	}
 }
@@ -449,6 +458,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.routeVP.SetContent(m.buildRoutesEditContent())
 				}
 				return m, nil
+			case "tab":
+				// Move focus from pattern to comment input.
+				if m.editCursor < len(m.editRules) {
+					r := &m.editRules[m.editCursor]
+					r.Pattern = m.editPatInput.Value()
+					r.recomputeModified()
+					r.validate()
+					m.editCmtInput.SetValue(r.Comment)
+				}
+				m.editPatFocused = false
+				m.editPatInput.Blur()
+				m.editCmtFocused = true
+				m.editCmtInput.Focus()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, textinput.Blink
 			default:
 				m.editPatInput, cmd = m.editPatInput.Update(msg)
 				// Live validation while typing
@@ -456,6 +482,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					r := &m.editRules[m.editCursor]
 					r.Pattern = m.editPatInput.Value()
 					r.validate()
+				}
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, cmd
+			}
+		}
+
+		// Comment edit input (inside edit mode).
+		if m.editCmtFocused {
+			switch msg.String() {
+			case "esc", "tab", "enter":
+				if m.editCursor < len(m.editRules) {
+					r := &m.editRules[m.editCursor]
+					r.Comment = m.editCmtInput.Value()
+					r.recomputeModified()
+				}
+				m.editCmtFocused = false
+				m.editCmtInput.Blur()
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesEditContent())
+				}
+				return m, nil
+			default:
+				m.editCmtInput, cmd = m.editCmtInput.Update(msg)
+				if m.editCursor < len(m.editRules) {
+					r := &m.editRules[m.editCursor]
+					r.Comment = m.editCmtInput.Value()
+					r.recomputeModified()
 				}
 				if m.routeVPReady {
 					m.routeVP.SetContent(m.buildRoutesEditContent())
@@ -562,9 +617,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			case "e", "E", "enter":
 				if m.editCursor < len(m.editRules) && !m.editRules[m.editCursor].isDeleted {
-					m.editPatInput.SetValue(m.editRules[m.editCursor].Pattern)
+					r := &m.editRules[m.editCursor]
+					m.editPatInput.SetValue(r.Pattern)
+					m.editCmtInput.SetValue(r.Comment)
 					m.editPatFocused = true
 					m.editPatInput.Focus()
+					if m.routeVPReady {
+						m.routeVP.SetContent(m.buildRoutesEditContent())
+					}
+					return m, textinput.Blink
+				}
+				return m, nil
+			case "c", "C":
+				if m.editCursor < len(m.editRules) && !m.editRules[m.editCursor].isDeleted {
+					r := &m.editRules[m.editCursor]
+					m.editCmtInput.SetValue(r.Comment)
+					m.editCmtFocused = true
+					m.editCmtInput.Focus()
 					if m.routeVPReady {
 						m.routeVP.SetContent(m.buildRoutesEditContent())
 					}
@@ -629,6 +698,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						RouteJSON:   r,
 						origPattern: r.Pattern,
 						origTarget:  r.Target,
+						origComment: r.Comment,
 					}
 				}
 				if m.routeVPReady {
@@ -713,11 +783,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "r", "R":
 			if m.activeTab == tabStatus && len(m.status.Tunnels) > 0 {
-				names := make([]string, 0, len(m.status.Tunnels))
-				for name := range m.status.Tunnels {
-					names = append(names, name)
-				}
-				sort.Strings(names)
+				names := m.tunnelNamesByPort()
 				if m.statusCursor < len(names) {
 					name := names[m.statusCursor]
 					// Optimistic update: show connecting immediately before the HTTP round-trip.
@@ -1115,7 +1181,7 @@ func (m Model) renderFooter() string {
 	hints := "q quit  tab/s/l/p switch  ↑↓/jk scroll"
 	if m.activeTab == tabRoutes {
 		if m.editMode {
-			hints = "↑↓/jk=cursor  shift+↑↓=reorder  e/enter=edit  v=via  i=ins↑  a=add↓  d=del  ctrl+s=save  esc=cancel"
+			hints = "↑↓/jk=cursor  shift+↑↓=reorder  e/enter=edit  tab=note  c=note  v=via  i=ins↑  a=add↓  d=del  ctrl+s=save  esc=cancel"
 		} else if m.routeFocused {
 			hints += "  esc unfocus"
 		} else {
@@ -1247,24 +1313,54 @@ func (m Model) buildRoutesContent() string {
 			}
 		}
 
-		fmt.Fprintf(&b, "%s%s%s%s%s\n",
+		var cmtStr string
+		if r.Comment != "" && statusStr == "" {
+			// 2 prefix + 4 num + 32 pattern + 22 via = 60; leave 4 margin
+			avail := m.width - 64
+			msg := "# " + r.Comment
+			if avail > 4 {
+				if lipgloss.Width(msg) > avail {
+					msg = string([]rune(msg)[:avail-1]) + "…"
+				}
+				cmtStr = styleMuted.Render(msg)
+			}
+		}
+		fmt.Fprintf(&b, "%s%s%s%s%s%s\n",
 			prefix,
 			styleRouteNum.Render(fmt.Sprintf("%d", i+1)),
 			patStyle.Render(r.Pattern),
 			viaRendered,
 			statusStr,
+			cmtStr,
 		)
 	}
 	return b.String()
 }
 
-// sortedTunnelNames returns tunnel names from the current status, sorted.
+// sortedTunnelNames returns tunnel names sorted alphabetically (used for pickers).
 func (m Model) sortedTunnelNames() []string {
 	names := make([]string, 0, len(m.status.Tunnels))
 	for n := range m.status.Tunnels {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	return names
+}
+
+// tunnelNamesByPort returns tunnel names sorted by local_port ascending, then name.
+func (m Model) tunnelNamesByPort() []string {
+	names := make([]string, 0, len(m.status.Tunnels))
+	for n := range m.status.Tunnels {
+		names = append(names, n)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		pi := m.status.Tunnels[names[i]].LocalPort
+		pj := m.status.Tunnels[names[j]].LocalPort
+		if pi != pj {
+			return pi < pj
+		}
+		return names[i] < names[j]
+	})
 	return names
 }
 
@@ -1378,17 +1474,30 @@ func (m Model) buildRoutesEditContent() string {
 			viaRendered = viaW.Foreground(colorDirect).Render(via)
 		}
 
-		// Inline validation error — same line, after via, truncated to fit
+		// Inline suffix: validation error, comment input, or comment text — after via.
+		// 2 prefix + 4 num + 32 pattern + 22 via = 60 used; leave 4 margin.
+		avail := m.width - 60 - 4
 		var errStr string
-		if r.validErr != "" && !r.isDeleted {
-			// 2 prefix + 4 num + 32 pattern + 22 via = 60 used; leave 4 margin
-			avail := m.width - 60 - 4
+		switch {
+		case selected && m.editCmtFocused && !r.isDeleted:
+			if avail > 6 {
+				errStr = styleMuted.Render("# ") + m.editCmtInput.View()
+			}
+		case r.validErr != "" && !r.isDeleted:
 			if avail > 6 {
 				msg := "✗ " + r.validErr
 				if lipgloss.Width(msg) > avail {
 					msg = string([]rune(msg)[:avail-1]) + "…"
 				}
 				errStr = lipgloss.NewStyle().Foreground(colorDisconnected).Render(msg)
+			}
+		case r.Comment != "" && !r.isDeleted:
+			if avail > 4 {
+				msg := "# " + r.Comment
+				if lipgloss.Width(msg) > avail {
+					msg = string([]rune(msg)[:avail-1]) + "…"
+				}
+				errStr = styleMuted.Render(msg)
 			}
 		}
 
@@ -1571,11 +1680,7 @@ func (m Model) lineOffsetForCursor() int {
 		offset++ // blank line separating VPN from tunnel section
 	}
 	offset += 2 // tunnel section header + sep
-	names := make([]string, 0, len(m.status.Tunnels))
-	for name := range m.status.Tunnels {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := m.tunnelNamesByPort()
 	for i, name := range names {
 		if i >= m.statusCursor {
 			break
@@ -1700,11 +1805,7 @@ func (m Model) buildStatusContent() string {
 	b.WriteString("\n")
 	b.WriteString(m.sectionSep())
 
-	names := make([]string, 0, len(m.status.Tunnels))
-	for name := range m.status.Tunnels {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := m.tunnelNamesByPort()
 
 	for tunnelIdx, name := range names {
 		t := m.status.Tunnels[name]

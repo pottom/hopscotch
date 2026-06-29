@@ -76,7 +76,8 @@ const (
 // Rule maps a host pattern to a tunnel name, "direct", or "block".
 type Rule struct {
 	Pattern string `yaml:"pattern"`
-	Target  string `yaml:"target"` // tunnel name, "direct", or "block"
+	Target  string `yaml:"target"`           // tunnel name, "direct", or "block"
+	Comment string `yaml:"comment,omitempty"` // optional human note
 }
 
 // ProxyConfig holds the SOCKS5 router configuration.

@@ -22,9 +22,9 @@ VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS="-s -w \
-  -X hopscotch/internal/version.Version=${VERSION} \
-  -X hopscotch/internal/version.GitCommit=${GIT_COMMIT} \
-  -X hopscotch/internal/version.BuildDate=${BUILD_DATE}"
+  -X github.com/pottom/hopscotch/internal/version.Version=${VERSION} \
+  -X github.com/pottom/hopscotch/internal/version.GitCommit=${GIT_COMMIT} \
+  -X github.com/pottom/hopscotch/internal/version.BuildDate=${BUILD_DATE}"
 
 # ── Docker tag generation ──────────────────────────────────────────────────────
 generate_tags() {

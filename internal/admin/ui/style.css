@@ -602,6 +602,7 @@ main, main.main {
 .routes-via-tunnel { color: var(--accent); }
 .routes-via-direct { color: #a78bfa; }
 .routes-via-block  { color: #f87171; }
+.routes-note       { color: var(--muted); font-size: 0.75rem; font-style: italic; }
 .routes-empty      { color: var(--muted); padding: 1.5rem 0.75rem; }
 .routes-hint       { color: var(--muted); font-size: 0.72rem; padding: 0 1.75rem 0.6rem; }
 
@@ -678,6 +679,29 @@ main, main.main {
   margin-top: 0.15rem;
   line-height: 1.2;
 }
+
+/* ── Comment input ───────────────────────── */
+.rules-comment-cell { min-width: 8rem; }
+.rules-edit-comment {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.76rem;
+  font-style: italic;
+  display: block;
+  padding: 0.3rem 0.5rem !important;
+  height: auto !important;
+  margin-bottom: 0 !important;
+  outline: none;
+  transition: border-color .15s;
+  width: 100%;
+  box-sizing: border-box;
+  line-height: 1.4;
+}
+.rules-edit-comment:focus      { border-color: var(--accent); color: var(--text); font-style: normal; }
+.rules-edit-comment::placeholder { font-style: italic; }
 
 /* ── Custom via picker ───────────────────── */
 .rules-via-picker {

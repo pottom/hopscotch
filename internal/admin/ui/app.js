@@ -230,7 +230,11 @@ let _tunnelKey = null;
 
 function syncTunnelTable() {
   const store = Alpine.store('hop');
-  const names = [...Object.keys(store.tunnels).sort(), 'direct'];
+  const names = [...Object.keys(store.tunnels).sort((a, b) => {
+    const pa = store.tunnels[a]?.local_port ?? 0;
+    const pb = store.tunnels[b]?.local_port ?? 0;
+    return pa !== pb ? pa - pb : a.localeCompare(b);
+  }), 'direct'];
   const key = names.join('\x00');
   if (_tunnelKey !== key) { buildTunnelRows(names); _tunnelKey = key; }
   else updateTunnelRows();
@@ -379,7 +383,11 @@ document.addEventListener('alpine:init', () => {
     meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', proxy_auth_enabled: false, admin_port: 0, admin_bind: '', admin_auth_enabled: false, status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
 
     tunnelList() {
-      return Object.keys(this.tunnels).sort();
+      return Object.keys(this.tunnels).sort((a, b) => {
+        const pa = this.tunnels[a]?.local_port ?? 0;
+        const pb = this.tunnels[b]?.local_port ?? 0;
+        return pa !== pb ? pa - pb : a.localeCompare(b);
+      });
     },
 
     vpnList() {
@@ -764,6 +772,7 @@ function resetRoutesHead() {
     <th class="routes-num-h">#</th>
     <th>Pattern</th>
     <th>Via</th>
+    <th>Note</th>
     <th>Status</th>
   </tr>`;
 }
@@ -801,7 +810,8 @@ function renderRoutesTable(highlightIdx) {
     const tr = document.createElement('tr');
     if (highlightIdx === i) tr.className = 'routes-match';
     const arrow = (highlightIdx === i) ? '▶' : '';
-    tr.innerHTML = `<td class="routes-arrow">${arrow}</td><td class="routes-num">${i + 1}</td><td class="routes-pattern">${r.pattern}</td><td>${viaHtml}</td><td>${statusHtml}</td>`;
+    const noteHtml = r.comment ? `<span class="routes-note">${escHtml(r.comment)}</span>` : '';
+    tr.innerHTML = `<td class="routes-arrow">${arrow}</td><td class="routes-num">${i + 1}</td><td class="routes-pattern">${escHtml(r.pattern)}</td><td>${viaHtml}</td><td>${noteHtml}</td><td>${statusHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -835,6 +845,7 @@ function rulesStartEdit() {
     _new: false, _deleted: false, _modified: false,
     _origPattern: r.pattern,
     _origTarget:  r.target || 'direct',
+    _origComment: r.comment || '',
   }));
   document.getElementById('routes-edit-btn').style.display   = 'none';
   document.getElementById('routes-save-btn').style.display   = '';
@@ -857,7 +868,7 @@ function rulesCancel() {
 
 function rulesInsertAfter(i) {
   rulesCollectFromDOM();
-  rulesEditData.splice(i + 1, 0, {pattern: '', target: 'direct', _new: true, _deleted: false});
+  rulesEditData.splice(i + 1, 0, {pattern: '', target: 'direct', comment: '', _new: true, _deleted: false});
   renderEditTable(i + 1);
   const rows = document.querySelectorAll('#routes-tbody tr[data-idx]');
   if (rows[i + 1]) rows[i + 1].querySelector('.rules-edit-pattern')?.focus();
@@ -900,8 +911,17 @@ function rulesEffectiveTarget(r) {
 function rulesComputeModified(r) {
   if (r._new || r._deleted) return false;
   return r.pattern !== (r._origPattern || '') ||
-         rulesEffectiveTarget(r) !== (r._origTarget || 'direct');
+         rulesEffectiveTarget(r) !== (r._origTarget || 'direct') ||
+         (r.comment || '') !== (r._origComment || '');
 }
+
+window.rulesMarkCommentModified = function(rowIdx, value) {
+  if (!rulesEditData[rowIdx]) return;
+  rulesEditData[rowIdx].comment = value;
+  rulesEditData[rowIdx]._modified = rulesComputeModified(rulesEditData[rowIdx]);
+  const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
+  if (tr) tr.classList.toggle('rules-row-modified', !!rulesEditData[rowIdx]._modified);
+};
 
 function rulesCollectFromDOM() {
   document.querySelectorAll('#routes-tbody tr[data-idx]').forEach(tr => {
@@ -909,10 +929,12 @@ function rulesCollectFromDOM() {
     if (rulesEditData[idx]?._deleted) return; // deleted rows keep their original data
     const pattern = tr.querySelector('.rules-edit-pattern')?.value || '';
     const target  = tr.querySelector('.rules-via-picker')?.dataset.value || 'direct';
+    const comment = tr.querySelector('.rules-edit-comment')?.value || '';
     rulesEditData[idx] = {
       ...rulesEditData[idx],
       pattern,
       target,
+      comment,
     };
     rulesEditData[idx]._modified = rulesComputeModified(rulesEditData[idx]);
   });
@@ -1028,7 +1050,7 @@ async function rulesSave() {
     // Strip UI-only metadata and filter out soft-deleted rows before sending
     const payload = rulesEditData
       .filter(r => !r._deleted)
-      .map(({_new, _deleted, _modified, _origPattern, _origTarget, _pickerValue, ...r}) => r);
+      .map(({_new, _deleted, _modified, _origPattern, _origTarget, _origComment, _pickerValue, ...r}) => r);
     const res = await fetch('/api/rules', {
       method:  'PUT',
       headers: {'Content-Type': 'application/json'},
@@ -1067,6 +1089,7 @@ function renderEditTable(newRowIdx) {
       <th class="routes-num-h">#</th>
       <th>Pattern</th>
       <th>Via</th>
+      <th>Note</th>
       <th style="width:4rem"></th>
     </tr>`;
   }
@@ -1126,6 +1149,11 @@ function renderEditTable(newRowIdx) {
                ${isDeleted ? 'disabled' : `oninput="debounceValidate(${i}, this.value)"`}>
       </td>
       <td>${viaCell}</td>
+      <td class="rules-comment-cell">
+        <input type="text" class="rules-edit-comment" value="${escHtml(r.comment || '')}"
+               placeholder="note…"
+               ${isDeleted ? 'disabled' : `oninput="rulesMarkCommentModified(${i}, this.value)"`}>
+      </td>
       <td class="rules-row-actions">
         ${isDeleted ? '' : `<button class="rules-insert-btn" onclick="rulesInsertAfter(${i})" title="Insert rule below">+</button>`}
         ${actionBtn}
