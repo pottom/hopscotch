@@ -25,6 +25,14 @@ window.fmtBytes = function(n) {
   return (n / 1048576).toFixed(2) + ' MB/s';
 };
 
+window.fmtTotal = function(n) {
+  if (!n) return '—';
+  if (n < 1024)       return n + ' B';
+  if (n < 1048576)    return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+};
+
 window.fmtUptime = function(sec) {
   if (!sec) return '—';
   sec = Math.floor(sec);
@@ -204,7 +212,7 @@ function renderVPNTable() {
       `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
-      `<td></td><td></td><td></td>`;
+      `<td></td><td></td><td></td><td></td>`;
     tbody.appendChild(tr);
     // message sub-row — only when not connected and last_error is set
     const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
@@ -213,7 +221,7 @@ function renderVPNTable() {
     vmtr.className = 'msg-row'; vmtr.dataset.name = name;
     vmtr.style.display = vpnMsg ? '' : 'none';
     const vpnPrefix = vpnIsProgress ? '◌ ' : '└ ✗ ';
-    vmtr.innerHTML = `<td colspan="10" class="msg-row-cell${vpnIsProgress ? ' msg-row-progress' : ''}">${vpnMsg ? escHtml(vpnPrefix + vpnMsg) : ''}</td>`;
+    vmtr.innerHTML = `<td colspan="11" class="msg-row-cell${vpnIsProgress ? ' msg-row-progress' : ''}">${vpnMsg ? escHtml(vpnPrefix + vpnMsg) : ''}</td>`;
     tbody.appendChild(vmtr);
   }
 }
@@ -250,9 +258,10 @@ function buildTunnelRows(names) {
         `<td data-col="status"><span class="st-muted">—</span></td>` +
         `<td data-col="uptime"><span class="st-muted">—</span></td>` +
         `<td data-col="rc"><span class="st-muted">—</span></td>` +
-        `<td class="bps-in"  data-col="bps-in">${fmtBytes(d.bps_in  || 0)}</td>` +
-        `<td class="bps-out" data-col="bps-out">${fmtBytes(d.bps_out || 0)}</td>` +
-        `<td data-col="active">${d.active || 0}</td>`;
+        `<td class="bps-in"  data-col="bps-in">${fmtTotal(d.bytes_in  || 0)}</td>` +
+        `<td class="bps-out" data-col="bps-out">${fmtTotal(d.bytes_out || 0)}</td>` +
+        `<td data-col="active">${d.active || 0}</td>` +
+        `<td></td>`;
     } else {
       const t = store.tunnels[name];
       if (!t) continue;
@@ -265,9 +274,10 @@ function buildTunnelRows(names) {
         `<td data-col="status">${tunnelStatusHtml(t)}</td>` +
         `<td data-col="uptime">${fmtUptime(t.uptime_seconds)}</td>` +
         `<td data-col="rc">${t.reconnect_count || 0}</td>` +
-        `<td class="bps-in"  data-col="bps-in">${fmtBytes(t.bps_in  || 0)}</td>` +
-        `<td class="bps-out" data-col="bps-out">${fmtBytes(t.bps_out || 0)}</td>` +
-        `<td data-col="active">${t.active || 0}</td>`;
+        `<td class="bps-in"  data-col="bps-in">${fmtTotal(t.bytes_in  || 0)}</td>` +
+        `<td class="bps-out" data-col="bps-out">${fmtTotal(t.bytes_out || 0)}</td>` +
+        `<td data-col="active">${t.active || 0}</td>` +
+        `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectTunnel('${escHtml(name)}')">↻</button></td>`;
     }
     tbody.appendChild(tr);
     // message sub-row — shown for errors (red └ ✗) and progress msgs (amber ◌)
@@ -277,11 +287,11 @@ function buildTunnelRows(names) {
     mtr.className = 'msg-row'; mtr.dataset.name = name;
     mtr.style.display = msg ? '' : 'none';
     const prefix = isProgress ? '◌ ' : '└ ✗ ';
-    mtr.innerHTML = `<td colspan="10" class="msg-row-cell${isProgress ? ' msg-row-progress' : ''}">${msg ? escHtml(prefix + msg) : ''}</td>`;
+    mtr.innerHTML = `<td colspan="11" class="msg-row-cell${isProgress ? ' msg-row-progress' : ''}">${msg ? escHtml(prefix + msg) : ''}</td>`;
     tbody.appendChild(mtr);
     const gtr = document.createElement('tr');
     gtr.className = 'graph-row'; gtr.dataset.name = name;
-    gtr.innerHTML = `<td colspan="10"><div class="graph-cell"><canvas id="${chartId(name)}"></canvas></div></td>`;
+    gtr.innerHTML = `<td colspan="11"><div class="graph-bps-bar" id="bps-bar-${chartId(name)}"></div><div class="graph-cell"><canvas id="${chartId(name)}"></canvas></div></td>`;
     tbody.appendChild(gtr);
   }
   if (document.body.classList.contains('graphs-on')) requestAnimationFrame(initAllCharts);
@@ -295,8 +305,8 @@ function updateTunnelRows() {
     const name = row.dataset.name;
     if (name === 'direct') {
       const d = store.direct;
-      setCell(row, 'bps-in',  fmtBytes(d.bps_in  || 0));
-      setCell(row, 'bps-out', fmtBytes(d.bps_out || 0));
+      setCell(row, 'bps-in',  fmtTotal(d.bytes_in  || 0));
+      setCell(row, 'bps-out', fmtTotal(d.bytes_out || 0));
       setCell(row, 'active', d.active || 0);
       continue;
     }
@@ -307,8 +317,8 @@ function updateTunnelRows() {
     setCell(row, 'status', tunnelStatusHtml(t), true);
     setCell(row, 'uptime', fmtUptime(t.uptime_seconds));
     setCell(row, 'rc', t.reconnect_count || 0);
-    setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0));
-    setCell(row, 'bps-out', fmtBytes(t.bps_out || 0));
+    setCell(row, 'bps-in',  fmtTotal(t.bytes_in  || 0));
+    setCell(row, 'bps-out', fmtTotal(t.bytes_out || 0));
     setCell(row, 'active', t.active || 0);
     // update msg sub-row
     const mRow = row.nextElementSibling?.classList.contains('msg-row') ? row.nextElementSibling : null;
@@ -324,10 +334,26 @@ function updateTunnelRows() {
   }
 }
 
+function updateBpsBar(name, bpsIn, bpsOut) {
+  const bar = document.getElementById('bps-bar-' + chartId(name));
+  if (!bar) return;
+  bar.innerHTML =
+    `<span class="bps-bar-in">↓ ${fmtBytes(bpsIn)}</span>` +
+    `<span class="bps-bar-sep"> · </span>` +
+    `<span class="bps-bar-out">↑ ${fmtBytes(bpsOut)}</span>`;
+}
+
 function renderStatusTables() {
   renderVPNTable();
   syncTunnelTable();
 }
+
+window.reconnectTunnel = async function(name) {
+  try {
+    await fetch('/api/tunnels/' + encodeURIComponent(name) + '/reconnect', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
 
 window.toggleRowGraph = function(row) {
   const expanded = row.classList.toggle('expanded');
@@ -440,6 +466,8 @@ async function refreshStatus() {
         last_error:         t.last_error || '',
         bps_in:             prev.bps_in       ?? 0,
         bps_out:            prev.bps_out      ?? 0,
+        bytes_in:           t.bytes_in        ?? prev.bytes_in  ?? 0,
+        bytes_out:          t.bytes_out       ?? prev.bytes_out ?? 0,
         active:             prev.active       ?? 0,
         reconnect_in:       prev.reconnect_in ?? null,
       };
@@ -489,16 +517,20 @@ function connectSSE() {
       if (store.tunnels[name]) {
         store.tunnels[name].bps_in       = t.bps_in;
         store.tunnels[name].bps_out      = t.bps_out;
+        store.tunnels[name].bytes_in     = t.bytes_in;
+        store.tunnels[name].bytes_out    = t.bytes_out;
         store.tunnels[name].active       = t.active;
         store.tunnels[name].reconnect_in = t.reconnect_in ?? null;
       }
       pushChart(name, t.bps_in, t.bps_out);
       const row = findTunnelRow(name);
       if (row) {
-        setCell(row, 'bps-in',  fmtBytes(t.bps_in  || 0));
-        setCell(row, 'bps-out', fmtBytes(t.bps_out || 0));
+        setCell(row, 'bps-in',  fmtTotal(t.bytes_in  || 0));
+        setCell(row, 'bps-out', fmtTotal(t.bytes_out || 0));
         setCell(row, 'active', t.active || 0);
         if (store.tunnels[name]) setCell(row, 'status', tunnelStatusHtml(store.tunnels[name]), true);
+        // update bps bar in expanded graph row if open
+        updateBpsBar(name, t.bps_in || 0, t.bps_out || 0);
       }
     }
 
@@ -511,17 +543,20 @@ function connectSSE() {
     }
 
     store.direct = {
-      bps_in:  d.direct?.bps_in  ?? 0,
-      bps_out: d.direct?.bps_out ?? 0,
-      active:  d.direct?.active  ?? 0,
+      bps_in:   d.direct?.bps_in   ?? 0,
+      bps_out:  d.direct?.bps_out  ?? 0,
+      bytes_in:  d.direct?.bytes_in  ?? 0,
+      bytes_out: d.direct?.bytes_out ?? 0,
+      active:   d.direct?.active   ?? 0,
     };
     pushChart('direct', d.direct?.bps_in ?? 0, d.direct?.bps_out ?? 0);
     const directRow = findTunnelRow('direct');
     if (directRow) {
       const dr = store.direct;
-      setCell(directRow, 'bps-in',  fmtBytes(dr.bps_in  || 0));
-      setCell(directRow, 'bps-out', fmtBytes(dr.bps_out || 0));
+      setCell(directRow, 'bps-in',  fmtTotal(dr.bytes_in  || 0));
+      setCell(directRow, 'bps-out', fmtTotal(dr.bytes_out || 0));
       setCell(directRow, 'active', dr.active || 0);
+      updateBpsBar('direct', dr.bps_in || 0, dr.bps_out || 0);
     }
   };
 

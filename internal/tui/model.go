@@ -106,6 +106,8 @@ type trafficWindow struct {
 	dataOut     []float64
 	bpsIn       uint64
 	bpsOut      uint64
+	bytesIn     uint64
+	bytesOut    uint64
 	active      int64
 	reconnectIn *int
 }
@@ -270,6 +272,8 @@ func blendColor(from, to lipgloss.Color, t float64) lipgloss.Color {
 type sseTrafficEntry struct {
 	BpsIn       uint64 `json:"bps_in"`
 	BpsOut      uint64 `json:"bps_out"`
+	BytesIn     uint64 `json:"bytes_in"`
+	BytesOut    uint64 `json:"bytes_out"`
 	Active      int64  `json:"active"`
 	ReconnectIn *int   `json:"reconnect_in,omitempty"`
 }
@@ -286,13 +290,14 @@ type ssePayload struct {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type statusMsg    admin.StatusResponse
-type sseMsg       ssePayload
-type logLineMsg   string
-type errMsg       error
-type tickMsg      time.Time
-type rulesSavedMsg   struct{}
-type rulesSaveErrMsg struct{ err error }
+type statusMsg         admin.StatusResponse
+type sseMsg            ssePayload
+type logLineMsg        string
+type errMsg            error
+type tickMsg           time.Time
+type rulesSavedMsg     struct{}
+type rulesSaveErrMsg   struct{ err error }
+type reconnectResultMsg struct{}
 
 // editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
 type editRule struct {
@@ -361,9 +366,10 @@ type Model struct {
 	height  int
 	vp      viewport.Model
 	vpReady bool
-	compact     bool
-	mirrorGraph bool
-	ready       bool
+	compact      bool
+	mirrorGraph  bool
+	statusCursor int // index into sorted tunnel names on the status tab
+	ready        bool
 }
 
 // New creates a TUI Model using the provided pre-authenticated http.Client.
@@ -588,7 +594,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "q", "Q", "ctrl+c", "esc":
+		case "q", "Q", "ctrl+c":
 			close(m.done)
 			return m, tea.Quit
 
@@ -663,6 +669,76 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "up", "k":
+			if m.activeTab == tabStatus {
+				if n := len(m.status.Tunnels); n > 0 {
+					if m.statusCursor > 0 {
+						m.statusCursor--
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+						m.vp.SetYOffset(m.lineOffsetForCursor())
+					}
+					return m, nil
+				}
+			}
+			if m.activeTab == tabLogs && m.logVPReady {
+				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.vpReady {
+				m.vp, cmd = m.vp.Update(msg)
+			}
+			return m, cmd
+
+		case "down", "j":
+			if m.activeTab == tabStatus {
+				if n := len(m.status.Tunnels); n > 0 {
+					if m.statusCursor < n-1 {
+						m.statusCursor++
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+						m.vp.SetYOffset(m.lineOffsetForCursor())
+					}
+					return m, nil
+				}
+			}
+			if m.activeTab == tabLogs && m.logVPReady {
+				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.vpReady {
+				m.vp, cmd = m.vp.Update(msg)
+			}
+			return m, cmd
+
+		case "r", "R":
+			if m.activeTab == tabStatus && len(m.status.Tunnels) > 0 {
+				names := make([]string, 0, len(m.status.Tunnels))
+				for name := range m.status.Tunnels {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				if m.statusCursor < len(names) {
+					name := names[m.statusCursor]
+					// Optimistic update: show connecting immediately before the HTTP round-trip.
+					if t, ok := m.status.Tunnels[name]; ok {
+						t.Status = "connecting"
+						t.LastError = ""
+						m.status.Tunnels[name] = t
+					}
+					if w := m.traffic[name]; w != nil {
+						w.reconnectIn = nil
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, m.reconnectTunnelCmd(name)
+				}
+			}
+			return m, nil
+
 		default:
 			if m.activeTab == tabStatus && m.vpReady {
 				m.vp, cmd = m.vp.Update(msg)
@@ -698,13 +774,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = fmt.Errorf("unauthorized — use: hopscotch status --username USER --password PASS")
 		return m, tea.Quit
 
+	case reconnectResultMsg:
+		// Fetch status immediately so the real state (connecting/connected) is shown without waiting for the next tick.
+		return m, fetchStatus(m.adminURL, m.httpClient)
+
 	case statusMsg:
 		m.status = admin.StatusResponse(msg)
 		m.err = nil
 		m.ready = true
-		for name := range m.status.Tunnels {
+		// Clamp cursor to valid range when tunnels change.
+		if n := len(m.status.Tunnels); n > 0 && m.statusCursor >= n {
+			m.statusCursor = n - 1
+		}
+		for name, t := range m.status.Tunnels {
 			if m.traffic[name] == nil {
 				m.traffic[name] = &trafficWindow{}
+			}
+			// Seed cumulative totals from /status on initial load (before first SSE tick).
+			if m.traffic[name].bytesIn == 0 {
+				m.traffic[name].bytesIn = t.BytesIn
+			}
+			if m.traffic[name].bytesOut == 0 {
+				m.traffic[name].bytesOut = t.BytesOut
 			}
 		}
 		if m.traffic["direct"] == nil {
@@ -723,6 +814,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.traffic[name] = &trafficWindow{}
 			}
 			m.traffic[name].push(t.BpsIn, t.BpsOut)
+			m.traffic[name].bytesIn = t.BytesIn
+			m.traffic[name].bytesOut = t.BytesOut
 			m.traffic[name].active = t.Active
 			m.traffic[name].reconnectIn = t.ReconnectIn
 		}
@@ -736,6 +829,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.traffic["direct"] = &trafficWindow{}
 		}
 		m.traffic["direct"].push(msg.Direct.BpsIn, msg.Direct.BpsOut)
+		m.traffic["direct"].bytesIn = msg.Direct.BytesIn
+		m.traffic["direct"].bytesOut = msg.Direct.BytesOut
 		m.traffic["direct"].active = msg.Direct.Active
 		if m.vpReady {
 			m.vp.SetContent(m.buildStatusContent())
@@ -1042,6 +1137,9 @@ func (m Model) renderFooter() string {
 		} else {
 			hints += "  g mirror"
 		}
+		if len(m.status.Tunnels) > 0 {
+			hints += "  ↑↓/jk cursor  r reconnect"
+		}
 	}
 
 	activeVP := m.vp
@@ -1331,6 +1429,24 @@ func (m Model) buildRoutesEditContent() string {
 	return b.String()
 }
 
+// reconnectTunnelCmd returns a Cmd that POSTs a reconnect request for the given tunnel.
+func (m Model) reconnectTunnelCmd(name string) tea.Cmd {
+	reconnectURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/tunnels/" + name + "/reconnect"
+	client := m.httpClient
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPost, reconnectURL, nil)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res.Body.Close()
+		return reconnectResultMsg{}
+	}
+}
+
 // saveRulesCmd returns a Cmd that PUTs the current editRules to the admin API.
 func (m Model) saveRulesCmd() tea.Cmd {
 	var rules []admin.RouteJSON
@@ -1460,6 +1576,48 @@ func (m Model) sectionSep() string {
 	return "  " + styleMuted.Render(strings.Repeat("─", max(m.width-4, 10))) + "\n"
 }
 
+// lineOffsetForCursor returns the viewport line offset of the cursor-selected
+// tunnel so the viewport can be scrolled to keep the selection visible.
+func (m Model) lineOffsetForCursor() int {
+	offset := 0
+	if len(m.status.VPNs) > 0 {
+		vpnNames := make([]string, 0, len(m.status.VPNs))
+		for name := range m.status.VPNs {
+			vpnNames = append(vpnNames, name)
+		}
+		sort.Strings(vpnNames)
+		offset += 2 // header + sep
+		for _, name := range vpnNames {
+			v := m.status.VPNs[name]
+			offset++
+			if v.LastError != "" && v.State != msgs.StatusConnected {
+				offset++
+			}
+		}
+		offset++ // blank line separating VPN from tunnel section
+	}
+	offset += 2 // tunnel section header + sep
+	names := make([]string, 0, len(m.status.Tunnels))
+	for name := range m.status.Tunnels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for i, name := range names {
+		if i >= m.statusCursor {
+			break
+		}
+		t := m.status.Tunnels[name]
+		offset++ // tunnel data row
+		if t.LastError != "" && t.Status != msgs.StatusConnected {
+			offset++ // error sub-row
+		}
+		if !m.compact && m.traffic[name] != nil {
+			offset += 1 + graphRows // bps line + graph rows
+		}
+	}
+	return offset
+}
+
 func (m Model) buildStatusContent() string {
 	tl := layoutTunnelCols(m.width)
 	vl := layoutVPNCols(m.width, tl)
@@ -1563,7 +1721,7 @@ func (m Model) buildStatusContent() string {
 	b.WriteString(hdr(tStatus, "STATUS"))
 	if tl.showUptime { b.WriteString(hdr(tUptime, "UPTIME")) }
 	if tl.showRC     { b.WriteString(hdr(tRC, "RC")) }
-	if tl.showBPS    { b.WriteString(hdr(tBpsIn, "↓")); b.WriteString(hdr(tBpsOut, "↑")) }
+	if tl.showBPS    { b.WriteString(hdr(tBpsIn, "↓ TOTAL")); b.WriteString(hdr(tBpsOut, "↑ TOTAL")) }
 	if tl.showConn   { b.WriteString(hdr(tConn, "CONN")) }
 	b.WriteString("\n")
 	b.WriteString(m.sectionSep())
@@ -1574,7 +1732,7 @@ func (m Model) buildStatusContent() string {
 	}
 	sort.Strings(names)
 
-	for _, name := range names {
+	for tunnelIdx, name := range names {
 		t := m.status.Tunnels[name]
 		w := m.traffic[name]
 
@@ -1584,13 +1742,22 @@ func (m Model) buildStatusContent() string {
 		}
 
 		var reconnectIn *int
-		var bpsIn, bpsOut uint64
+		var bpsIn, bpsOut, bytesIn, bytesOut uint64
 		var active int64
 		if w != nil {
 			reconnectIn = w.reconnectIn
 			bpsIn = w.bpsIn
 			bpsOut = w.bpsOut
+			bytesIn = w.bytesIn
+			bytesOut = w.bytesOut
 			active = w.active
+		}
+		// Fall back to /status bytes on first render before SSE arrives.
+		if bytesIn == 0 {
+			bytesIn = t.BytesIn
+		}
+		if bytesOut == 0 {
+			bytesOut = t.BytesOut
 		}
 
 		// error sub-line: propagate VPN root cause so "waiting for VPN: X" shows X's actual reason.
@@ -1635,7 +1802,11 @@ func (m Model) buildStatusContent() string {
 			vpnLabel = bullet + " " + t.RequiresVPN
 		}
 
-		b.WriteString("  ")
+		prefix := "  "
+		if tunnelIdx == m.statusCursor {
+			prefix = styleConnecting.Render(">") + " "
+		}
+		b.WriteString(prefix)
 		b.WriteString(tName.Foreground(colorAccent).Render(name))
 		if tl.showHost   { b.WriteString(tHost.Render(t.Host)) }
 		b.WriteString(vpnColStyle.Render(vpnLabel))
@@ -1643,7 +1814,7 @@ func (m Model) buildStatusContent() string {
 		b.WriteString(tStatus.Render(tunnelStatusStr))
 		if tl.showUptime { b.WriteString(tUptime.Render(uptime)) }
 		if tl.showRC     { b.WriteString(tRC.Render(fmt.Sprintf("%d", t.ReconnectCount))) }
-		if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtBytes(bpsIn))); b.WriteString(tBpsOut.Render("↑ "+fmtBytes(bpsOut))) }
+		if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtTotal(bytesIn))); b.WriteString(tBpsOut.Render("↑ "+fmtTotal(bytesOut))) }
 		if tl.showConn   { b.WriteString(tConn.Render(fmtActive(active))) }
 		b.WriteString("\n")
 
@@ -1652,6 +1823,11 @@ func (m Model) buildStatusContent() string {
 		}
 
 		if !m.compact && w != nil {
+			// bps summary line above the braille graph
+			bpsLine := lipgloss.NewStyle().Foreground(colorBpsIn).Render("↓ "+fmtBytes(bpsIn)) +
+				"  " +
+				lipgloss.NewStyle().Foreground(colorBpsOut).Render("↑ "+fmtBytes(bpsOut))
+			fmt.Fprintf(&b, "  %s\n", bpsLine)
 			for _, line := range renderGraph(w.dataIn, w.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
 				fmt.Fprintf(&b, "  %s\n", line)
 			}
@@ -1660,11 +1836,13 @@ func (m Model) buildStatusContent() string {
 
 	// direct row
 	dw := m.traffic["direct"]
-	var dBpsIn, dBpsOut uint64
+	var dBpsIn, dBpsOut, dBytesIn, dBytesOut uint64
 	var dActive int64
 	if dw != nil {
 		dBpsIn = dw.bpsIn
 		dBpsOut = dw.bpsOut
+		dBytesIn = dw.bytesIn
+		dBytesOut = dw.bytesOut
 		dActive = dw.active
 	}
 	b.WriteString("  ")
@@ -1675,11 +1853,15 @@ func (m Model) buildStatusContent() string {
 	b.WriteString(tStatus.Render(""))
 	if tl.showUptime { b.WriteString(tUptime.Render("")) }
 	if tl.showRC     { b.WriteString(tRC.Render("")) }
-	if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtBytes(dBpsIn))); b.WriteString(tBpsOut.Render("↑ "+fmtBytes(dBpsOut))) }
+	if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtTotal(dBytesIn))); b.WriteString(tBpsOut.Render("↑ "+fmtTotal(dBytesOut))) }
 	if tl.showConn   { b.WriteString(tConn.Render(fmtActive(dActive))) }
 	b.WriteString("\n")
 
 	if !m.compact && dw != nil {
+		bpsLine := lipgloss.NewStyle().Foreground(colorBpsIn).Render("↓ "+fmtBytes(dBpsIn)) +
+			"  " +
+			lipgloss.NewStyle().Foreground(colorBpsOut).Render("↑ "+fmtBytes(dBpsOut))
+		fmt.Fprintf(&b, "  %s\n", bpsLine)
 		for _, line := range renderGraph(dw.dataIn, dw.dataOut, colorBpsIn, colorBpsOut, graphRows, sparkW, m.mirrorGraph) {
 			fmt.Fprintf(&b, "  %s\n", line)
 		}
@@ -1795,6 +1977,21 @@ func fmtBytes(n uint64) string {
 		return fmt.Sprintf("%.1f KB/s", float64(n)/1024)
 	default:
 		return fmt.Sprintf("%.2f MB/s", float64(n)/1048576)
+	}
+}
+
+func fmtTotal(n uint64) string {
+	switch {
+	case n == 0:
+		return "—"
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1048576:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	case n < 1073741824:
+		return fmt.Sprintf("%.1f MB", float64(n)/1048576)
+	default:
+		return fmt.Sprintf("%.2f GB", float64(n)/1073741824)
 	}
 }
 

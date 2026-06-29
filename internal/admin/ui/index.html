@@ -88,16 +88,16 @@
         <col class="col-name"><col class="col-host"><col class="col-vpn">
         <col class="col-port"><col class="col-status"><col class="col-uptime">
         <col class="col-rc"><col class="col-bps"><col class="col-bps">
-        <col class="col-conn">
+        <col class="col-conn"><col class="col-action">
       </colgroup>
 
       <!-- VPN section -->
       <tbody id="vpn-section" style="display:none">
-        <tr class="sh-label-row"><td colspan="10">VPN</td></tr>
+        <tr class="sh-label-row"><td colspan="11">VPN</td></tr>
         <tr class="sh-head-row">
           <th>Name</th><th>Host</th><th>Iface</th><th></th>
           <th>Status</th><th>Uptime</th><th>RC</th>
-          <th></th><th></th><th></th>
+          <th></th><th></th><th></th><th></th>
         </tr>
         <!-- rows injected by JS -->
       </tbody>
@@ -105,15 +105,15 @@
 
       <!-- Tunnels section -->
       <tbody>
-        <tr class="sh-label-row"><td colspan="10">Tunnels</td></tr>
+        <tr class="sh-label-row"><td colspan="11">Tunnels</td></tr>
         <tr class="sh-head-row">
           <th>Name</th><th>Host</th><th>VPN</th><th>Port</th>
           <th>Status</th><th>Uptime</th><th>RC</th>
-          <th>↓</th><th>↑</th><th>Conn</th>
+          <th>↓ Total</th><th>↑ Total</th><th>Conn</th><th></th>
         </tr>
       </tbody>
       <tbody id="tunnel-tbody">
-        <tr><td colspan="10" class="st-loading">loading…</td></tr>
+        <tr><td colspan="11" class="st-loading">loading…</td></tr>
       </tbody>
     </table>
 

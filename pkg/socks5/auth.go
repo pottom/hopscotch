@@ -14,7 +14,7 @@ const (
 )
 
 // Credentials holds optional username/password for SOCKS5 auth (RFC 1929).
-// A nil or zero-value Credentials means no authentication is required.
+// A nil or zero-value Credentials disables authentication entirely.
 type Credentials struct {
 	Username string
 	Password string

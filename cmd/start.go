@@ -107,7 +107,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
 		vpnStatter = vpnMgr
 	}
-	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent, cfg, router, proxySrv.AuthEnabled())
+	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent, cfg, router, mgr, proxySrv.AuthEnabled())
 
 	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)

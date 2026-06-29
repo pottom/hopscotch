@@ -987,7 +987,40 @@ col.col-uptime { width: 78px;  }
 col.col-rc     { width: 40px;  }
 col.col-bps    { width: 90px;  }
 col.col-conn   { width: 48px;  }
+col.col-action { width: 36px;  }
 /* col-msg removed */
+
+/* Reconnect action button */
+.col-action-cell {
+  text-align: center;
+  padding: 0 0.2rem;
+}
+.reconnect-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.3rem;
+  transition: color .15s, border-color .15s;
+  line-height: 1;
+  opacity: 0;
+}
+.status-table tr.data-row:hover .reconnect-btn { opacity: 1; }
+.reconnect-btn:hover { color: var(--accent); border-color: rgba(56,189,248,.4); }
+
+/* BPS bar shown inside open graph row */
+.graph-bps-bar {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem 0;
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+  min-height: 1.2em;
+}
+.bps-bar-in  { color: #38bdf8; }
+.bps-bar-out { color: #818cf8; }
+.bps-bar-sep { color: #475569; }
 
 /* Status span states */
 .st-connected    { color: var(--connected); }
