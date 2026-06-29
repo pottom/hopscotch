@@ -14,6 +14,8 @@ import (
 type trafficEntry struct {
 	BpsIn       uint64 `json:"bps_in"`                 // bytes/s received
 	BpsOut      uint64 `json:"bps_out"`                // bytes/s sent
+	BytesIn     uint64 `json:"bytes_in"`               // cumulative bytes received since process start
+	BytesOut    uint64 `json:"bytes_out"`              // cumulative bytes sent since process start
 	Active      int64  `json:"active"`                 // current open connections
 	ReconnectIn *int   `json:"reconnect_in,omitempty"` // seconds until next attempt (connecting only)
 }
@@ -56,9 +58,11 @@ func buildPayload(prev, curr trafficState) trafficPayload {
 	for name, cs := range curr.tunnels {
 		ps := prev.tunnels[name]
 		e := trafficEntry{
-			BpsIn:  delta(ps.BytesIn, cs.BytesIn),
-			BpsOut: delta(ps.BytesOut, cs.BytesOut),
-			Active: cs.ActiveConns,
+			BpsIn:    delta(ps.BytesIn, cs.BytesIn),
+			BpsOut:   delta(ps.BytesOut, cs.BytesOut),
+			BytesIn:  cs.BytesIn,
+			BytesOut: cs.BytesOut,
+			Active:   cs.ActiveConns,
 		}
 		if cs.Status == tunnel.StatusConnecting && !cs.NextReconnectAt.IsZero() {
 			secs := int(time.Until(cs.NextReconnectAt).Seconds())
@@ -86,9 +90,11 @@ func buildPayload(prev, curr trafficState) trafficPayload {
 	}
 
 	p.Direct = trafficEntry{
-		BpsIn:  delta(prev.direct.BytesIn, curr.direct.BytesIn),
-		BpsOut: delta(prev.direct.BytesOut, curr.direct.BytesOut),
-		Active: curr.direct.ActiveConns,
+		BpsIn:    delta(prev.direct.BytesIn, curr.direct.BytesIn),
+		BpsOut:   delta(prev.direct.BytesOut, curr.direct.BytesOut),
+		BytesIn:  curr.direct.BytesIn,
+		BytesOut: curr.direct.BytesOut,
+		Active:   curr.direct.ActiveConns,
 	}
 
 	return p

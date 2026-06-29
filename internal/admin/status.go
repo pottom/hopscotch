@@ -28,6 +28,8 @@ type TunnelStatusJSON struct {
 	RequiresVPN       string  `json:"requires_vpn,omitempty"`
 	KeepaliveFailures int     `json:"keepalive_failures,omitempty"`
 	LastError         string  `json:"last_error,omitempty"`
+	BytesIn           uint64  `json:"bytes_in"`
+	BytesOut          uint64  `json:"bytes_out"`
 }
 
 // VPNStatusJSON is the per-VPN block in the /status response.
@@ -86,6 +88,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			RequiresVPN:       st.RequiresVPN,
 			KeepaliveFailures: st.KeepaliveFailures,
 			LastError:         st.LastError,
+			BytesIn:           st.BytesIn,
+			BytesOut:          st.BytesOut,
 		}
 	}
 
