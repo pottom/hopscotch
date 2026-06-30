@@ -279,7 +279,8 @@ type sseTrafficEntry struct {
 }
 
 type sseVPNEntry struct {
-	ReconnectIn *int `json:"reconnect_in,omitempty"`
+	State       string `json:"state"`
+	ReconnectIn *int   `json:"reconnect_in,omitempty"`
 }
 
 type ssePayload struct {
@@ -342,17 +343,21 @@ type Model struct {
 	done       chan struct{}
 	httpClient *http.Client
 
-	activeTab    int
-	logLines     []string
-	logLevel     int // 0=DEBUG 1=INFO 2=WARN 3=ERROR
-	logVP        viewport.Model
-	logVPReady   bool
+	activeTab      int
+	logLines       []string
+	logLevel       int // 0=DEBUG 1=INFO 2=WARN 3=ERROR
+	logSources     map[string]bool
+	logGrep        string
+	logGrepInput   textinput.Model
+	logGrepFocused bool
+	logVP          viewport.Model
+	logVPReady     bool
 	routeVP      viewport.Model
 	routeVPReady bool
 	routeInput   textinput.Model
 	routeFocused bool
 
-	// edit mode (Patterns tab)
+	// edit mode (Rules tab)
 	editMode       bool
 	editRules      []editRule
 	editCursor     int
@@ -403,6 +408,11 @@ func New(adminURL string, client *http.Client) Model {
 	ec.CharLimit = 256
 	ec.Width = 30
 
+	lg := textinput.New()
+	lg.Placeholder = "Filter… — Ctrl+N to clear"
+	lg.CharLimit = 256
+	lg.Width = 60
+
 	return Model{
 		adminURL:    adminURL,
 		sseURL:      base + "/traffic/stream",
@@ -419,7 +429,14 @@ func New(adminURL string, client *http.Client) Model {
 		routeInput:   ti,
 		editPatInput: ep,
 		editCmtInput: ec,
+		logGrepInput: lg,
 		logLevel:     1, // default: INFO+
+		logSources: map[string]bool{
+			"tunnel": true,
+			"vpn":    true,
+			"proxy":  true,
+			"system": true,
+		},
 	}
 }
 
@@ -515,6 +532,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.routeVPReady {
 					m.routeVP.SetContent(m.buildRoutesEditContent())
 				}
+				return m, cmd
+			}
+		}
+
+		// Log grep input.
+		if m.logGrepFocused {
+			switch msg.String() {
+			case "esc":
+				m.logGrepFocused = false
+				m.logGrepInput.Blur()
+				return m, nil
+			case "ctrl+n":
+				m.logGrepInput.SetValue("")
+				m.logGrep = ""
+				m.logGrepFocused = false
+				m.logGrepInput.Blur()
+				m.rebuildLogVP()
+				return m, nil
+			default:
+				m.logGrepInput, cmd = m.logGrepInput.Update(msg)
+				m.logGrep = m.logGrepInput.Value()
+				m.rebuildLogVP()
 				return m, cmd
 			}
 		}
@@ -650,15 +689,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Ctrl+N: clear URL tester on Patterns tab.
-		if msg.String() == "ctrl+n" && m.activeTab == tabRoutes {
-			m.routeInput.SetValue("")
-			m.routeInput.Blur()
-			m.routeFocused = false
-			if m.routeVPReady {
-				m.routeVP.SetContent(m.buildRoutesContent())
+		// Ctrl+N: clear tester/filter input.
+		if msg.String() == "ctrl+n" {
+			if m.activeTab == tabRoutes {
+				m.routeInput.SetValue("")
+				m.routeInput.Blur()
+				m.routeFocused = false
+				if m.routeVPReady {
+					m.routeVP.SetContent(m.buildRoutesContent())
+				}
+				return m, nil
 			}
-			return m, nil
+			if m.activeTab == tabLogs {
+				m.logGrepInput.SetValue("")
+				m.logGrep = ""
+				m.logGrepFocused = false
+				m.logGrepInput.Blur()
+				m.rebuildLogVP()
+				return m, nil
+			}
 		}
 
 		switch msg.String() {
@@ -671,18 +720,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.resizeViewports()
 			return m, nil
 
-		case "s", "S":
+		case "1":
 			m.activeTab = tabStatus
 			m = m.resizeViewports()
 			return m, nil
 
-		case "l", "L":
-			m.activeTab = tabLogs
+		case "2":
+			m.activeTab = tabRoutes
 			m = m.resizeViewports()
 			return m, nil
 
-		case "p", "P":
-			m.activeTab = tabRoutes
+		case "3":
+			m.activeTab = tabLogs
 			m = m.resizeViewports()
 			return m, nil
 
@@ -714,6 +763,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.routeInput.Focus()
 				return m, textinput.Blink
 			}
+			if m.activeTab == tabLogs {
+				m.logGrepFocused = true
+				m.logGrepInput.Focus()
+				return m, textinput.Blink
+			}
+			return m, nil
+
+		case "t", "T":
+			if m.activeTab == tabLogs {
+				m.logSources["tunnel"] = !m.logSources["tunnel"]
+				m.ensureMinLogSource()
+				m.rebuildLogVP()
+			}
+			return m, nil
+
+		case "v", "V":
+			if m.activeTab == tabLogs {
+				m.logSources["vpn"] = !m.logSources["vpn"]
+				m.ensureMinLogSource()
+				m.rebuildLogVP()
+			}
+			return m, nil
+
+		case "p", "P":
+			if m.activeTab == tabLogs {
+				m.logSources["proxy"] = !m.logSources["proxy"]
+				m.ensureMinLogSource()
+				m.rebuildLogVP()
+			}
+			return m, nil
+
+		case "s", "S":
+			if m.activeTab == tabLogs {
+				m.logSources["system"] = !m.logSources["system"]
+				m.ensureMinLogSource()
+				m.rebuildLogVP()
+			}
 			return m, nil
 
 		case "f", "F":
@@ -722,7 +808,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.vpReady {
 					m.vp.SetContent(m.buildStatusContent())
 				}
-			} else if m.activeTab == tabLogs {
+			}
+			return m, nil
+
+		case "l", "L":
+			if m.activeTab == tabLogs {
 				m.logLevel = (m.logLevel + 1) % 4
 				m.rebuildLogVP()
 			}
@@ -739,7 +829,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "up", "k":
 			if m.activeTab == tabStatus {
-				if n := len(m.status.Tunnels); n > 0 {
+				if n := m.statusItemCount(); n > 0 {
 					if m.statusCursor > 0 {
 						m.statusCursor--
 					}
@@ -761,7 +851,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down", "j":
 			if m.activeTab == tabStatus {
-				if n := len(m.status.Tunnels); n > 0 {
+				if n := m.statusItemCount(); n > 0 {
 					if m.statusCursor < n-1 {
 						m.statusCursor++
 					}
@@ -782,11 +872,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case "r", "R":
-			if m.activeTab == tabStatus && len(m.status.Tunnels) > 0 {
-				names := m.tunnelNamesByPort()
-				if m.statusCursor < len(names) {
-					name := names[m.statusCursor]
-					// Optimistic update: show connecting immediately before the HTTP round-trip.
+			if m.activeTab == tabStatus && m.statusItemCount() > 0 {
+				nVPNs := len(m.status.VPNs)
+				if m.statusCursor < nVPNs {
+					// cursor is on a VPN row
+					vpnNames := m.vpnNamesSorted()
+					name := vpnNames[m.statusCursor]
+					if v, ok := m.status.VPNs[name]; ok {
+						v.State = msgs.StatusConnecting
+						v.LastError = ""
+						m.status.VPNs[name] = v
+					}
+					if w := m.traffic[name]; w != nil {
+						w.reconnectIn = nil
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, m.reconnectVPNCmd(name)
+				}
+				// cursor is on a tunnel row
+				tunnelNames := m.tunnelNamesByPort()
+				tunnelIdx := m.statusCursor - nVPNs
+				if tunnelIdx < len(tunnelNames) {
+					name := tunnelNames[tunnelIdx]
 					if t, ok := m.status.Tunnels[name]; ok {
 						t.Status = "connecting"
 						t.LastError = ""
@@ -846,8 +955,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = admin.StatusResponse(msg)
 		m.err = nil
 		m.ready = true
-		// Clamp cursor to valid range when tunnels change.
-		if n := len(m.status.Tunnels); n > 0 && m.statusCursor >= n {
+		// Clamp cursor to valid range when tunnels/VPNs change.
+		if n := m.statusItemCount(); n > 0 && m.statusCursor >= n {
 			m.statusCursor = n - 1
 		}
 		for name, t := range m.status.Tunnels {
@@ -888,6 +997,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.traffic[name] = &trafficWindow{}
 			}
 			m.traffic[name].reconnectIn = v.ReconnectIn
+			// Apply state update from SSE so the TUI reflects changes between /status polls.
+			if v.State != "" {
+				if entry, ok := m.status.VPNs[name]; ok {
+					entry.State = v.State
+					m.status.VPNs[name] = entry
+				}
+			}
 		}
 		if m.traffic["direct"] == nil {
 			m.traffic["direct"] = &trafficWindow{}
@@ -947,10 +1063,11 @@ func (m Model) resizeViewports() Model {
 	}
 	m.vp.SetContent(m.buildStatusContent())
 
-	logVPH := vpH - 2
+	logVPH := vpH - 3
 	if logVPH < 1 {
 		logVPH = 1
 	}
+	m.logGrepInput.Width = m.width - 6
 	if !m.logVPReady {
 		m.logVP = viewport.New(m.width, logVPH)
 		m.logVPReady = true
@@ -1088,7 +1205,7 @@ func (m Model) renderTabBar() string {
 		idx  int
 	}{
 		{"Status", tabStatus},
-		{"Patterns", tabRoutes},
+		{"Rules", tabRoutes},
 		{"Logs", tabLogs},
 	}
 	var parts []string
@@ -1168,9 +1285,15 @@ func (m Model) renderHeader() string {
 			fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 		}
 	default:
-		levelLabel := logLevelLabels[m.logLevel]
 		fmt.Fprintf(&b, "\n")
-		fmt.Fprintf(&b, "  %s  %s\n", styleMuted.Render("LOGS"), styleTabActive.Render(levelLabel))
+		fmt.Fprintf(&b, "%s\n", m.renderLogFilterBar())
+		var grepPrefix string
+		if m.logGrepFocused {
+			grepPrefix = styleTabActive.Render("/ ")
+		} else {
+			grepPrefix = styleMuted.Render("/ ")
+		}
+		fmt.Fprintf(&b, "  %s%s\n", grepPrefix, m.logGrepInput.View())
 		fmt.Fprintf(&b, "  %s\n", styleMuted.Render(strings.Repeat("─", m.width-4)))
 	}
 	return b.String()
@@ -1178,7 +1301,7 @@ func (m Model) renderHeader() string {
 
 // renderFooter returns a single-line bar: hints on the left, ports on the right.
 func (m Model) renderFooter() string {
-	hints := "q quit  tab/s/l/p switch  ↑↓/jk scroll"
+	hints := "q quit  tab/1/2/3 switch  ↑↓/jk scroll"
 	if m.activeTab == tabRoutes {
 		if m.editMode {
 			hints = "↑↓/jk=cursor  shift+↑↓=reorder  e/enter=edit  tab=note  c=note  v=via  i=ins↑  a=add↓  d=del  ctrl+s=save  esc=cancel"
@@ -1189,7 +1312,11 @@ func (m Model) renderFooter() string {
 		}
 	}
 	if m.activeTab == tabLogs {
-		hints += "  f level"
+		if m.logGrepFocused {
+			hints += "  esc unfocus  ctrl+n clear"
+		} else {
+			hints += "  l level  t/v/p/s src  / filter  ctrl+n clear"
+		}
 	}
 	if m.activeTab == tabStatus {
 		hints += "  f format"
@@ -1198,7 +1325,7 @@ func (m Model) renderFooter() string {
 		} else {
 			hints += "  g mirror"
 		}
-		if len(m.status.Tunnels) > 0 {
+		if m.statusItemCount() > 0 {
 			hints += "  ↑↓/jk cursor  r reconnect"
 		}
 	}
@@ -1250,7 +1377,7 @@ func (m Model) renderFooter() string {
 		gap = 2
 	}
 
-	return "\n  " + leftStr + strings.Repeat(" ", gap) + right
+	return "\n\n  " + leftStr + strings.Repeat(" ", gap) + right
 }
 
 
@@ -1530,6 +1657,39 @@ func (m Model) reconnectTunnelCmd(name string) tea.Cmd {
 	}
 }
 
+// reconnectVPNCmd returns a Cmd that POSTs a reconnect request for the given VPN.
+func (m Model) reconnectVPNCmd(name string) tea.Cmd {
+	reconnectURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/vpns/" + name + "/reconnect"
+	client := m.httpClient
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPost, reconnectURL, nil)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res.Body.Close()
+		return reconnectResultMsg{}
+	}
+}
+
+// vpnNamesSorted returns VPN names sorted alphabetically (same order as rendered).
+func (m Model) vpnNamesSorted() []string {
+	names := make([]string, 0, len(m.status.VPNs))
+	for name := range m.status.VPNs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// statusItemCount returns the total number of navigable rows (VPNs + tunnels).
+func (m Model) statusItemCount() int {
+	return len(m.status.VPNs) + len(m.status.Tunnels)
+}
+
 // saveRulesCmd returns a Cmd that PUTs the current editRules to the admin API.
 func (m Model) saveRulesCmd() tea.Cmd {
 	var rules []admin.RouteJSON
@@ -1660,29 +1820,44 @@ func (m Model) sectionSep() string {
 }
 
 // lineOffsetForCursor returns the viewport line offset of the cursor-selected
-// tunnel so the viewport can be scrolled to keep the selection visible.
+// row so the viewport can be scrolled to keep the selection visible.
 func (m Model) lineOffsetForCursor() int {
 	offset := 0
-	if len(m.status.VPNs) > 0 {
-		vpnNames := make([]string, 0, len(m.status.VPNs))
-		for name := range m.status.VPNs {
-			vpnNames = append(vpnNames, name)
-		}
-		sort.Strings(vpnNames)
+	nVPNs := len(m.status.VPNs)
+
+	if nVPNs > 0 {
+		vpnNames := m.vpnNamesSorted()
 		offset += 2 // header + sep
+		if m.statusCursor < nVPNs {
+			// cursor is on a VPN row — count lines up to that row
+			for i, name := range vpnNames {
+				if i >= m.statusCursor {
+					break
+				}
+				offset++
+				v := m.status.VPNs[name]
+				if v.LastError != "" && v.State != msgs.StatusConnected {
+					offset++
+				}
+			}
+			return offset
+		}
+		// cursor is on a tunnel row — count all VPN rows
 		for _, name := range vpnNames {
-			v := m.status.VPNs[name]
 			offset++
+			v := m.status.VPNs[name]
 			if v.LastError != "" && v.State != msgs.StatusConnected {
 				offset++
 			}
 		}
 		offset++ // blank line separating VPN from tunnel section
 	}
+
 	offset += 2 // tunnel section header + sep
 	names := m.tunnelNamesByPort()
+	tunnelIdx := m.statusCursor - nVPNs
 	for i, name := range names {
-		if i >= m.statusCursor {
+		if i >= tunnelIdx {
 			break
 		}
 		t := m.status.Tunnels[name]
@@ -1751,7 +1926,7 @@ func (m Model) buildStatusContent() string {
 		}
 		sort.Strings(vpnNames)
 
-		for _, name := range vpnNames {
+		for vpnIdx, name := range vpnNames {
 			v := m.status.VPNs[name]
 			w := m.traffic[name]
 
@@ -1770,7 +1945,11 @@ func (m Model) buildStatusContent() string {
 				iface = "—"
 			}
 
-			b.WriteString("  ")
+			prefix := "  "
+			if vpnIdx == m.statusCursor {
+				prefix = styleConnecting.Render(">") + " "
+			}
+			b.WriteString(prefix)
 			b.WriteString(vName.Foreground(colorVPN).Render(name))
 			if vl.showHost   { b.WriteString(vHost.Render(v.Host)) }
 			b.WriteString(vIface.Render(iface))
@@ -1878,7 +2057,7 @@ func (m Model) buildStatusContent() string {
 		}
 
 		prefix := "  "
-		if tunnelIdx == m.statusCursor {
+		if tunnelIdx == m.statusCursor-len(m.status.VPNs) {
 			prefix = styleConnecting.Render(">") + " "
 		}
 		b.WriteString(prefix)
@@ -2106,7 +2285,6 @@ func (m Model) logLevelMatches(line string) bool {
 	if m.logLevel == 0 {
 		return true
 	}
-	// Strip ANSI and check for level tokens at or above current filter.
 	stripped := ansiRe.ReplaceAllString(line, "")
 	for i := m.logLevel; i < len(logLevelTokens); i++ {
 		if logLevelTokens[i] != "" && strings.Contains(stripped, logLevelTokens[i]) {
@@ -2116,17 +2294,80 @@ func (m Model) logLevelMatches(line string) bool {
 	return false
 }
 
-func (m Model) filteredLogLines() []string {
-	if m.logLevel == 0 {
-		return m.logLines
+func logLineSource(line string) string {
+	stripped := ansiRe.ReplaceAllString(line, "")
+	if strings.Contains(stripped, "tunnel=") {
+		return "tunnel"
 	}
-	out := make([]string, 0, len(m.logLines))
-	for _, l := range m.logLines {
-		if m.logLevelMatches(l) {
-			out = append(out, l)
+	if strings.Contains(stripped, "vpn=") {
+		return "vpn"
+	}
+	if strings.Contains(stripped, "proxy") {
+		return "proxy"
+	}
+	return "system"
+}
+
+func (m Model) logSourceMatches(line string) bool {
+	if len(m.logSources) == 0 {
+		return true
+	}
+	return m.logSources[logLineSource(line)]
+}
+
+func (m Model) logGrepMatches(line string) bool {
+	if m.logGrep == "" {
+		return true
+	}
+	stripped := ansiRe.ReplaceAllString(line, "")
+	return strings.Contains(strings.ToLower(stripped), strings.ToLower(m.logGrep))
+}
+
+func (m *Model) ensureMinLogSource() {
+	for _, active := range m.logSources {
+		if active {
+			return
 		}
 	}
+	for k := range m.logSources {
+		m.logSources[k] = true
+	}
+}
+
+func (m Model) filteredLogLines() []string {
+	out := make([]string, 0, len(m.logLines))
+	for _, l := range m.logLines {
+		if !m.logLevelMatches(l) {
+			continue
+		}
+		if !m.logSourceMatches(l) {
+			continue
+		}
+		if !m.logGrepMatches(l) {
+			continue
+		}
+		out = append(out, l)
+	}
 	return out
+}
+
+func (m Model) renderLogFilterBar() string {
+	levelLabel := logLevelLabels[m.logLevel]
+	srcKeys := []struct{ key, label string }{
+		{"tunnel", "TUNNEL"},
+		{"vpn", "VPN"},
+		{"proxy", "PROXY"},
+		{"system", "SYS"},
+	}
+	var srcParts []string
+	for _, s := range srcKeys {
+		if m.logSources[s.key] {
+			srcParts = append(srcParts, lipgloss.NewStyle().Foreground(colorVPN).Bold(true).Render(s.label))
+		} else {
+			srcParts = append(srcParts, styleMuted.Render(s.label))
+		}
+	}
+	return "  " + styleTabActive.Render(levelLabel) + "   " + strings.Join(srcParts, styleMuted.Render("  ·  "))
 }
 
 func (m *Model) rebuildLogVP() {

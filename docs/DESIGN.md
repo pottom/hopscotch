@@ -134,6 +134,43 @@ A hints sor felette, a port sor alatta, jobbra igazítva.
 
 ---
 
+## Logs tab — filter sor
+
+A Logs tab fejlécében két sor van a viewport felett:
+
+**1. sor — severity + source badge-ek:**
+```
+  INFO+   TUNNEL  ·  VPN  ·  PROXY  ·  SYS
+```
+
+| Elem | Aktív | Inaktív |
+|------|-------|---------|
+| Severity (ALL / INFO+ / WARN+ / ERR) | `colorAccent (#38bdf8)` | — |
+| Source badge (TUNNEL / VPN / PROXY / SYS) | `colorVPN (#2dd4bf)`, bold | `colorMuted (#475569)` |
+
+**2. sor — szövegszűrő input:**
+```
+  / Filter… — Ctrl+N to clear
+```
+
+Fókuszált állapotban a `/` prefix `colorAccent`; fókuszon kívül `colorMuted`.
+
+**Billentyűk (Logs tab):**
+
+| Billentyű | Hatás |
+|-----------|-------|
+| `l` | Severity ciklus: ALL → INFO+ → WARN+ → ERR |
+| `t` / `v` / `p` / `s` | Forrás toggle: tunnel / vpn / proxy / system |
+| `/` | Szövegszűrő aktiválása |
+| `Esc` | Szövegszűrő elhagyása |
+| `Ctrl+N` | Szövegszűrő törlése |
+
+**AND logika:** mind a három szűrő (`level`, `source`, `grep`) egyszerre érvényes. Legalább egy source mindig aktív marad.
+
+**Web UI megfelelők:** severity chipek (kék), source chipek (teal), Filter… input — azonos vizuális logika.
+
+---
+
 ## Színpaletta
 
 | Változó | Hex | Szerep |

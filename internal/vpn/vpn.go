@@ -77,16 +77,28 @@ type Connection struct {
 	lastError        atomic.Value // stores string; last subprocess error
 	tunIface         atomic.Value // stores string; tunnel interface name
 	tunIfacesBefore  atomic.Value // stores map[string]bool; tun interfaces before this runOnce
+	forceReconnect   chan struct{}
 }
 
 func newConnection(cfg connConfig) *Connection {
-	c := &Connection{cfg: cfg}
+	c := &Connection{
+		cfg:            cfg,
+		forceReconnect: make(chan struct{}, 1),
+	}
 	c.connectedAt.Store(time.Time{})
 	c.nextReconnectAt.Store(time.Time{})
 	c.lastError.Store("")
 	c.tunIface.Store("")
 	c.tunIfacesBefore.Store(map[string]bool{})
 	return c
+}
+
+// ForceReconnect interrupts the current backoff wait, triggering an immediate reconnect.
+func (c *Connection) ForceReconnect() {
+	select {
+	case c.forceReconnect <- struct{}{}:
+	default:
+	}
 }
 
 // detectTunIface finds the tunnel interface created by openconnect by comparing
@@ -158,17 +170,39 @@ func (c *Connection) Run(ctx context.Context) error {
 	for {
 		c.setState(StateConnecting)
 		beforeRun := time.Now()
-		if err := c.runOnce(ctx); ctx.Err() != nil {
-			c.setState(StateDisconnected)
-			c.nextReconnectAt.Store(time.Time{})
-			return nil
-		} else if err != nil {
-			// Don't overwrite a more specific error already captured from stderr.
-			if c.lastError.Load().(string) == "" {
-				c.lastError.Store(err.Error())
+
+		// Run the subprocess in a goroutine so forceReconnect can interrupt it
+		// even while the VPN is connected (not just during the backoff countdown).
+		runCtx, cancelRun := context.WithCancel(ctx)
+		errCh := make(chan error, 1)
+		go func() { errCh <- c.runOnce(runCtx) }()
+
+		forceSkipDelay := false
+		select {
+		case err := <-errCh:
+			cancelRun()
+			if ctx.Err() != nil {
+				c.setState(StateDisconnected)
+				c.nextReconnectAt.Store(time.Time{})
+				return nil
 			}
+			if err != nil {
+				if c.lastError.Load().(string) == "" {
+					c.lastError.Store(err.Error())
+				}
+			}
+		case <-c.forceReconnect:
+			// Signal the UI immediately — don't wait for the subprocess to exit first.
+			c.setState(StateConnecting)
+			log.Info("force reconnect requested", "vpn", c.cfg.Name)
+			cancelRun()
+			<-errCh // wait for subprocess to exit
+			forceSkipDelay = true
 		}
-		c.setState(StateDisconnected)
+
+		if !forceSkipDelay {
+			c.setState(StateDisconnected)
+		}
 		c.reconnects.Add(1)
 
 		// If the VPN reached StateConnected during this run, reset the backoff —
@@ -176,6 +210,10 @@ func (c *Connection) Run(ctx context.Context) error {
 		// accumulate reconnect delay.
 		if c.connectedAt.Load().(time.Time).After(beforeRun) {
 			b.reset()
+		}
+
+		if forceSkipDelay {
+			continue
 		}
 
 		// If there's no network at all, wait for it before the next attempt.
@@ -203,6 +241,9 @@ func (c *Connection) Run(ctx context.Context) error {
 			return nil
 		case <-time.After(delay):
 			c.nextReconnectAt.Store(time.Time{})
+		case <-c.forceReconnect:
+			c.nextReconnectAt.Store(time.Time{})
+			log.Info("force reconnect requested, skipping delay", "vpn", c.cfg.Name)
 		}
 	}
 }

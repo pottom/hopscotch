@@ -212,7 +212,8 @@ function renderVPNTable() {
       `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
-      `<td></td><td></td><td></td><td></td>`;
+      `<td></td><td></td><td></td>` +
+      `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectVPN('${escHtml(name)}')">↻</button></td>`;
     tbody.appendChild(tr);
     // message sub-row — only when not connected and last_error is set
     const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
@@ -355,6 +356,13 @@ function renderStatusTables() {
 window.reconnectTunnel = async function(name) {
   try {
     await fetch('/api/tunnels/' + encodeURIComponent(name) + '/reconnect', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.reconnectVPN = async function(name) {
+  try {
+    await fetch('/api/vpns/' + encodeURIComponent(name) + '/reconnect', { method: 'POST' });
     refreshStatus();
   } catch (_) {}
 };
@@ -544,6 +552,7 @@ function connectSSE() {
 
     for (const [name, v] of Object.entries(d.vpns || {})) {
       if (store.vpns[name]) {
+        if (v.state) store.vpns[name].state = v.state;
         store.vpns[name].reconnect_in = v.reconnect_in ?? null;
         const row = findVPNRow(name);
         if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in), true);
@@ -612,10 +621,14 @@ window.switchTab = function(name) {
 // ── Log SSE stream ────────────────────────────────────────────────────────────
 
 const MAX_LOG_LINES = 500;
-let logLineCount = 0;
+let logBuffer = [];    // {raw, plain, level, source}
+let logDomCount = 0;
 let ansiUp = null;
 let currentLogLevel = localStorage.getItem('logLevel') || 'INFO';
 let activeLogEs = null;
+let isLogFollowing = true;
+let activeSources = new Set(['tunnel', 'vpn', 'proxy', 'system']);
+let logGrep = '';
 
 const LOG_LEVEL_ORDER = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 
@@ -627,34 +640,68 @@ function getAnsiUp() {
   return ansiUp;
 }
 
-function logLineLevel(raw) {
-  const s = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-  if (s.includes(' DEBU ')) return 'DEBUG';
-  if (s.includes(' INFO ')) return 'INFO';
-  if (s.includes(' WARN ')) return 'WARN';
-  if (s.includes(' ERRO ') || s.includes(' ERROR ')) return 'ERROR';
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
+function logLineLevel(plain) {
+  if (plain.includes(' DEBU ')) return 'DEBUG';
+  if (plain.includes(' INFO ')) return 'INFO';
+  if (plain.includes(' WARN ')) return 'WARN';
+  if (plain.includes(' ERRO ') || plain.includes(' ERROR ')) return 'ERROR';
   return 'INFO';
 }
 
-function appendLogLine(scroll, raw) {
-  const level = logLineLevel(raw);
-  if (LOG_LEVEL_ORDER[level] < LOG_LEVEL_ORDER[currentLogLevel]) return;
+function logLineSource(plain) {
+  if (plain.includes(' tunnel=') || plain.includes('"tunnel"')) return 'tunnel';
+  if (plain.includes(' vpn=')    || plain.includes('"vpn"'))    return 'vpn';
+  if (plain.includes(' proxy'))                                  return 'proxy';
+  return 'system';
+}
 
-  const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+function logEntryVisible(entry) {
+  if (!activeSources.has(entry.source)) return false;
+  if (LOG_LEVEL_ORDER[entry.level] < LOG_LEVEL_ORDER[currentLogLevel]) return false;
+  if (logGrep && !entry.plain.toLowerCase().includes(logGrep.toLowerCase())) return false;
+  return true;
+}
+
+function makeLogDiv(entry) {
   const au = getAnsiUp();
-  const html = au ? au.ansi_to_html(raw) : raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const html = au ? au.ansi_to_html(entry.raw)
+    : entry.raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const div = document.createElement('div');
   div.className = 'log-line';
-  div.dataset.level = level;
+  div.dataset.level = entry.level;
+  div.dataset.source = entry.source;
   div.innerHTML = html;
-  scroll.appendChild(div);
-  logLineCount++;
-  if (logLineCount > MAX_LOG_LINES) {
-    scroll.firstElementChild?.remove();
-    logLineCount--;
-  }
-  if (atBottom) scroll.scrollTop = scroll.scrollHeight;
+  return div;
 }
+
+function reRenderLog() {
+  const scroll = document.getElementById('log-scroll');
+  if (!scroll) return;
+  scroll.innerHTML = '';
+  logDomCount = 0;
+  for (const entry of logBuffer) {
+    if (!logEntryVisible(entry)) continue;
+    scroll.appendChild(makeLogDiv(entry));
+    logDomCount++;
+  }
+  if (isLogFollowing) scroll.scrollTop = scroll.scrollHeight;
+}
+
+function updateFollowBtn() {
+  const btn = document.getElementById('log-follow-btn');
+  if (btn) btn.style.display = isLogFollowing ? 'none' : '';
+}
+
+window.resumeLogFollow = function() {
+  isLogFollowing = true;
+  updateFollowBtn();
+  const scroll = document.getElementById('log-scroll');
+  if (scroll) scroll.scrollTop = scroll.scrollHeight;
+};
 
 window.setLogLevel = function(level) {
   currentLogLevel = level;
@@ -662,13 +709,55 @@ window.setLogLevel = function(level) {
   document.querySelectorAll('.log-chip').forEach(c => {
     c.classList.toggle('active', c.dataset.level === level);
   });
-  // Reconnect SSE with the new level so the server filters the backlog too.
   initLogStream();
 };
+
+window.toggleLogSource = function(src) {
+  if (activeSources.has(src)) {
+    if (activeSources.size <= 1) return;
+    activeSources.delete(src);
+  } else {
+    activeSources.add(src);
+  }
+  document.querySelectorAll('.log-src-chip').forEach(c => {
+    c.classList.toggle('active', activeSources.has(c.dataset.src));
+  });
+  reRenderLog();
+};
+
+window.setLogGrep = function(val) {
+  logGrep = val.trim();
+  reRenderLog();
+};
+
+function initLogScrollTracking() {
+  const scroll = document.getElementById('log-scroll');
+  if (!scroll || scroll._trackingBound) return;
+  scroll._trackingBound = true;
+  scroll.addEventListener('scroll', () => {
+    const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+    isLogFollowing = atBottom;
+    updateFollowBtn();
+  }, { passive: true });
+}
 
 function initLogStream() {
   const scroll = document.getElementById('log-scroll');
   if (!scroll) return;
+
+  const grepInput = document.getElementById('log-grep');
+  if (grepInput && !grepInput._ctrlNAttached) {
+    grepInput._ctrlNAttached = true;
+    grepInput.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key === 'n') {
+        e.preventDefault();
+        grepInput.value = '';
+        setLogGrep('');
+      }
+    });
+  }
+
+  initLogScrollTracking();
 
   document.querySelectorAll('.log-chip').forEach(c => {
     c.classList.toggle('active', c.dataset.level === currentLogLevel);
@@ -676,7 +765,10 @@ function initLogStream() {
 
   if (activeLogEs) { activeLogEs.close(); activeLogEs = null; }
   scroll.innerHTML = '';
-  logLineCount = 0;
+  logBuffer = [];
+  logDomCount = 0;
+  isLogFollowing = true;
+  updateFollowBtn();
 
   const cursor = document.createElement('div');
   cursor.innerHTML = '<span class="log-cursor">▌</span>';
@@ -685,7 +777,19 @@ function initLogStream() {
   activeLogEs = es;
   es.onmessage = e => {
     cursor.remove();
-    appendLogLine(scroll, e.data);
+    const plain = stripAnsi(e.data);
+    const entry = { raw: e.data, plain, level: logLineLevel(plain), source: logLineSource(plain) };
+    logBuffer.push(entry);
+    if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
+    if (logEntryVisible(entry)) {
+      scroll.appendChild(makeLogDiv(entry));
+      logDomCount++;
+      while (logDomCount > MAX_LOG_LINES) {
+        scroll.firstElementChild?.remove();
+        logDomCount--;
+      }
+      if (isLogFollowing) scroll.scrollTop = scroll.scrollHeight;
+    }
     scroll.appendChild(cursor);
   };
   es.onerror = () => {

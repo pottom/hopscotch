@@ -62,6 +62,7 @@ type Server struct {
 	cfgMu            sync.Mutex
 	ruleUpdater      RuleUpdater
 	reconnecter      TunnelReconnecter
+	vpnReconnecter   VPNReconnecter // nil when no VPNs configured
 	// admin auth — empty means no auth required
 	adminUsername string
 	adminPassword string
@@ -70,7 +71,7 @@ type Server struct {
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater, reconnecter TunnelReconnecter, proxyAuthEnabled bool) *Server {
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater, reconnecter TunnelReconnecter, vpnReconnecter VPNReconnecter, proxyAuthEnabled bool) *Server {
 	var sessionToken string
 	if cfg.Admin.Username != "" {
 		b := make([]byte, 32)
@@ -94,6 +95,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPN
 		cfg:              cfg,
 		ruleUpdater:      ruleUpdater,
 		reconnecter:      reconnecter,
+		vpnReconnecter:   vpnReconnecter,
 		adminUsername:    cfg.Admin.Username,
 		adminPassword:    cfg.Admin.Password,
 		sessionToken:     sessionToken,
@@ -158,6 +160,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	protected.HandleFunc("PUT /api/rules", s.handleRules)
 	protected.HandleFunc("GET /api/validate-pattern", s.handleValidatePattern)
 	protected.HandleFunc("POST /api/tunnels/{name}/reconnect", s.handleTunnelReconnect)
+	protected.HandleFunc("POST /api/vpns/{name}/reconnect", s.handleVPNReconnect)
 	sub, _ := fs.Sub(uiFiles, "ui")
 	protected.Handle("GET /", noCacheFS(http.FileServerFS(sub)))
 

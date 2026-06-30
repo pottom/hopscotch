@@ -63,12 +63,12 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 | **Dead connection detection** | Keepalive probes every few seconds — not TCP's minutes-long timeout. Reconnect starts in under 10 seconds. |
 | **Shell integration** | `hopscotch enable` / `disable` like Python venv — sets and restores `HTTP_PROXY` without touching other shells. |
 | **SSH ProxyCommand** | `ssh`, `scp`, `rsync`, VSCode Remote, Ansible — all route through tunnels transparently, zero extra flags. |
-| **TUI dashboard** | Live tunnel cards with dual-channel traffic graphs, reconnect countdowns, URL tester, log streaming with level filter. |
-| **Web UI** | Same data, in your browser at `localhost:9090`, live SSE updates, log level filter, tab and level persisted across reloads. |
+| **TUI dashboard** | Live tunnel cards with dual-channel traffic graphs, reconnect countdowns, URL tester, log streaming with level / source / text filter. |
+| **Web UI** | Same data, in your browser at `localhost:9090`, live SSE updates, log filtering (level + source + text, AND logic), tab and level persisted across reloads. |
 | **VPN integration** | Manages openconnect as a subprocess; tunnels wait for VPN before connecting, show reason in UI. |
 | **Hot reload** | Config reloads on `SIGHUP` or file change, tunnels re-configured in place, no restart. |
 | **Self-update** | `hopscotch update` atomically replaces the binary. Container-aware — prints a notice instead of updating inside Docker. |
-| **Force reconnect** | `r` in TUI or ↻ button in web UI reconnects a tunnel immediately, skipping the backoff timer. |
+| **Force reconnect** | `r` in TUI or ↻ button in web UI reconnects a tunnel or VPN immediately, skipping the backoff timer. |
 | **Prometheus metrics** | `/metrics` endpoint with per-tunnel bytes, connections, reconnects, keepalive failures, uptime. |
 
 One binary. Zero services. Zero background daemons beyond itself.
@@ -81,7 +81,7 @@ hopscotch sits between your tools and your jump hosts. Apps connect to a single 
 
 ## TUI dashboard
 
-`hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Patterns**, **Logs**, **Docs**.
+`hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Rules**, **Logs**, **Docs**.
 
 ![TUI status tab](docs/tui-status.png)
 
@@ -91,20 +91,23 @@ Each tunnel shows: connection status, host, local port, uptime, reconnect counte
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `s` / `l` / `p` | Switch tabs: Status → Logs → Patterns → Docs |
-| `↑` `↓` / `j` `k` | **Status tab:** move cursor between tunnels (viewport follows) · **Other tabs:** scroll |
-| `r` | **Status tab:** force reconnect selected tunnel immediately (skips backoff) |
-| `/` | Focus URL tester (Patterns tab) |
-| `Esc` | Unfocus tester |
-| `f` | **Status tab:** toggle graphs on/off (compact mode) · **Logs tab:** cycle log level filter (ALL → INFO+ → WARN+ → ERR) |
-| `g` | Toggle mirror graph (dual-channel ↔ download only) |
+| `Tab` / `1` / `2` / `3` | Switch tabs: Status / Rules / Logs |
+| `↑` `↓` / `j` `k` | **Status tab:** move cursor between tunnels and VPNs (viewport follows) · **Other tabs:** scroll |
+| `r` | **Status tab:** force reconnect selected tunnel or VPN immediately (skips backoff) |
+| `f` | **Status tab:** toggle graphs on/off (compact mode) |
+| `g` | **Status tab:** toggle mirror graph (dual-channel ↔ download only) |
+| `/` | **Rules tab:** focus URL tester · **Logs tab:** focus text filter |
+| `Esc` | Unfocus tester / filter input |
+| `Ctrl+N` | **Rules / Logs tab:** clear tester / filter input |
+| `l` | **Logs tab:** cycle log level (ALL → INFO+ → WARN+ → ERR) |
+| `t` / `v` / `p` / `s` | **Logs tab:** toggle source filter (tunnel / vpn / proxy / system) |
 | `q` / `Ctrl+C` | Quit |
 
 ## Routing patterns
 
-The **Patterns tab** shows exactly which hostnames route where. Press `/` to focus the URL tester — type any hostname or URL and hopscotch highlights the matching rule in real time.
+The **Rules tab** shows exactly which hostnames route where. Press `/` to focus the URL tester — type any hostname or URL and hopscotch highlights the matching rule in real time.
 
-The **Logs tab** shows a live stream of structured log lines, filterable by level with `f`.
+The **Logs tab** streams structured log lines with three independent filters: `l` cycles the severity level (ALL / INFO+ / WARN+ / ERR), `t`/`v`/`p`/`s` toggle source categories (tunnel / vpn / proxy / system), and `/` opens a live text filter. All three apply simultaneously with AND logic over a rolling 300-line buffer.
 
 ![TUI logs tab](docs/tui-logs.png)
 
@@ -191,9 +194,9 @@ The generated file stays in sync: hopscotch refreshes it automatically on every 
 
 ## Web admin UI
 
-`http://localhost:9090` — mirrors the TUI with tunnel cards, live traffic graphs, a Patterns tab with interactive URL tester, VPN status, and a Logs tab with real-time structured output. Pure SSE, no polling.
+`http://localhost:9090` — mirrors the TUI with tunnel cards, live traffic graphs, a Rules tab with interactive URL tester, VPN status, and a Logs tab with real-time structured output. Pure SSE, no polling.
 
-The **Logs tab** has level filter buttons (ALL / INFO / WARN / ERR) that reconnect the SSE stream so only matching lines are sent from the server. The active tab and selected log level are saved in `localStorage` and restored on reload.
+The **Logs tab** buffers up to 500 log lines and filters them client-side: severity buttons (ALL / INFO / WARN / ERR), source chips (TUNNEL / VPN / PROXY / SYSTEM), and a text filter all apply simultaneously with AND logic. Auto-scroll pauses when you scroll up; a `↓ live` badge reappears at the bottom-right to resume it. The active tab and selected log level are saved in `localStorage` and restored on reload.
 
 ![Admin web UI — Status](docs/ui-status.png)
 
