@@ -22,7 +22,8 @@ type trafficEntry struct {
 
 // vpnEntry is the per-VPN payload sent over SSE each second.
 type vpnEntry struct {
-	ReconnectIn *int `json:"reconnect_in,omitempty"` // seconds until next attempt (connecting only)
+	State       string `json:"state"`                  // connected / connecting / disconnected
+	ReconnectIn *int   `json:"reconnect_in,omitempty"` // seconds until next attempt (connecting only)
 }
 
 // trafficPayload is the full SSE message body.
@@ -77,7 +78,7 @@ func buildPayload(prev, curr trafficState) trafficPayload {
 	if len(curr.vpns) > 0 {
 		p.VPNs = make(map[string]vpnEntry, len(curr.vpns))
 		for name, vs := range curr.vpns {
-			e := vpnEntry{}
+			e := vpnEntry{State: vs.State.String()}
 			if !vs.NextReconnectAt.IsZero() {
 				secs := int(time.Until(vs.NextReconnectAt).Seconds())
 				if secs < 0 {

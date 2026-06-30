@@ -68,6 +68,39 @@ Szín: a VPN aktuális állapota alapján (`colorConnected` / `colorConnecting` 
 
 ---
 
+## Status tábla — Cursor és reconnect
+
+A status táblában van egy cursor (`statusCursor`), ami megmutatja, melyik tunnel van kiválasztva az `r` (reconnect) akcióhoz.
+
+| Elem | Megjelenés |
+|------|-----------|
+| Kiválasztott sor prefix | `> ` amber / `colorConnecting (#fbbf24)` |
+| Nem kiválasztott prefix | `  ` (két szóköz) |
+
+A viewport automatikusan scrollozik a cursor pozícióhoz (`lineOffsetForCursor()`). A cursor nem teker: az első tunnelnél `k`/`↑` nem csinál semmit, az utolsónál `j`/`↓` sem.
+
+Web UI-ban: ↻ gomb, hover-reveal (soronként, jobb szélén). Szín: `var(--muted)` alapból, `var(--accent)` hoveroláskor.
+
+---
+
+## Status tábla — ↓ / ↑ oszlopok (forgalom)
+
+A táblában a ↓/↑ oszlopok **kumulatív összeget** mutatnak (process start óta):
+
+| Érték | Megjelenítés |
+|-------|-------------|
+| 0 | `—` |
+| < 1 KB | `X B` |
+| < 1 MB | `X.X KB` |
+| < 1 GB | `X.X MB` |
+| ≥ 1 GB | `X.X GB` |
+
+Oszlopfejléc: `↓ TOTAL` / `↑ TOTAL`.
+
+A másodpercenkénti sebesség (bps) kizárólag a grafikonterületen jelenik meg — a grafikon első sora (non-compact módban) a `↓ X B/s  ↑ X B/s` sor a braille grafikon felett. Web UI-ban a kibontott graph-row-ban `#bps-bar-{name}` div. Szín: `colorBpsIn (#38bdf8)` / `colorBpsOut (#818cf8)`.
+
+---
+
 ## Status tábla — Error/progress sub-row
 
 Minden tunnel és VPN sor alatt jelenik meg ha `last_error` nem üres és az állapot nem `connected`.
@@ -98,6 +131,43 @@ Mindkét felületen azonos szöveg. TUI: `renderStatus()`, web UI: `tunnelStatus
 ```
 
 A hints sor felette, a port sor alatta, jobbra igazítva.
+
+---
+
+## Logs tab — filter sor
+
+A Logs tab fejlécében két sor van a viewport felett:
+
+**1. sor — severity + source badge-ek:**
+```
+  INFO+   TUNNEL  ·  VPN  ·  PROXY  ·  SYS
+```
+
+| Elem | Aktív | Inaktív |
+|------|-------|---------|
+| Severity (ALL / INFO+ / WARN+ / ERR) | `colorAccent (#38bdf8)` | — |
+| Source badge (TUNNEL / VPN / PROXY / SYS) | `colorVPN (#2dd4bf)`, bold | `colorMuted (#475569)` |
+
+**2. sor — szövegszűrő input:**
+```
+  / Filter… — Ctrl+N to clear
+```
+
+Fókuszált állapotban a `/` prefix `colorAccent`; fókuszon kívül `colorMuted`.
+
+**Billentyűk (Logs tab):**
+
+| Billentyű | Hatás |
+|-----------|-------|
+| `l` | Severity ciklus: ALL → INFO+ → WARN+ → ERR |
+| `t` / `v` / `p` / `s` | Forrás toggle: tunnel / vpn / proxy / system |
+| `/` | Szövegszűrő aktiválása |
+| `Esc` | Szövegszűrő elhagyása |
+| `Ctrl+N` | Szövegszűrő törlése |
+
+**AND logika:** mind a három szűrő (`level`, `source`, `grep`) egyszerre érvényes. Legalább egy source mindig aktív marad.
+
+**Web UI megfelelők:** severity chipek (kék), source chipek (teal), Filter… input — azonos vizuális logika.
 
 ---
 

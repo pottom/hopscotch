@@ -14,8 +14,8 @@ import (
 // RouteJSON is a single routing rule in the /status response.
 type RouteJSON struct {
 	Pattern string `json:"pattern"`
-	Tunnel  string `json:"tunnel,omitempty"`
-	Via     string `json:"via,omitempty"`
+	Target  string `json:"target"`
+	Comment string `json:"comment,omitempty"`
 }
 
 // TunnelStatusJSON is the per-tunnel block in the /status response.
@@ -133,7 +133,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	rules := s.routes.Rules()
 	routes := make([]RouteJSON, len(rules))
 	for i, r := range rules {
-		routes[i] = RouteJSON{Pattern: r.Pattern, Tunnel: r.Tunnel, Via: r.Via}
+		routes[i] = RouteJSON{Pattern: r.Pattern, Target: r.Target, Comment: r.Comment}
 	}
 
 	uplink := netcheck.HasUplink()

@@ -65,7 +65,7 @@
 
 <nav class="tab-bar" id="tab-bar">
   <a class="active" data-tab="status" href="#" onclick="switchTab('status');return false">Status</a>
-  <a data-tab="patterns"  href="#" onclick="switchTab('patterns');return false">Patterns</a>
+  <a data-tab="patterns"  href="#" onclick="switchTab('patterns');return false">Rules</a>
   <a data-tab="logs"    href="#" onclick="switchTab('logs');return false">Logs</a>
   <a data-tab="docs"    href="#" onclick="switchTab('docs');return false">Docs</a>
 </nav>
@@ -124,15 +124,24 @@
 <div id="panel-logs" class="tab-panel">
   <div class="log-wrap">
     <div class="log-header">
-      <span class="log-label">Live log stream</span>
-      <div class="log-level-chips">
+<div class="log-level-chips">
         <button class="log-chip" data-level="DEBUG" onclick="setLogLevel('DEBUG')">ALL</button>
         <button class="log-chip active" data-level="INFO"  onclick="setLogLevel('INFO')">INFO</button>
         <button class="log-chip" data-level="WARN"  onclick="setLogLevel('WARN')">WARN</button>
         <button class="log-chip" data-level="ERROR" onclick="setLogLevel('ERROR')">ERR</button>
       </div>
+      <div class="log-src-chips">
+        <button class="log-src-chip active" data-src="tunnel" onclick="toggleLogSource('tunnel')">TUNNEL</button>
+        <button class="log-src-chip active" data-src="vpn"    onclick="toggleLogSource('vpn')">VPN</button>
+        <button class="log-src-chip active" data-src="proxy"  onclick="toggleLogSource('proxy')">PROXY</button>
+        <button class="log-src-chip active" data-src="system" onclick="toggleLogSource('system')">SYSTEM</button>
+      </div>
+      <input id="log-grep" class="log-grep" type="text" placeholder="Filter… — Ctrl+N to clear" oninput="setLogGrep(this.value)" autocomplete="off" spellcheck="false">
     </div>
-    <div class="log-scroll" id="log-scroll"></div>
+    <div class="log-scroll-wrap">
+      <div class="log-scroll" id="log-scroll"></div>
+      <button class="log-follow-btn" id="log-follow-btn" onclick="resumeLogFollow()">↓ live</button>
+    </div>
   </div>
 </div>
 

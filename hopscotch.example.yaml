@@ -83,13 +83,13 @@ proxy:
   shell_icon: "⇢"                        # icon exported as HOPSCOTCH_ACTIVE
   rules:
     - pattern: "*.prod.internal"
-      tunnel: prod-jump
+      target: prod-jump
     - pattern: "*.staging.internal"
       tunnel: staging-jump
     - pattern: "10.0.*"
-      tunnel: prod-jump
+      target: prod-jump
     - pattern: "*"
-      via: direct                        # everything else goes direct
+      target: direct                     # everything else goes direct
 
 # ── Admin ──────────────────────────────────────────────────────────────────────
 admin:

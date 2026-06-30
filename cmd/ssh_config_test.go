@@ -21,8 +21,8 @@ func TestBuildSSHConfig_GlobOnly(t *testing.T) {
 		Tunnels: []config.TunnelConfig{baseTunnel("prod", 1080)},
 		Proxy: config.ProxyConfig{
 			Rules: []config.Rule{
-				{Pattern: "*.prod.internal", Tunnel: "prod"},
-				{Pattern: "api.example.com", Tunnel: "prod"},
+				{Pattern: "*.prod.internal", Target: "prod"},
+				{Pattern: "api.example.com", Target: "prod"},
 			},
 		},
 	}
@@ -44,8 +44,8 @@ func TestBuildSSHConfig_CIDROnly(t *testing.T) {
 		Tunnels: []config.TunnelConfig{baseTunnel("prod", 1080)},
 		Proxy: config.ProxyConfig{
 			Rules: []config.Rule{
-				{Pattern: "10.0.1.0/24", Tunnel: "prod"},
-				{Pattern: "10.0.2.0/24", Tunnel: "prod"},
+				{Pattern: "10.0.1.0/24", Target: "prod"},
+				{Pattern: "10.0.2.0/24", Target: "prod"},
 			},
 		},
 	}
@@ -70,8 +70,8 @@ func TestBuildSSHConfig_MixedGlobAndCIDR(t *testing.T) {
 		Tunnels: []config.TunnelConfig{baseTunnel("prod", 1080)},
 		Proxy: config.ProxyConfig{
 			Rules: []config.Rule{
-				{Pattern: "10.0.1.0/24", Tunnel: "prod"},
-				{Pattern: "*.prod.internal", Tunnel: "prod"},
+				{Pattern: "10.0.1.0/24", Target: "prod"},
+				{Pattern: "*.prod.internal", Target: "prod"},
 			},
 		},
 	}
@@ -98,8 +98,8 @@ func TestBuildSSHConfig_MultipleTunnels(t *testing.T) {
 		},
 		Proxy: config.ProxyConfig{
 			Rules: []config.Rule{
-				{Pattern: "*.prod.internal", Tunnel: "prod"},
-				{Pattern: "*.staging.internal", Tunnel: "staging"},
+				{Pattern: "*.prod.internal", Target: "prod"},
+				{Pattern: "*.staging.internal", Target: "staging"},
 			},
 		},
 	}
@@ -122,8 +122,8 @@ func TestBuildSSHConfig_DirectRuleSkipped(t *testing.T) {
 		Tunnels: []config.TunnelConfig{baseTunnel("prod", 1080)},
 		Proxy: config.ProxyConfig{
 			Rules: []config.Rule{
-				{Pattern: "*.prod.internal", Tunnel: "prod"},
-				{Pattern: "*", Via: "direct"},
+				{Pattern: "*.prod.internal", Target: "prod"},
+				{Pattern: "*", Target: "direct"},
 			},
 		},
 	}

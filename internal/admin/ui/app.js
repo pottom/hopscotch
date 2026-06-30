@@ -212,7 +212,8 @@ function renderVPNTable() {
       `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
-      `<td></td><td></td><td></td><td></td>`;
+      `<td></td><td></td><td></td>` +
+      `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectVPN('${escHtml(name)}')">↻</button></td>`;
     tbody.appendChild(tr);
     // message sub-row — only when not connected and last_error is set
     const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
@@ -230,7 +231,11 @@ let _tunnelKey = null;
 
 function syncTunnelTable() {
   const store = Alpine.store('hop');
-  const names = [...Object.keys(store.tunnels).sort(), 'direct'];
+  const names = [...Object.keys(store.tunnels).sort((a, b) => {
+    const pa = store.tunnels[a]?.local_port ?? 0;
+    const pb = store.tunnels[b]?.local_port ?? 0;
+    return pa !== pb ? pa - pb : a.localeCompare(b);
+  }), 'direct'];
   const key = names.join('\x00');
   if (_tunnelKey !== key) { buildTunnelRows(names); _tunnelKey = key; }
   else updateTunnelRows();
@@ -355,6 +360,13 @@ window.reconnectTunnel = async function(name) {
   } catch (_) {}
 };
 
+window.reconnectVPN = async function(name) {
+  try {
+    await fetch('/api/vpns/' + encodeURIComponent(name) + '/reconnect', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
 window.toggleRowGraph = function(row) {
   const expanded = row.classList.toggle('expanded');
   if (expanded) {
@@ -379,7 +391,11 @@ document.addEventListener('alpine:init', () => {
     meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', proxy_auth_enabled: false, admin_port: 0, admin_bind: '', admin_auth_enabled: false, status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
 
     tunnelList() {
-      return Object.keys(this.tunnels).sort();
+      return Object.keys(this.tunnels).sort((a, b) => {
+        const pa = this.tunnels[a]?.local_port ?? 0;
+        const pb = this.tunnels[b]?.local_port ?? 0;
+        return pa !== pb ? pa - pb : a.localeCompare(b);
+      });
     },
 
     vpnList() {
@@ -536,6 +552,7 @@ function connectSSE() {
 
     for (const [name, v] of Object.entries(d.vpns || {})) {
       if (store.vpns[name]) {
+        if (v.state) store.vpns[name].state = v.state;
         store.vpns[name].reconnect_in = v.reconnect_in ?? null;
         const row = findVPNRow(name);
         if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in), true);
@@ -604,10 +621,14 @@ window.switchTab = function(name) {
 // ── Log SSE stream ────────────────────────────────────────────────────────────
 
 const MAX_LOG_LINES = 500;
-let logLineCount = 0;
+let logBuffer = [];    // {raw, plain, level, source}
+let logDomCount = 0;
 let ansiUp = null;
 let currentLogLevel = localStorage.getItem('logLevel') || 'INFO';
 let activeLogEs = null;
+let isLogFollowing = true;
+let activeSources = new Set(['tunnel', 'vpn', 'proxy', 'system']);
+let logGrep = '';
 
 const LOG_LEVEL_ORDER = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 
@@ -619,34 +640,68 @@ function getAnsiUp() {
   return ansiUp;
 }
 
-function logLineLevel(raw) {
-  const s = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-  if (s.includes(' DEBU ')) return 'DEBUG';
-  if (s.includes(' INFO ')) return 'INFO';
-  if (s.includes(' WARN ')) return 'WARN';
-  if (s.includes(' ERRO ') || s.includes(' ERROR ')) return 'ERROR';
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
+function logLineLevel(plain) {
+  if (plain.includes(' DEBU ')) return 'DEBUG';
+  if (plain.includes(' INFO ')) return 'INFO';
+  if (plain.includes(' WARN ')) return 'WARN';
+  if (plain.includes(' ERRO ') || plain.includes(' ERROR ')) return 'ERROR';
   return 'INFO';
 }
 
-function appendLogLine(scroll, raw) {
-  const level = logLineLevel(raw);
-  if (LOG_LEVEL_ORDER[level] < LOG_LEVEL_ORDER[currentLogLevel]) return;
+function logLineSource(plain) {
+  if (plain.includes(' tunnel=') || plain.includes('"tunnel"')) return 'tunnel';
+  if (plain.includes(' vpn=')    || plain.includes('"vpn"'))    return 'vpn';
+  if (plain.includes(' proxy'))                                  return 'proxy';
+  return 'system';
+}
 
-  const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+function logEntryVisible(entry) {
+  if (!activeSources.has(entry.source)) return false;
+  if (LOG_LEVEL_ORDER[entry.level] < LOG_LEVEL_ORDER[currentLogLevel]) return false;
+  if (logGrep && !entry.plain.toLowerCase().includes(logGrep.toLowerCase())) return false;
+  return true;
+}
+
+function makeLogDiv(entry) {
   const au = getAnsiUp();
-  const html = au ? au.ansi_to_html(raw) : raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const html = au ? au.ansi_to_html(entry.raw)
+    : entry.raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const div = document.createElement('div');
   div.className = 'log-line';
-  div.dataset.level = level;
+  div.dataset.level = entry.level;
+  div.dataset.source = entry.source;
   div.innerHTML = html;
-  scroll.appendChild(div);
-  logLineCount++;
-  if (logLineCount > MAX_LOG_LINES) {
-    scroll.firstElementChild?.remove();
-    logLineCount--;
-  }
-  if (atBottom) scroll.scrollTop = scroll.scrollHeight;
+  return div;
 }
+
+function reRenderLog() {
+  const scroll = document.getElementById('log-scroll');
+  if (!scroll) return;
+  scroll.innerHTML = '';
+  logDomCount = 0;
+  for (const entry of logBuffer) {
+    if (!logEntryVisible(entry)) continue;
+    scroll.appendChild(makeLogDiv(entry));
+    logDomCount++;
+  }
+  if (isLogFollowing) scroll.scrollTop = scroll.scrollHeight;
+}
+
+function updateFollowBtn() {
+  const btn = document.getElementById('log-follow-btn');
+  if (btn) btn.style.display = isLogFollowing ? 'none' : '';
+}
+
+window.resumeLogFollow = function() {
+  isLogFollowing = true;
+  updateFollowBtn();
+  const scroll = document.getElementById('log-scroll');
+  if (scroll) scroll.scrollTop = scroll.scrollHeight;
+};
 
 window.setLogLevel = function(level) {
   currentLogLevel = level;
@@ -654,13 +709,55 @@ window.setLogLevel = function(level) {
   document.querySelectorAll('.log-chip').forEach(c => {
     c.classList.toggle('active', c.dataset.level === level);
   });
-  // Reconnect SSE with the new level so the server filters the backlog too.
   initLogStream();
 };
+
+window.toggleLogSource = function(src) {
+  if (activeSources.has(src)) {
+    if (activeSources.size <= 1) return;
+    activeSources.delete(src);
+  } else {
+    activeSources.add(src);
+  }
+  document.querySelectorAll('.log-src-chip').forEach(c => {
+    c.classList.toggle('active', activeSources.has(c.dataset.src));
+  });
+  reRenderLog();
+};
+
+window.setLogGrep = function(val) {
+  logGrep = val.trim();
+  reRenderLog();
+};
+
+function initLogScrollTracking() {
+  const scroll = document.getElementById('log-scroll');
+  if (!scroll || scroll._trackingBound) return;
+  scroll._trackingBound = true;
+  scroll.addEventListener('scroll', () => {
+    const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+    isLogFollowing = atBottom;
+    updateFollowBtn();
+  }, { passive: true });
+}
 
 function initLogStream() {
   const scroll = document.getElementById('log-scroll');
   if (!scroll) return;
+
+  const grepInput = document.getElementById('log-grep');
+  if (grepInput && !grepInput._ctrlNAttached) {
+    grepInput._ctrlNAttached = true;
+    grepInput.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key === 'n') {
+        e.preventDefault();
+        grepInput.value = '';
+        setLogGrep('');
+      }
+    });
+  }
+
+  initLogScrollTracking();
 
   document.querySelectorAll('.log-chip').forEach(c => {
     c.classList.toggle('active', c.dataset.level === currentLogLevel);
@@ -668,7 +765,10 @@ function initLogStream() {
 
   if (activeLogEs) { activeLogEs.close(); activeLogEs = null; }
   scroll.innerHTML = '';
-  logLineCount = 0;
+  logBuffer = [];
+  logDomCount = 0;
+  isLogFollowing = true;
+  updateFollowBtn();
 
   const cursor = document.createElement('div');
   cursor.innerHTML = '<span class="log-cursor">▌</span>';
@@ -677,7 +777,19 @@ function initLogStream() {
   activeLogEs = es;
   es.onmessage = e => {
     cursor.remove();
-    appendLogLine(scroll, e.data);
+    const plain = stripAnsi(e.data);
+    const entry = { raw: e.data, plain, level: logLineLevel(plain), source: logLineSource(plain) };
+    logBuffer.push(entry);
+    if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
+    if (logEntryVisible(entry)) {
+      scroll.appendChild(makeLogDiv(entry));
+      logDomCount++;
+      while (logDomCount > MAX_LOG_LINES) {
+        scroll.firstElementChild?.remove();
+        logDomCount--;
+      }
+      if (isLogFollowing) scroll.scrollTop = scroll.scrollHeight;
+    }
     scroll.appendChild(cursor);
   };
   es.onerror = () => {
@@ -764,6 +876,7 @@ function resetRoutesHead() {
     <th class="routes-num-h">#</th>
     <th>Pattern</th>
     <th>Via</th>
+    <th>Note</th>
     <th>Status</th>
   </tr>`;
 }
@@ -781,7 +894,7 @@ function renderRoutesTable(highlightIdx) {
 
   tbody.innerHTML = '';
   routes.forEach((r, i) => {
-    const via = r.tunnel || r.via || 'direct';
+    const via = r.target || 'direct';
     const t = tunnels[via];
     const vs = tunnelVisualStatus(t);
 
@@ -801,7 +914,8 @@ function renderRoutesTable(highlightIdx) {
     const tr = document.createElement('tr');
     if (highlightIdx === i) tr.className = 'routes-match';
     const arrow = (highlightIdx === i) ? '▶' : '';
-    tr.innerHTML = `<td class="routes-arrow">${arrow}</td><td class="routes-num">${i + 1}</td><td class="routes-pattern">${r.pattern}</td><td>${viaHtml}</td><td>${statusHtml}</td>`;
+    const noteHtml = r.comment ? `<span class="routes-note">${escHtml(r.comment)}</span>` : '';
+    tr.innerHTML = `<td class="routes-arrow">${arrow}</td><td class="routes-num">${i + 1}</td><td class="routes-pattern">${escHtml(r.pattern)}</td><td>${viaHtml}</td><td>${noteHtml}</td><td>${statusHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -834,8 +948,8 @@ function rulesStartEdit() {
     ...r,
     _new: false, _deleted: false, _modified: false,
     _origPattern: r.pattern,
-    _origTunnel:  r.tunnel || '',
-    _origVia:     r.via    || 'direct',
+    _origTarget:  r.target || 'direct',
+    _origComment: r.comment || '',
   }));
   document.getElementById('routes-edit-btn').style.display   = 'none';
   document.getElementById('routes-save-btn').style.display   = '';
@@ -858,7 +972,7 @@ function rulesCancel() {
 
 function rulesInsertAfter(i) {
   rulesCollectFromDOM();
-  rulesEditData.splice(i + 1, 0, {pattern: '', tunnel: '', via: 'direct', _new: true, _deleted: false});
+  rulesEditData.splice(i + 1, 0, {pattern: '', target: 'direct', comment: '', _new: true, _deleted: false});
   renderEditTable(i + 1);
   const rows = document.querySelectorAll('#routes-tbody tr[data-idx]');
   if (rows[i + 1]) rows[i + 1].querySelector('.rules-edit-pattern')?.focus();
@@ -894,27 +1008,37 @@ function rulesMoveDown(i) {
   renderEditTable();
 }
 
-function rulesEffectiveVia(r) {
-  return r.tunnel || r.via || 'direct';
+function rulesEffectiveTarget(r) {
+  return r.target || 'direct';
 }
 
 function rulesComputeModified(r) {
   if (r._new || r._deleted) return false;
   return r.pattern !== (r._origPattern || '') ||
-         rulesEffectiveVia(r) !== (r._origTunnel || r._origVia || 'direct');
+         rulesEffectiveTarget(r) !== (r._origTarget || 'direct') ||
+         (r.comment || '') !== (r._origComment || '');
 }
+
+window.rulesMarkCommentModified = function(rowIdx, value) {
+  if (!rulesEditData[rowIdx]) return;
+  rulesEditData[rowIdx].comment = value;
+  rulesEditData[rowIdx]._modified = rulesComputeModified(rulesEditData[rowIdx]);
+  const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
+  if (tr) tr.classList.toggle('rules-row-modified', !!rulesEditData[rowIdx]._modified);
+};
 
 function rulesCollectFromDOM() {
   document.querySelectorAll('#routes-tbody tr[data-idx]').forEach(tr => {
     const idx = parseInt(tr.dataset.idx);
     if (rulesEditData[idx]?._deleted) return; // deleted rows keep their original data
     const pattern = tr.querySelector('.rules-edit-pattern')?.value || '';
-    const via     = tr.querySelector('.rules-via-picker')?.dataset.value || 'direct';
+    const target  = tr.querySelector('.rules-via-picker')?.dataset.value || 'direct';
+    const comment = tr.querySelector('.rules-edit-comment')?.value || '';
     rulesEditData[idx] = {
       ...rulesEditData[idx],
       pattern,
-      tunnel: (via === 'direct' || via === 'block') ? '' : via,
-      via:    (via === 'direct' || via === 'block') ? via : '',
+      target,
+      comment,
     };
     rulesEditData[idx]._modified = rulesComputeModified(rulesEditData[idx]);
   });
@@ -933,8 +1057,7 @@ window.rulesPickerSelect = function(rowIdx, value, event) {
   event.stopPropagation();
   rulesCollectFromDOM();
   if (rowIdx < rulesEditData.length) {
-    rulesEditData[rowIdx].tunnel = (value === 'direct' || value === 'block') ? '' : value;
-    rulesEditData[rowIdx].via    = (value === 'direct' || value === 'block') ? value : '';
+    rulesEditData[rowIdx].target = value;
     rulesEditData[rowIdx]._pickerValue = value;
     rulesEditData[rowIdx]._modified = rulesComputeModified(rulesEditData[rowIdx]);
     const tr = document.querySelector(`#routes-tbody tr[data-idx="${rowIdx}"]`);
@@ -1031,7 +1154,7 @@ async function rulesSave() {
     // Strip UI-only metadata and filter out soft-deleted rows before sending
     const payload = rulesEditData
       .filter(r => !r._deleted)
-      .map(({_new, _deleted, _modified, _origPattern, _origTunnel, _origVia, _pickerValue, ...r}) => r);
+      .map(({_new, _deleted, _modified, _origPattern, _origTarget, _origComment, _pickerValue, ...r}) => r);
     const res = await fetch('/api/rules', {
       method:  'PUT',
       headers: {'Content-Type': 'application/json'},
@@ -1070,6 +1193,7 @@ function renderEditTable(newRowIdx) {
       <th class="routes-num-h">#</th>
       <th>Pattern</th>
       <th>Via</th>
+      <th>Note</th>
       <th style="width:4rem"></th>
     </tr>`;
   }
@@ -1095,7 +1219,7 @@ function renderEditTable(newRowIdx) {
   rulesEditData.forEach((r, i) => {
     const isNew     = !!r._new;
     const isDeleted = !!r._deleted;
-    const currentVia = r.tunnel || (r.via || 'direct');
+    const currentVia = r.target || 'direct';
 
     const isModified = !!r._modified && !isNew && !isDeleted;
 
@@ -1129,6 +1253,11 @@ function renderEditTable(newRowIdx) {
                ${isDeleted ? 'disabled' : `oninput="debounceValidate(${i}, this.value)"`}>
       </td>
       <td>${viaCell}</td>
+      <td class="rules-comment-cell">
+        <input type="text" class="rules-edit-comment" value="${escHtml(r.comment || '')}"
+               placeholder="note…"
+               ${isDeleted ? 'disabled' : `oninput="rulesMarkCommentModified(${i}, this.value)"`}>
+      </td>
       <td class="rules-row-actions">
         ${isDeleted ? '' : `<button class="rules-insert-btn" onclick="rulesInsertAfter(${i})" title="Insert rule below">+</button>`}
         ${actionBtn}

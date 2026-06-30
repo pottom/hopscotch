@@ -25,7 +25,7 @@ func (m *mockLookup) Get(name string) *tunnel.Tunnel {
 func directRules(patterns ...string) ([]config.Rule, *Router) {
 	rules := make([]config.Rule, len(patterns))
 	for i, p := range patterns {
-		rules[i] = config.Rule{Pattern: p, Via: "direct"}
+		rules[i] = config.Rule{Pattern: p, Target: "direct"}
 	}
 	return rules, NewRouter(rules, nil)
 }
@@ -84,7 +84,7 @@ func TestResolve_DirectFallback(t *testing.T) {
 
 func TestResolve_UnknownTunnel(t *testing.T) {
 	rules := []config.Rule{
-		{Pattern: "10.0.0.0/8", Tunnel: "nonexistent"},
+		{Pattern: "10.0.0.0/8", Target: "nonexistent"},
 	}
 	r := NewRouter(rules, &mockLookup{tunnels: map[string]*tunnel.Tunnel{}})
 

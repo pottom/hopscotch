@@ -56,6 +56,17 @@ func (m *Manager) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
+// ForceReconnect triggers an immediate reconnect for the named VPN.
+// Returns false if the VPN name is not found.
+func (m *Manager) ForceReconnect(name string) bool {
+	conn, ok := m.connections[name]
+	if !ok {
+		return false
+	}
+	conn.ForceReconnect()
+	return true
+}
+
 // IsConnected reports whether the named VPN is currently in StateConnected.
 func (m *Manager) IsConnected(name string) bool {
 	conn, ok := m.connections[name]

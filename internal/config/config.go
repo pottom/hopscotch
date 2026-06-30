@@ -67,17 +67,17 @@ type VPNConfig struct {
 	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
 }
 
-// ViaDirect and ViaBlock are the special via values for routing rules.
+// TargetDirect and TargetBlock are the special target values for routing rules.
 const (
-	ViaDirect = "direct"
-	ViaBlock  = "block"
+	TargetDirect = "direct"
+	TargetBlock  = "block"
 )
 
-// Rule maps a host pattern to a tunnel name or "direct".
+// Rule maps a host pattern to a tunnel name, "direct", or "block".
 type Rule struct {
 	Pattern string `yaml:"pattern"`
-	Tunnel  string `yaml:"tunnel"`
-	Via     string `yaml:"via"` // "direct"
+	Target  string `yaml:"target"`           // tunnel name, "direct", or "block"
+	Comment string `yaml:"comment,omitempty"` // optional human note
 }
 
 // ProxyConfig holds the SOCKS5 router configuration.
@@ -352,14 +352,8 @@ func validate(cfg *Config) error {
 		if rule.Pattern == "" {
 			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].pattern", i+1), Message: "pattern is required"}
 		}
-		if rule.Tunnel == "" && rule.Via == "" {
-			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].tunnel", i+1), Message: "either tunnel or via is required"}
-		}
-		if rule.Via != "" && rule.Via != ViaDirect && rule.Via != ViaBlock && rule.Tunnel != "" {
-			// via is only for special values; tunnel name goes in tunnel field
-		}
-		if rule.Via != "" && rule.Via != ViaDirect && rule.Via != ViaBlock {
-			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].via", i+1), Message: fmt.Sprintf("via must be %q, %q, or empty (use tunnel field for tunnel names)", ViaDirect, ViaBlock)}
+		if rule.Target == "" {
+			return &ConfigError{Field: fmt.Sprintf("proxy.rules[%d].target", i+1), Message: "target is required (tunnel name, \"direct\", or \"block\")"}
 		}
 		if err := ValidatePattern(rule.Pattern); err != nil {
 			hint := patternErrorHint(cfg.Path, rule.Pattern, i+1)

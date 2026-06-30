@@ -24,15 +24,15 @@ proxy:
   port: 8080
   rules:
     - pattern: "*.prod.example.com"
-      tunnel: prod
+      target: prod
     - pattern: "*.dev.example.com"
       tunnel: dev
     - pattern: "*.staging.example.com"
-      tunnel: staging
+      target: staging
     - pattern: "10.0.1.*"
-      tunnel: prod
+      target: prod
     - pattern: "*"
-      via: direct
+      target: direct
 
 admin:
   port: 9090
