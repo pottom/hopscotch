@@ -1362,7 +1362,10 @@ func (m Model) renderHeader() string {
 
 // renderFooter returns a single-line bar: hints on the left, ports on the right.
 func (m Model) renderFooter() string {
-	hints := "q quit  tab/1/2/3 switch  ↑↓/jk scroll"
+	hints := "q quit  tab/1/2/3 switch"
+	if m.activeTab != tabStatus || m.statusItemCount() == 0 {
+		hints += "  ↑↓/jk scroll"
+	}
 	if m.activeTab == tabRoutes {
 		if m.editMode {
 			hints = "↑↓/jk=cursor  shift+↑↓=reorder  e/enter=edit  tab=note  c=note  v=via  i=ins↑  a=add↓  d=del  ctrl+s=save  esc=cancel"
