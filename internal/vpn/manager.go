@@ -67,6 +67,28 @@ func (m *Manager) ForceReconnect(name string) bool {
 	return true
 }
 
+// Pause stops the named VPN from retrying, tearing down any in-flight or
+// active subprocess immediately. Returns false if the VPN name is not found.
+func (m *Manager) Pause(name string) bool {
+	conn, ok := m.connections[name]
+	if !ok {
+		return false
+	}
+	conn.Pause()
+	return true
+}
+
+// Resume clears a paused VPN connection and triggers an immediate reconnect.
+// Returns false if the VPN name is not found.
+func (m *Manager) Resume(name string) bool {
+	conn, ok := m.connections[name]
+	if !ok {
+		return false
+	}
+	conn.Resume()
+	return true
+}
+
 // IsConnected reports whether the named VPN is currently in StateConnected.
 func (m *Manager) IsConnected(name string) bool {
 	conn, ok := m.connections[name]

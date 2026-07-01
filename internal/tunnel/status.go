@@ -9,6 +9,7 @@ const (
 	StatusConnecting   Status = iota // dialing or waiting to reconnect
 	StatusConnected                  // tunnel is up and forwarding
 	StatusDisconnected               // gracefully stopped
+	StatusPaused                     // manually paused; not retrying until resumed
 )
 
 func (s Status) String() string {
@@ -19,6 +20,8 @@ func (s Status) String() string {
 		return "connecting"
 	case StatusDisconnected:
 		return "disconnected"
+	case StatusPaused:
+		return "paused"
 	default:
 		return "unknown"
 	}

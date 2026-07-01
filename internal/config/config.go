@@ -41,6 +41,7 @@ type TunnelConfig struct {
 	ReconnectDelay    int  `yaml:"reconnect_delay"`     // initial backoff seconds
 	ReconnectMaxDelay int  `yaml:"reconnect_max_delay"` // backoff cap seconds
 	ForcePTY          bool     `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
+	PTYPokeInterval   int      `yaml:"pty_poke_interval"`   // seconds between synthetic keystrokes on the PTY channel (only when force_pty); keeps SCB session-recording idle timeout from tearing it down
 	RequiresVPN       string   `yaml:"requires_vpn"`        // wait for this VPN before connecting
 	PreConnect        []string `yaml:"pre_connect"`         // commands to run before each dial attempt
 }
@@ -192,6 +193,9 @@ func applyDefaults(cfg *Config) {
 		}
 		if t.ReconnectMaxDelay == 0 {
 			t.ReconnectMaxDelay = DefaultReconnectMaxDelay
+		}
+		if t.ForcePTY && t.PTYPokeInterval == 0 {
+			t.PTYPokeInterval = DefaultPTYPokeInterval
 		}
 		if home != "" {
 			if strings.HasPrefix(t.IdentityFile, "~/") {

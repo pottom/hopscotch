@@ -76,7 +76,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		if st.Status == tunnel.StatusConnected && !st.ConnectedAt.IsZero() {
 			uptime = time.Since(st.ConnectedAt).Seconds()
 		}
-		if st.Status != tunnel.StatusConnected {
+		if st.Status != tunnel.StatusConnected && st.Status != tunnel.StatusPaused {
 			allConnected = false
 		}
 		tunnels[name] = TunnelStatusJSON{
@@ -107,7 +107,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			if st.State == vpn.StateConnected && !st.ConnectedAt.IsZero() {
 				uptime = time.Since(st.ConnectedAt).Seconds()
 			}
-			if st.State != vpn.StateConnected {
+			if st.State != vpn.StateConnected && st.State != vpn.StatePaused {
 				overall = "degraded"
 			}
 				var reconnectIn *int

@@ -7,6 +7,7 @@
   --connected:    #34d399;
   --connecting:   #fbbf24;
   --disconnected: #f87171;
+  --paused:       #94a3b8;
   --text:         #cbd5e1;
   --muted:        #475569;
   --pico-background-color: var(--bg);
@@ -1086,7 +1087,7 @@ col.col-uptime { width: 78px;  }
 col.col-rc     { width: 40px;  }
 col.col-bps    { width: 90px;  }
 col.col-conn   { width: 48px;  }
-col.col-action { width: 36px;  }
+col.col-action { width: 56px;  }
 /* col-msg removed */
 
 /* Reconnect action button */
@@ -1125,6 +1126,7 @@ col.col-action { width: 36px;  }
 .st-connected    { color: var(--connected); }
 .st-connecting   { color: var(--connecting); }
 .st-disconnected { color: var(--disconnected); }
+.st-paused       { color: var(--paused); }
 .st-warning      { color: var(--connecting); }
 .st-muted        { color: var(--muted); }
 .st-loading      { color: var(--muted); padding: 0.5rem 0.6rem; font-size: 0.72rem; }

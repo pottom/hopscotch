@@ -23,7 +23,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	allConnected := true
 	for name, st := range allStats {
 		tunnelMap[name] = st.Status.String()
-		if st.Status != tunnel.StatusConnected {
+		if st.Status != tunnel.StatusConnected && st.Status != tunnel.StatusPaused {
 			allConnected = false
 		}
 	}

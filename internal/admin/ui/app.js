@@ -122,6 +122,7 @@ function escHtml(s) {
 
 function vpnStatusHtml(state, reconnectIn) {
   if (state === 'connected') return '<span class="st-connected">● connected</span>';
+  if (state === 'paused') return '<span class="st-paused">⏸ paused</span>';
   if (state === 'connecting' || state === 'disconnected') {
     if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next try: ${reconnectIn}s</span>`;
     if (state === 'connecting') return '<span class="st-connecting">connecting</span>';
@@ -141,6 +142,7 @@ function tunnelStatusHtml(t) {
       ? `<span class="st-warning">● connected ⚠${t.keepalive_failures}</span>`
       : '<span class="st-connected">● connected</span>';
   }
+  if (s === 'paused') return '<span class="st-paused">⏸ paused</span>';
   if (s === 'connecting' || s === 'disconnected') {
     if (ri != null && ri >= 0) return `<span class="st-connecting">○ next try: ${ri}s</span>`;
     return s === 'connecting'
@@ -148,6 +150,24 @@ function tunnelStatusHtml(t) {
       : '<span class="st-disconnected">disconnected</span>';
   }
   return `<span class="st-muted">${escHtml(s || '…')}</span>`;
+}
+
+// tunnelActionHtml / vpnActionHtml render the reconnect/pause/resume buttons
+// for the action column, swapping to a single resume button while paused.
+function tunnelActionHtml(name, status) {
+  if (status === 'paused') {
+    return `<button class="reconnect-btn" title="Resume" onclick="event.stopPropagation();resumeTunnel('${escHtml(name)}')">▶</button>`;
+  }
+  return `<button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectTunnel('${escHtml(name)}')">↻</button>` +
+    `<button class="reconnect-btn" title="Pause" onclick="event.stopPropagation();pauseTunnel('${escHtml(name)}')">⏸</button>`;
+}
+
+function vpnActionHtml(name, state) {
+  if (state === 'paused') {
+    return `<button class="reconnect-btn" title="Resume" onclick="event.stopPropagation();resumeVPN('${escHtml(name)}')">▶</button>`;
+  }
+  return `<button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectVPN('${escHtml(name)}')">↻</button>` +
+    `<button class="reconnect-btn" title="Pause" onclick="event.stopPropagation();pauseVPN('${escHtml(name)}')">⏸</button>`;
 }
 
 function vpnDepHtml(vpn, state) {
@@ -213,7 +233,7 @@ function renderVPNTable() {
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
       `<td></td><td></td><td></td>` +
-      `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectVPN('${escHtml(name)}')">↻</button></td>`;
+      `<td class="col-action-cell" data-col="action">${vpnActionHtml(name, v.state)}</td>`;
     tbody.appendChild(tr);
     // message sub-row — only when not connected and last_error is set
     const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
@@ -282,7 +302,7 @@ function buildTunnelRows(names) {
         `<td class="bps-in"  data-col="bps-in">${fmtTotal(t.bytes_in  || 0)}</td>` +
         `<td class="bps-out" data-col="bps-out">${fmtTotal(t.bytes_out || 0)}</td>` +
         `<td data-col="active">${t.active || 0}</td>` +
-        `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectTunnel('${escHtml(name)}')">↻</button></td>`;
+        `<td class="col-action-cell" data-col="action">${tunnelActionHtml(name, t.status)}</td>`;
     }
     tbody.appendChild(tr);
     // message sub-row — shown for errors (red └ ✗) and progress msgs (amber ◌)
@@ -325,6 +345,7 @@ function updateTunnelRows() {
     setCell(row, 'bps-in',  fmtTotal(t.bytes_in  || 0));
     setCell(row, 'bps-out', fmtTotal(t.bytes_out || 0));
     setCell(row, 'active', t.active || 0);
+    setCell(row, 'action', tunnelActionHtml(name, t.status), true);
     // update msg sub-row
     const mRow = row.nextElementSibling?.classList.contains('msg-row') ? row.nextElementSibling : null;
     if (mRow) {
@@ -363,6 +384,34 @@ window.reconnectTunnel = async function(name) {
 window.reconnectVPN = async function(name) {
   try {
     await fetch('/api/vpns/' + encodeURIComponent(name) + '/reconnect', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.pauseTunnel = async function(name) {
+  try {
+    await fetch('/api/tunnels/' + encodeURIComponent(name) + '/pause', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.resumeTunnel = async function(name) {
+  try {
+    await fetch('/api/tunnels/' + encodeURIComponent(name) + '/resume', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.pauseVPN = async function(name) {
+  try {
+    await fetch('/api/vpns/' + encodeURIComponent(name) + '/pause', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.resumeVPN = async function(name) {
+  try {
+    await fetch('/api/vpns/' + encodeURIComponent(name) + '/resume', { method: 'POST' });
     refreshStatus();
   } catch (_) {}
 };

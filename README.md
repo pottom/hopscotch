@@ -69,6 +69,7 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 | **Hot reload** | Config reloads on `SIGHUP` or file change, tunnels re-configured in place, no restart. |
 | **Self-update** | `hopscotch update` atomically replaces the binary. Container-aware — prints a notice instead of updating inside Docker. |
 | **Force reconnect** | `r` in TUI or ↻ button in web UI reconnects a tunnel or VPN immediately, skipping the backoff timer. |
+| **Pause/resume** | `p` in TUI or ⏸/▶ button in web UI manually pauses a tunnel or VPN — even mid-connect — until resumed. |
 | **Prometheus metrics** | `/metrics` endpoint with per-tunnel bytes, connections, reconnects, keepalive failures, uptime. |
 
 One binary. Zero services. Zero background daemons beyond itself.
@@ -94,6 +95,7 @@ Each tunnel shows: connection status, host, local port, uptime, reconnect counte
 | `Tab` / `1` / `2` / `3` | Switch tabs: Status / Rules / Logs |
 | `↑` `↓` / `j` `k` | **Status tab:** move cursor between tunnels and VPNs (viewport follows) · **Other tabs:** scroll |
 | `r` | **Status tab:** force reconnect selected tunnel or VPN immediately (skips backoff) |
+| `p` | **Status tab:** pause/resume selected tunnel or VPN (aborts an in-flight connect immediately) · **Logs tab:** toggle proxy source filter |
 | `f` | **Status tab:** toggle graphs on/off (compact mode) |
 | `g` | **Status tab:** toggle mirror graph (dual-channel ↔ download only) |
 | `/` | **Rules tab:** focus URL tester · **Logs tab:** focus text filter |
@@ -337,6 +339,7 @@ admin:
 | `reconnect_delay` | `5` | Initial reconnect backoff (doubles each attempt) |
 | `reconnect_max_delay` | `30` | Reconnect backoff cap (seconds) |
 | `force_pty` | `false` | Open a PTY shell session — for jump hosts that enforce channel policies (SPS/SCB appliances) |
+| `pty_poke_interval` | `60` | Seconds between no-op keystrokes sent on the PTY channel (only when `force_pty` is set); keeps SCB session-recording idle timeouts from tearing down the connection |
 
 ### VPN integration
 

@@ -59,6 +59,7 @@ tunnels:
     reconnect_delay: 5               # initial backoff (doubles each attempt)
     reconnect_max_delay: 30          # backoff cap
     # force_pty: true                # open a PTY shell — needed for SPS/SCB jump hosts
+    # pty_poke_interval: 60          # seconds between no-op keystrokes on the PTY (force_pty only); prevents SCB idle-timeout from closing the recorded session
     # requires_vpn: corp-vpn         # wait for this VPN before connecting
     # pre_connect:                   # commands before each dial attempt
     #   - "nc -z 10.0.0.1 22 || exit 1"   # check if host is reachable first

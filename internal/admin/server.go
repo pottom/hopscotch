@@ -160,7 +160,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	protected.HandleFunc("PUT /api/rules", s.handleRules)
 	protected.HandleFunc("GET /api/validate-pattern", s.handleValidatePattern)
 	protected.HandleFunc("POST /api/tunnels/{name}/reconnect", s.handleTunnelReconnect)
+	protected.HandleFunc("POST /api/tunnels/{name}/pause", s.handleTunnelPause)
+	protected.HandleFunc("POST /api/tunnels/{name}/resume", s.handleTunnelResume)
 	protected.HandleFunc("POST /api/vpns/{name}/reconnect", s.handleVPNReconnect)
+	protected.HandleFunc("POST /api/vpns/{name}/pause", s.handleVPNPause)
+	protected.HandleFunc("POST /api/vpns/{name}/resume", s.handleVPNResume)
 	sub, _ := fs.Sub(uiFiles, "ui")
 	protected.Handle("GET /", noCacheFS(http.FileServerFS(sub)))
 

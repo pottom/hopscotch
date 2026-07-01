@@ -33,6 +33,7 @@ const (
 	StateDisconnected State = iota
 	StateConnecting
 	StateConnected
+	StatePaused // manually paused; not retrying until resumed
 )
 
 func (s State) String() string {
@@ -41,6 +42,8 @@ func (s State) String() string {
 		return "connecting"
 	case StateConnected:
 		return "connected"
+	case StatePaused:
+		return "paused"
 	default:
 		return "disconnected"
 	}
@@ -78,12 +81,17 @@ type Connection struct {
 	tunIface         atomic.Value // stores string; tunnel interface name
 	tunIfacesBefore  atomic.Value // stores map[string]bool; tun interfaces before this runOnce
 	forceReconnect   chan struct{}
+	paused           atomic.Bool
+	pauseRequest     chan struct{} // buffered(1); signals a pause request
+	resume           chan struct{} // buffered(1); signals resume from pause
 }
 
 func newConnection(cfg connConfig) *Connection {
 	c := &Connection{
 		cfg:            cfg,
 		forceReconnect: make(chan struct{}, 1),
+		pauseRequest:   make(chan struct{}, 1),
+		resume:         make(chan struct{}, 1),
 	}
 	c.connectedAt.Store(time.Time{})
 	c.nextReconnectAt.Store(time.Time{})
@@ -97,6 +105,26 @@ func newConnection(cfg connConfig) *Connection {
 func (c *Connection) ForceReconnect() {
 	select {
 	case c.forceReconnect <- struct{}{}:
+	default:
+	}
+}
+
+// Pause stops the VPN from retrying, tearing down an in-flight or active
+// subprocess via the same graceful (SIGTERM-then-SIGKILL) shutdown path used
+// on ForceReconnect/shutdown. The connection stays paused until Resume.
+func (c *Connection) Pause() {
+	c.paused.Store(true)
+	select {
+	case c.pauseRequest <- struct{}{}:
+	default:
+	}
+}
+
+// Resume clears a paused VPN connection and triggers an immediate reconnect.
+func (c *Connection) Resume() {
+	c.paused.Store(false)
+	select {
+	case c.resume <- struct{}{}:
 	default:
 	}
 }
@@ -168,16 +196,40 @@ func (c *Connection) Run(ctx context.Context) error {
 	}
 
 	for {
+		if c.paused.Load() {
+			c.setState(StatePaused)
+			c.lastError.Store("")
+			c.nextReconnectAt.Store(time.Time{})
+			select {
+			case <-ctx.Done():
+				c.setState(StateDisconnected)
+				return nil
+			case <-c.resume:
+				b.reset()
+			}
+			continue
+		}
+
+		// Discard a stale pause signal left over from a Pause() call whose effect
+		// (the paused-wait above, or a teardown already in progress) was already
+		// applied — otherwise a later select in this loop could misread it as a
+		// brand new pause request.
+		select {
+		case <-c.pauseRequest:
+		default:
+		}
+
 		c.setState(StateConnecting)
 		beforeRun := time.Now()
 
-		// Run the subprocess in a goroutine so forceReconnect can interrupt it
-		// even while the VPN is connected (not just during the backoff countdown).
+		// Run the subprocess in a goroutine so forceReconnect/Pause can interrupt
+		// it even while the VPN is connected (not just during the backoff countdown).
 		runCtx, cancelRun := context.WithCancel(ctx)
 		errCh := make(chan error, 1)
 		go func() { errCh <- c.runOnce(runCtx) }()
 
 		forceSkipDelay := false
+		pausedThisRound := false
 		select {
 		case err := <-errCh:
 			cancelRun()
@@ -198,9 +250,15 @@ func (c *Connection) Run(ctx context.Context) error {
 			cancelRun()
 			<-errCh // wait for subprocess to exit
 			forceSkipDelay = true
+		case <-c.pauseRequest:
+			// Reuse the same graceful subprocess teardown as shutdown/ForceReconnect.
+			log.Info("pause requested", "vpn", c.cfg.Name)
+			cancelRun()
+			<-errCh // wait for subprocess to exit
+			pausedThisRound = true
 		}
 
-		if !forceSkipDelay {
+		if !forceSkipDelay && !pausedThisRound {
 			c.setState(StateDisconnected)
 		}
 		c.reconnects.Add(1)
@@ -210,6 +268,11 @@ func (c *Connection) Run(ctx context.Context) error {
 		// accumulate reconnect delay.
 		if c.connectedAt.Load().(time.Time).After(beforeRun) {
 			b.reset()
+		}
+
+		if pausedThisRound {
+			// Status will be set to StatePaused at the top of the loop.
+			continue
 		}
 
 		if forceSkipDelay {
@@ -244,6 +307,9 @@ func (c *Connection) Run(ctx context.Context) error {
 		case <-c.forceReconnect:
 			c.nextReconnectAt.Store(time.Time{})
 			log.Info("force reconnect requested, skipping delay", "vpn", c.cfg.Name)
+		case <-c.pauseRequest:
+			c.nextReconnectAt.Store(time.Time{})
+			log.Info("pause requested, skipping delay", "vpn", c.cfg.Name)
 		}
 	}
 }

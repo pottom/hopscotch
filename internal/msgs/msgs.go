@@ -8,6 +8,7 @@ const (
 	StatusConnected    = "connected"
 	StatusConnecting   = "connecting"
 	StatusDisconnected = "disconnected"
+	StatusPaused       = "paused"
 )
 
 // Progress/error messages stored in LastError during connect phases.

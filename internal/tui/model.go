@@ -38,6 +38,7 @@ var (
 	colorConnected    = lipgloss.Color("#34d399")
 	colorConnecting   = lipgloss.Color("#fbbf24")
 	colorDisconnected = lipgloss.Color("#f87171")
+	colorPaused       = lipgloss.Color("#94a3b8")
 	colorMuted        = lipgloss.Color("#475569")
 	colorAccent       = lipgloss.Color("#38bdf8")
 	colorVPN          = lipgloss.Color("#2dd4bf")
@@ -52,6 +53,7 @@ var (
 	styleConnected    = lipgloss.NewStyle().Foreground(colorConnected)
 	styleConnecting   = lipgloss.NewStyle().Foreground(colorConnecting)
 	styleDisconnected = lipgloss.NewStyle().Foreground(colorDisconnected)
+	stylePaused       = lipgloss.NewStyle().Foreground(colorPaused)
 
 	styleBadgeHealthy  = lipgloss.NewStyle().Foreground(colorConnected).Bold(true)
 	styleBadgeDegraded = lipgloss.NewStyle().Foreground(colorConnecting).Bold(true)
@@ -791,6 +793,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logSources["proxy"] = !m.logSources["proxy"]
 				m.ensureMinLogSource()
 				m.rebuildLogVP()
+				return m, nil
+			}
+			if m.activeTab == tabStatus && m.statusItemCount() > 0 {
+				nVPNs := len(m.status.VPNs)
+				if m.statusCursor < nVPNs {
+					// cursor is on a VPN row
+					vpnNames := m.vpnNamesSorted()
+					name := vpnNames[m.statusCursor]
+					v, ok := m.status.VPNs[name]
+					if !ok {
+						return m, nil
+					}
+					if v.State == msgs.StatusPaused {
+						v.State = msgs.StatusConnecting
+						m.status.VPNs[name] = v
+						if m.vpReady {
+							m.vp.SetContent(m.buildStatusContent())
+						}
+						return m, m.resumeVPNCmd(name)
+					}
+					v.State = msgs.StatusPaused
+					v.LastError = ""
+					m.status.VPNs[name] = v
+					if w := m.traffic[name]; w != nil {
+						w.reconnectIn = nil
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, m.pauseVPNCmd(name)
+				}
+				// cursor is on a tunnel row
+				tunnelNames := m.tunnelNamesByPort()
+				tunnelIdx := m.statusCursor - nVPNs
+				if tunnelIdx < len(tunnelNames) {
+					name := tunnelNames[tunnelIdx]
+					t, ok := m.status.Tunnels[name]
+					if !ok {
+						return m, nil
+					}
+					if t.Status == msgs.StatusPaused {
+						t.Status = msgs.StatusConnecting
+						m.status.Tunnels[name] = t
+						if m.vpReady {
+							m.vp.SetContent(m.buildStatusContent())
+						}
+						return m, m.resumeTunnelCmd(name)
+					}
+					t.Status = msgs.StatusPaused
+					t.LastError = ""
+					m.status.Tunnels[name] = t
+					if w := m.traffic[name]; w != nil {
+						w.reconnectIn = nil
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, m.pauseTunnelCmd(name)
+				}
 			}
 			return m, nil
 
@@ -1326,7 +1387,7 @@ func (m Model) renderFooter() string {
 			hints += "  g mirror"
 		}
 		if m.statusItemCount() > 0 {
-			hints += "  ↑↓/jk cursor  r reconnect"
+			hints += "  ↑↓/jk cursor  r reconnect  p pause/resume"
 		}
 	}
 
@@ -1673,6 +1734,42 @@ func (m Model) reconnectVPNCmd(name string) tea.Cmd {
 		res.Body.Close()
 		return reconnectResultMsg{}
 	}
+}
+
+// postActionCmd returns a Cmd that POSTs to the given admin API path
+// (relative to the base admin URL, e.g. "/api/tunnels/foo/pause") and
+// ignores the response body.
+func (m Model) postActionCmd(path string) tea.Cmd {
+	url := strings.TrimSuffix(m.adminURL, "/status") + path
+	client := m.httpClient
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPost, url, nil)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res.Body.Close()
+		return reconnectResultMsg{}
+	}
+}
+
+func (m Model) pauseTunnelCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/tunnels/" + name + "/pause")
+}
+
+func (m Model) resumeTunnelCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/tunnels/" + name + "/resume")
+}
+
+func (m Model) pauseVPNCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/vpns/" + name + "/pause")
+}
+
+func (m Model) resumeVPNCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/vpns/" + name + "/resume")
 }
 
 // vpnNamesSorted returns VPN names sorted alphabetically (same order as rendered).
@@ -2216,6 +2313,8 @@ func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int)
 			return styleConnecting.Render(fmt.Sprintf("○ next try: %ds", *reconnectIn))
 		}
 		return styleDisconnected.Render("○ disconnected")
+	case msgs.StatusPaused:
+		return stylePaused.Render("⏸ paused")
 	default:
 		return styleMuted.Render("? " + status)
 	}
