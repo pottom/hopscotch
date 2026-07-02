@@ -17,6 +17,7 @@ import (
 
 	"github.com/pottom/hopscotch/internal/config"
 	"github.com/pottom/hopscotch/internal/logger"
+	"github.com/pottom/hopscotch/internal/state"
 	"github.com/pottom/hopscotch/internal/tunnel"
 	"github.com/pottom/hopscotch/internal/vpn"
 )
@@ -63,6 +64,7 @@ type Server struct {
 	ruleUpdater      RuleUpdater
 	reconnecter      TunnelReconnecter
 	vpnReconnecter   VPNReconnecter // nil when no VPNs configured
+	pausedTracker    *state.PausedTracker
 	// admin auth — empty means no auth required
 	adminUsername string
 	adminPassword string
@@ -71,7 +73,7 @@ type Server struct {
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater, reconnecter TunnelReconnecter, vpnReconnecter VPNReconnecter, proxyAuthEnabled bool) *Server {
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater, reconnecter TunnelReconnecter, vpnReconnecter VPNReconnecter, proxyAuthEnabled bool, pausedTracker *state.PausedTracker) *Server {
 	var sessionToken string
 	if cfg.Admin.Username != "" {
 		b := make([]byte, 32)
@@ -96,6 +98,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPN
 		ruleUpdater:      ruleUpdater,
 		reconnecter:      reconnecter,
 		vpnReconnecter:   vpnReconnecter,
+		pausedTracker:    pausedTracker,
 		adminUsername:    cfg.Admin.Username,
 		adminPassword:    cfg.Admin.Password,
 		sessionToken:     sessionToken,

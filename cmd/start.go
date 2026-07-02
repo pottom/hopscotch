@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -57,6 +58,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("state manager: %w", err)
 	}
+	pausedTracker := state.NewPausedTracker(filepath.Dir(cfg.Path))
 
 	if pid, err := stateMgr.ReadPID(); err == nil && isRunning(pid) {
 		if err := handleAlreadyRunning(pid, stateMgr); err != nil {
@@ -101,6 +103,20 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	mgr := tunnel.NewManager(cfg.Tunnels, vpnGater)
+
+	for _, name := range pausedTracker.Tunnels() {
+		if !mgr.Pause(name) {
+			log.Warn("paused state references unknown tunnel, ignoring", "tunnel", name)
+		}
+	}
+	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
+		for _, name := range pausedTracker.VPNs() {
+			if !vpnMgr.Pause(name) {
+				log.Warn("paused state references unknown vpn, ignoring", "vpn", name)
+			}
+		}
+	}
+
 	router := proxy.NewRouter(cfg.Proxy.Rules, mgr)
 	proxySrv := proxy.NewServer(cfg.Proxy.Bind, cfg.Proxy.Port, router, cfg.Proxy.Username, cfg.Proxy.Password)
 	var vpnStatter admin.VPNStatter
@@ -109,7 +125,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		vpnStatter = vpnMgr
 		vpnReconnecter = vpnMgr
 	}
-	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent, cfg, router, mgr, vpnReconnecter, proxySrv.AuthEnabled())
+	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent, cfg, router, mgr, vpnReconnecter, proxySrv.AuthEnabled(), pausedTracker)
 
 	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)

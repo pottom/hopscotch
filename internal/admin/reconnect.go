@@ -31,6 +31,7 @@ func (s *Server) handleTunnelPause(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "tunnel not found", http.StatusNotFound)
 		return
 	}
+	s.pausedTracker.SetTunnelPaused(name, true)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -40,6 +41,7 @@ func (s *Server) handleTunnelResume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "tunnel not found", http.StatusNotFound)
 		return
 	}
+	s.pausedTracker.SetTunnelPaused(name, false)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -66,6 +68,7 @@ func (s *Server) handleVPNPause(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "vpn not found", http.StatusNotFound)
 		return
 	}
+	s.pausedTracker.SetVPNPaused(name, true)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -79,5 +82,6 @@ func (s *Server) handleVPNResume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "vpn not found", http.StatusNotFound)
 		return
 	}
+	s.pausedTracker.SetVPNPaused(name, false)
 	w.WriteHeader(http.StatusNoContent)
 }
