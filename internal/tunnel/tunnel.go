@@ -442,7 +442,7 @@ func (t *Tunnel) dial(ctx context.Context) error {
 	now := t.clock.Now()
 	t.stats.Store(Stats{
 		Status:         StatusConnected,
-		ConnectedAt:    now,
+		ConnectedAt:    now.Round(0), // strip monotonic reading so uptime survives system sleep
 		LocalPort:      t.cfg.LocalPort,
 		Host:           addr,
 		ReconnectCount: t.Stats().ReconnectCount,

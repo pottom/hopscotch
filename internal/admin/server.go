@@ -93,7 +93,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPN
 		direct:           direct,
 		routes:           routes,
 		logs:             logger.GetBroadcaster(),
-		startedAt:        time.Now(),
+		startedAt:        time.Now().Round(0), // strip monotonic reading so uptime survives system sleep
 		cfg:              cfg,
 		ruleUpdater:      ruleUpdater,
 		reconnecter:      reconnecter,

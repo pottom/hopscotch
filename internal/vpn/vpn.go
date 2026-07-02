@@ -177,7 +177,7 @@ func (c *Connection) Stats() Stats {
 func (c *Connection) setState(s State) {
 	if s == StateConnected {
 		if State(c.state.Load()) != StateConnected {
-			c.connectedAt.Store(time.Now())
+			c.connectedAt.Store(time.Now().Round(0)) // strip monotonic reading so uptime survives system sleep
 		}
 		c.nextReconnectAt.Store(time.Time{})
 		c.lastError.Store("")
