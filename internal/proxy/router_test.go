@@ -45,7 +45,7 @@ func TestResolve_CIDRPrecedence(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		_, _, _, got, err := r.resolve(context.Background(), tc.host)
+		_, _, _, got, _, err := r.resolve(context.Background(), tc.host)
 		if err != nil {
 			t.Errorf("resolve(%q): unexpected error: %v", tc.host, err)
 			continue
@@ -60,7 +60,7 @@ func TestResolve_GlobBeforeCIDR(t *testing.T) {
 	// Glob wildcard listed before CIDR — glob should win for matching hosts.
 	_, r := directRules("*.internal", "10.0.0.0/8")
 
-	_, _, _, got, err := r.resolve(context.Background(), "api.internal")
+	_, _, _, got, _, err := r.resolve(context.Background(), "api.internal")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestResolve_DirectFallback(t *testing.T) {
 	// Host matches no rule → direct fallback, no error.
 	_, r := directRules("10.0.1.0/24")
 
-	label, _, _, _, err := r.resolve(context.Background(), "192.168.1.1")
+	label, _, _, _, _, err := r.resolve(context.Background(), "192.168.1.1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestResolve_UnknownTunnel(t *testing.T) {
 	}
 	r := NewRouter(rules, &mockLookup{tunnels: map[string]*tunnel.Tunnel{}})
 
-	_, _, _, _, err := r.resolve(context.Background(), "10.0.0.1")
+	_, _, _, _, _, err := r.resolve(context.Background(), "10.0.0.1")
 	if err == nil {
 		t.Fatal("expected error for unknown tunnel, got nil")
 	}
@@ -97,7 +97,7 @@ func TestResolve_UnknownTunnel(t *testing.T) {
 func TestResolve_StarMatchesAll(t *testing.T) {
 	_, r := directRules("*")
 
-	_, _, _, pattern, err := r.resolve(context.Background(), "anything.example.com")
+	_, _, _, pattern, _, err := r.resolve(context.Background(), "anything.example.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

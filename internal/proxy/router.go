@@ -65,7 +65,7 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 
 	proto := inferProto(network, port)
 
-	label, dialer, tunnelStatus, pattern, err := r.resolve(ctx, host)
+	label, dialer, tunnelStatus, pattern, comment, err := r.resolve(ctx, host)
 	if err != nil {
 		if errors.Is(err, errBlocked) {
 			log.Warn("proxy blocked", "host", host, "proto", proto, "err", err)
@@ -75,22 +75,14 @@ func (r *Router) DialContext(ctx context.Context, network, addr string) (net.Con
 		return nil, err
 	}
 
-	if tunnelStatus != "" {
-		log.Info("proxy",
-			"proto", proto,
-			"host", host,
-			"pattern", pattern,
-			"via", label,
-			"tunnel", tunnelStatus,
-		)
-	} else {
-		log.Info("proxy",
-			"proto", proto,
-			"host", host,
-			"pattern", pattern,
-			"via", label,
-		)
+	args := []any{"proto", proto, "host", host, "pattern", pattern, "via", label}
+	if comment != "" {
+		args = append(args, "note", comment)
 	}
+	if tunnelStatus != "" {
+		args = append(args, "tunnel", tunnelStatus)
+	}
+	log.Info("proxy", args...)
 	return dialer.DialContext(ctx, network, addr)
 }
 
@@ -157,38 +149,38 @@ type dialContexter interface {
 // resolve finds the matching rule and returns the label, dialer, matched pattern, and (for tunnels)
 // the tunnel status captured before any wait — so the caller can log what state
 // the tunnel was in when the request arrived.
-func (r *Router) resolve(ctx context.Context, host string) (label string, dialer dialContexter, tunnelStatus string, pattern string, err error) {
+func (r *Router) resolve(ctx context.Context, host string) (label string, dialer dialContexter, tunnelStatus string, pattern string, comment string, err error) {
 	for _, rule := range r.rules {
 		if !matchPattern(rule.Pattern, host) {
 			continue
 		}
 
 		if rule.Target == config.TargetDirect {
-			return config.TargetDirect, &r.direct, "", rule.Pattern, nil
+			return config.TargetDirect, &r.direct, "", rule.Pattern, rule.Comment, nil
 		}
 
 		if rule.Target == config.TargetBlock {
-			return "", nil, "", "", fmt.Errorf("%w: connection to %s blocked by rule (pattern: %s)", errBlocked, host, rule.Pattern)
+			return "", nil, "", "", "", fmt.Errorf("%w: connection to %s blocked by rule (pattern: %s)", errBlocked, host, rule.Pattern)
 		}
 
 		t := r.tunnels.Get(rule.Target)
 		if t == nil {
-			return "", nil, "", "", fmt.Errorf("rule refers to unknown tunnel %q", rule.Target)
+			return "", nil, "", "", "", fmt.Errorf("rule refers to unknown tunnel %q", rule.Target)
 		}
 
 		// Snapshot status before waiting so the log reflects what the caller saw.
 		initialStatus := t.Stats().Status.String()
 
 		if err := r.waitForTunnel(ctx, t); err != nil {
-			return "", nil, "", "", err
+			return "", nil, "", "", "", err
 		}
 
-		return rule.Target, t, initialStatus, rule.Pattern, nil
+		return rule.Target, t, initialStatus, rule.Pattern, rule.Comment, nil
 	}
 
 	// No matching rule — use direct as fallback.
 	log.Warn("no routing rule matched, using direct", "host", host)
-	return config.TargetDirect, &r.direct, "", "", nil
+	return config.TargetDirect, &r.direct, "", "", "", nil
 }
 
 // waitForTunnel returns immediately with an error if the tunnel is not connected.
