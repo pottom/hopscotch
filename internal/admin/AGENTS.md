@@ -14,6 +14,7 @@ HTTP admin server: session-cookie auth, `/health`, `/metrics` (Prometheus), `/st
 - `reconnect.go`'s four pause/resume handlers are the **only** code path that ever calls `tunnel.Manager`/`vpn.Manager` `Pause`/`Resume` — both the TUI and the web UI drive pause/resume exclusively through these HTTP endpoints. Anything hooked here (e.g. `internal/state.PausedTracker` persistence) automatically covers both UIs; don't add a second, direct-call path.
 - `rules.go`'s `handleRules` mutates `cfg.Proxy.Rules` under `cfgMu` and immediately persists via `config.WriteConfig` (atomic temp-file + rename) before applying to the live router — `config.yaml` is the durable source of truth for rules, not just a bootstrap file. Hand-edited comments in `config.yaml` do not survive this write (see `internal/config/AGENTS.md`).
 - Auth is all-or-nothing: `adminUsername == ""` means no auth for the whole server. `sessionToken` is random per process start, never persisted — restarting the daemon invalidates all sessions.
+- `startedAt` is stored as `time.Now().Round(0)` (strips the monotonic clock reading), not raw `time.Now()` — otherwise the daemon uptime shown in `/health`/`/status` (and thus the TUI/web UI header) freezes during macOS sleep, since the monotonic clock doesn't advance while the system is suspended. Same pattern applied to `ConnectedAt`/`connectedAt` in `internal/tunnel`/`internal/vpn` — any new "since this moment" timestamp meant for duration display must follow it too.
 
 ## Work Guidance
 

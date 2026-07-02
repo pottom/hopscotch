@@ -12,6 +12,7 @@ Manages an `openconnect` subprocess per configured VPN: connect detection (stder
 
 - Same pre-`Run()` pause-then-restore safety pattern as `internal/tunnel` (`Run()` checks `paused` first, drains a stale `pauseRequest`) — see `internal/tunnel/AGENTS.md`; keep both in sync if this pattern ever changes.
 - No config hot-reload exists for VPNs (unlike tunnels' `ApplyConfig`) — a VPN config change requires a full process restart.
+- `connectedAt` is stored as `time.Now().Round(0)` (strips the monotonic clock reading), not raw `time.Now()` — otherwise the displayed "connected since" duration freezes during macOS sleep (monotonic clock doesn't advance while suspended). Same pattern as `internal/tunnel`'s `ConnectedAt`; apply it to any new timestamp captured here for duration display.
 
 ## Work Guidance
 
