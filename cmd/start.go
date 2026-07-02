@@ -107,13 +107,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 	for _, name := range pausedTracker.Tunnels() {
 		if !mgr.Pause(name) {
 			log.Warn("paused state references unknown tunnel, ignoring", "tunnel", name)
+			continue
 		}
+		log.Info("tunnel starting paused, restored from state file", "tunnel", name)
 	}
 	if vpnMgr, ok := vpnGater.(*vpn.Manager); ok {
 		for _, name := range pausedTracker.VPNs() {
 			if !vpnMgr.Pause(name) {
 				log.Warn("paused state references unknown vpn, ignoring", "vpn", name)
+				continue
 			}
+			log.Info("vpn starting paused, restored from state file", "vpn", name)
 		}
 	}
 
