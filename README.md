@@ -196,7 +196,7 @@ The generated file stays in sync: hopscotch refreshes it automatically on every 
 
 ## Web admin UI
 
-`http://localhost:9090` — mirrors the TUI with tunnel cards, live traffic graphs, a Rules tab with interactive URL tester, VPN status, and a Logs tab with real-time structured output. Pure SSE, no polling.
+`http://localhost:9090` — mirrors the TUI with tunnel cards, live traffic graphs, a Rules tab with interactive URL tester, VPN status, a Settings tab for desktop notifications, and a Logs tab with real-time structured output. Pure SSE, no polling. Everything here — and the TUI — goes through the same HTTP API; see [`docs/API.md`](docs/API.md) for the full reference if you want to script against it directly.
 
 The **Logs tab** buffers up to 500 log lines and filters them client-side: severity buttons (ALL / INFO / WARN / ERR), source chips (TUNNEL / VPN / PROXY / SYSTEM), and a text filter all apply simultaneously with AND logic. Auto-scroll pauses when you scroll up; a `↓ live` badge reappears at the bottom-right to resume it. The active tab and selected log level are saved in `localStorage` and restored on reload.
 

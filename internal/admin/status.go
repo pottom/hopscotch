@@ -70,6 +70,7 @@ type StatusResponse struct {
 	Tunnels          map[string]TunnelStatusJSON `json:"tunnels"`
 	VPNs             map[string]VPNStatusJSON    `json:"vpns,omitempty"`
 	Routes           []RouteJSON                 `json:"routes"`
+	Notifications    NotificationsJSON           `json:"notifications"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +174,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Tunnels:          tunnels,
 		VPNs:             vpnMap,
 		Routes:           routes,
+	}
+	if s.notifyCtl != nil {
+		resp.Notifications = notificationsJSON(s.notifyCtl.Config())
 	}
 
 	w.Header().Set("Content-Type", "application/json")

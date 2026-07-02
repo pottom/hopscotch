@@ -103,12 +103,24 @@ type AdminConfig struct {
 	ShowPublicIP bool   `yaml:"show_public_ip"` // periodically fetch and display public IP; default false
 }
 
+// NotificationsConfig controls native OS desktop notifications for tunnel and
+// VPN status changes. Config-file only for v1 — no TUI/web UI toggle; see
+// docs/DESIGN.md for why.
+type NotificationsConfig struct {
+	Enabled      bool `yaml:"enabled"`       // master switch; default false
+	OnDisconnect bool `yaml:"on_disconnect"` // notify when a connected tunnel/VPN unexpectedly drops
+	OnReconnect  bool `yaml:"on_reconnect"`  // notify when a tunnel/VPN recovers after being down
+	OnAutoPause  bool `yaml:"on_auto_pause"` // notify when auto_pause_threshold triggers a pause
+	Sound        bool `yaml:"sound"`         // play the OS default notification sound; default false
+}
+
 // Config is the root configuration object.
 type Config struct {
-	Tunnels []TunnelConfig `yaml:"tunnels"`
-	VPNs    []VPNConfig    `yaml:"vpn"`
-	Proxy   ProxyConfig    `yaml:"proxy"`
-	Admin   AdminConfig    `yaml:"admin"`
+	Tunnels       []TunnelConfig      `yaml:"tunnels"`
+	VPNs          []VPNConfig         `yaml:"vpn"`
+	Proxy         ProxyConfig         `yaml:"proxy"`
+	Admin         AdminConfig         `yaml:"admin"`
+	Notifications NotificationsConfig `yaml:"notifications"`
 
 	// resolved path, not from YAML
 	Path string `yaml:"-"`

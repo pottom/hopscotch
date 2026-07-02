@@ -98,3 +98,17 @@ proxy:
 admin:
   port: 9090
   bind: "127.0.0.1"                     # change to 0.0.0.0 to expose in containers
+
+# ── Notifications ──────────────────────────────────────────────────────────────
+# Optional. Native OS desktop notifications on meaningful tunnel/VPN state
+# changes. Disabled by default. Also live-editable from the TUI/web UI
+# Settings tab — changes there apply immediately and are written back here.
+# Shows the hopscotch logo on Linux and Windows. On macOS the notification
+# text still works fine, but no custom icon is shown — modern macOS blocks
+# custom notification icons for unbundled CLI/daemon tools like hopscotch.
+# notifications:
+#   enabled: true
+#   on_disconnect: true    # a connected tunnel/VPN unexpectedly drops
+#   on_reconnect: true     # a tunnel/VPN recovers after being down
+#   on_auto_pause: true    # auto_pause_threshold triggers a pause
+#   sound: false           # play the OS default notification sound too

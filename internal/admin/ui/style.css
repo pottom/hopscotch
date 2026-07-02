@@ -719,6 +719,46 @@ main, main.main {
 .routes-save-ok      { color: var(--connected); }
 .routes-save-error   { color: var(--disconnected); }
 
+/* ── SETTINGS PANEL ──────────────────────── */
+.settings-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem 1.75rem;
+  max-width: 28rem;
+}
+
+.settings-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settings-hint {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-top: -0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.settings-row input[type="checkbox"] { cursor: pointer; }
+.settings-row-disabled { color: var(--muted); }
+.settings-row-disabled input[type="checkbox"] { cursor: default; }
+
+.settings-save-status { font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace; font-size: 0.7rem; margin-top: 0.25rem; }
+.settings-save-ok     { color: var(--connected); }
+.settings-save-error  { color: var(--disconnected); }
+
 /* ── Edit row animation ──────────────────── */
 @keyframes rules-row-in {
   from { opacity: 0; transform: translateX(-6px); }

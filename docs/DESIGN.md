@@ -1,52 +1,69 @@
 # UI Design Spec
 
-## Alapelv: TUI ↔ Web UI paritás
+## Core principle: TUI ↔ Web UI parity
 
-A TUI és a web UI **megjelenésben és viselkedésben a lehetőségekhez mérten egyforma legyen.** Ez azt jelenti:
+The TUI and the web UI **must look and behave identically wherever feasible.** This means:
 
-- Azonos színek (hex értékek szintjén)
-- Azonos szövegek, prefixek, ikonok
-- Azonos sorrend és elrendezés
-- Azonos állapot-jelzések és logika
+- Identical colors (down to the hex value)
+- Identical text, prefixes, icons
+- Identical ordering and layout
+- Identical status indicators and logic
 
-Ha valamelyik felületen változtatás történik — akár szín, akár szöveg, akár új elem — **automatikusan el kell végezni a változtatást a másik felületen is.** Nem kell külön szólni érte.
+If a change is made on one surface — whether a color, a text, or a new element — **it must automatically be carried over to the other surface as well.** No separate request is needed for that.
 
-Kivételek (ahol technikai kényszernél elfogadható az eltérés):
-- Interakciós elemek (billentyűkezelés TUI-ban, hover/kattintás web UI-ban)
-- Animációk (TUI-ban korlátozott)
-- Elválasztók stílusa (TUI = szóköz, web UI = `·`)
-- Tördelés és igazítás (terminál karakterrács vs. CSS flexbox)
+Exceptions (where a divergence is acceptable due to a technical constraint):
+- Interaction elements (keyboard handling in the TUI, hover/click in the web UI)
+- Animations (limited in the TUI)
+- Separator style (TUI = space, web UI = `·`)
+- Wrapping and alignment (terminal character grid vs. CSS flexbox)
 
-Ez a dokumentum a kanonikus referencia. Ha valami itt nincs leírva de eltérés van a két felület között, azt hibának kell tekinteni.
+This document is the canonical reference. If something isn't documented here but a divergence exists between the two surfaces, that must be treated as a bug.
+
+---
+
+## Settings tab — native desktop notification toggles
+
+The `notifications` config is live-editable on both surfaces, on a fourth
+"Settings" tab (`Status` / `Rules` / `Logs` / `Settings`). Five checkboxes:
+`Enabled`, `Notify on disconnect`, `Notify on reconnect`, `Notify on
+auto-pause`, `Play sound`. The checkboxes are subordinate to `Enabled` — when
+it's off, the other four are inactive/dimmed (`var(--muted)` / TUI
+`styleMuted`), with identical logic on both surfaces.
+
+Saves immediately on toggle (no separate "Edit"/"Save" button, unlike the
+Rules tab) — `PUT /api/notifications`, which persists to `config.yaml` and
+applies live to the running daemon (no restart needed). TUI: `↑↓`/`jk` moves
+the cursor, `space`/`enter` toggles. Web UI: native checkbox with `x-model`,
+saved on every `@change`. See `internal/notify/AGENTS.md`, `internal/admin/AGENTS.md`.
 
 ---
 
 ## Header
 
-**Kanonikus sorrend (bal → jobb):**
+**Canonical order (left → right):**
 
 ```
 hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface localIP / ○ no link]  [⊕ internet publicIP / ○ no internet]  PID XXXXX  up Xh Xm
 ```
 
-| Elem | Mindig látható | Feltétel |
+| Element | Always visible | Condition |
 |------|---------------|----------|
-| `hopscotch vX.Y.Z` | igen | — |
-| `⚡X.Y.Z` (update badge) | nem | ha elérhető újabb verzió |
-| status badge (`healthy` / `degraded` / ...) | igen | — |
-| `● iface localIP` / `○ no link` | igen | uplink állapot alapján; localIP = az interface helyi IP-je; piros ha nincs link |
-| `⊕ internet publicIP` | nem | ha `admin.show_public_ip: true` és van internet |
-| `○ no internet` | nem | ha link van de internet nincs (`admin.show_public_ip: true`) |
-| `PID XXXXX` | igen | — |
-| `up Xh Xm` | igen | — |
+| `hopscotch vX.Y.Z` | yes | — |
+| `⚡X.Y.Z` (update badge) | no | when a newer version is available |
+| status badge (`healthy` / `degraded` / ...) | yes | — |
+| `● iface localIP` / `○ no link` | yes | based on uplink state; localIP = the interface's local IP; red if there's no link |
+| `⊕ internet publicIP` | no | when `admin.show_public_ip: true` and internet is available |
+| `○ no internet` | no | when there's a link but no internet (`admin.show_public_ip: true`) |
+| `PID XXXXX` | yes | — |
+| `up Xh Xm` | yes | — |
 
-**Elválasztó:** TUI = két szóköz, web UI = `·` karakter.
+**Separator:** TUI = two spaces, web UI = `·` character.
 
 ---
 
-## Status tábla — Name oszlop színei
+## Status table — Name column colors
 
-| Sor típusa | Szín | Hex |
+| Row type | Color | Hex |
 |------------|------|-----|
 | VPN | teal | `#2dd4bf` |
 | Tunnel | sky blue | `#38bdf8` |
@@ -54,40 +71,40 @@ hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface localIP / ○ no link]  
 
 ---
 
-## Status tábla — Host / Iface oszlop
+## Status table — Host / Iface column
 
-Mindkét felületen: `var(--muted)` / `colorMuted (#475569)`.
-
----
-
-## Status tábla — VPN oszlop (tunnel sorokban)
-
-Formátum: `● vpnname` ha connected, `○ vpnname` ha nem.
-
-Szín: a VPN aktuális állapota alapján (`colorConnected` / `colorConnecting` / `colorDisconnected`).
+Both surfaces: `var(--muted)` / `colorMuted (#475569)`.
 
 ---
 
-## Status tábla — Cursor és reconnect
+## Status table — VPN column (in tunnel rows)
 
-A status táblában van egy cursor (`statusCursor`), ami megmutatja, melyik tunnel van kiválasztva az `r` (reconnect) akcióhoz.
+Format: `● vpnname` if connected, `○ vpnname` if not.
 
-| Elem | Megjelenés |
+Color: based on the VPN's current state (`colorConnected` / `colorConnecting` / `colorDisconnected`).
+
+---
+
+## Status table — Cursor and reconnect
+
+The status table has a cursor (`statusCursor`) that shows which tunnel is selected for the `r` (reconnect) action.
+
+| Element | Appearance |
 |------|-----------|
-| Kiválasztott sor prefix | `> ` amber / `colorConnecting (#fbbf24)` |
-| Nem kiválasztott prefix | `  ` (két szóköz) |
+| Selected row prefix | `> ` amber / `colorConnecting (#fbbf24)` |
+| Unselected prefix | `  ` (two spaces) |
 
-A viewport automatikusan scrollozik a cursor pozícióhoz (`lineOffsetForCursor()`). A cursor nem teker: az első tunnelnél `k`/`↑` nem csinál semmit, az utolsónál `j`/`↓` sem.
+The viewport automatically scrolls to the cursor position (`lineOffsetForCursor()`). The cursor doesn't wrap: `k`/`↑` does nothing on the first tunnel, and neither does `j`/`↓` on the last.
 
-Web UI-ban: ↻ gomb, hover-reveal (soronként, jobb szélén). Szín: `var(--muted)` alapból, `var(--accent)` hoveroláskor.
+In the web UI: a ↻ button, hover-reveal (per row, on the right edge). Color: `var(--muted)` by default, `var(--accent)` on hover.
 
 ---
 
-## Status tábla — ↓ / ↑ oszlopok (forgalom)
+## Status table — ↓ / ↑ columns (traffic)
 
-A táblában a ↓/↑ oszlopok **kumulatív összeget** mutatnak (process start óta):
+In the table, the ↓/↑ columns show a **cumulative total** (since process start):
 
-| Érték | Megjelenítés |
+| Value | Display |
 |-------|-------------|
 | 0 | `—` |
 | < 1 KB | `X B` |
@@ -95,48 +112,48 @@ A táblában a ↓/↑ oszlopok **kumulatív összeget** mutatnak (process start
 | < 1 GB | `X.X MB` |
 | ≥ 1 GB | `X.X GB` |
 
-Oszlopfejléc: `↓ TOTAL` / `↑ TOTAL`.
+Column header: `↓ TOTAL` / `↑ TOTAL`.
 
-A másodpercenkénti sebesség (bps) kizárólag a grafikonterületen jelenik meg — a grafikon első sora (non-compact módban) a `↓ X B/s  ↑ X B/s` sor a braille grafikon felett. Web UI-ban a kibontott graph-row-ban `#bps-bar-{name}` div. Szín: `colorBpsIn (#38bdf8)` / `colorBpsOut (#818cf8)`.
+The per-second rate (bps) is shown exclusively in the graph area — the graph's first row (in non-compact mode) is the `↓ X B/s  ↑ X B/s` line above the braille graph. In the web UI, the `#bps-bar-{name}` div in the expanded graph row. Color: `colorBpsIn (#38bdf8)` / `colorBpsOut (#818cf8)`.
 
 ---
 
-## Status tábla — Error/progress sub-row
+## Status table — Error/progress sub-row
 
-Minden tunnel és VPN sor alatt jelenik meg ha `last_error` nem üres és az állapot nem `connected`.
+Appears under every tunnel and VPN row when `last_error` is non-empty and the state isn't `connected`.
 
-| Típus | Prefix | Szín |
+| Type | Prefix | Color |
 |-------|--------|------|
 | Progress (waiting for...) | `◌ ` | amber / `var(--connecting)` |
 | Error | `└ ✗ ` | red / `var(--disconnected)` |
 
-Root cause propagáció: ha tunnel `last_error = "waiting for VPN: X"` és VPN X-nek van saját `last_error`-ja, azt kell megjeleníteni (nem a "waiting for VPN: X" szöveget).
+Root-cause propagation: if a tunnel has `last_error = "waiting for VPN: X"` and VPN X has its own `last_error`, that one must be displayed (not the "waiting for VPN: X" text).
 
 ---
 
-## Status tábla — Reconnect timer szöveg
+## Status table — Reconnect timer text
 
 ```
 ○ next try: Xs
 ```
 
-Mindkét felületen azonos szöveg. TUI: `renderStatus()`, web UI: `tunnelStatusHtml()` / `vpnStatusHtml()`.
+Identical text on both surfaces. TUI: `renderStatus()`, web UI: `tunnelStatusHtml()` / `vpnStatusHtml()`.
 
 ---
 
-## Status tábla — Paused szöveg (kézi vs. auto-pause)
+## Status table — Paused text (manual vs. auto-pause)
 
 ```
-⏸ paused           ← kézi pause (TUI/web UI-ból)
-⏸ paused (auto)    ← auto_pause_threshold triggerelte
+⏸ paused           ← manual pause (from TUI/web UI)
+⏸ paused (auto)    ← triggered by auto_pause_threshold
 ```
 
-Az `(auto)` jelző csak akkor jelenik meg, ha a pause-t az app maga csinálta
-(`auto_pause_threshold` elérése miatt), nem a felhasználó. Emellett a
-threshold-hoz közeledve (connecting/disconnected állapotban, még pause előtt)
-mindkét felület megjeleníti a `⚠N/threshold` szám-jelzést is.
+The `(auto)` indicator only appears when the app itself triggered the pause
+(due to reaching `auto_pause_threshold`), not the user. In addition, as the
+threshold is approached (in the connecting/disconnected state, before the
+pause), both surfaces also show the `⚠N/threshold` count indicator.
 
-Mindkét felületen azonos szöveg/logika. TUI: `renderStatus()`, web UI:
+Identical text/logic on both surfaces. TUI: `renderStatus()`, web UI:
 `tunnelStatusHtml()` / `vpnStatusHtml()`.
 
 ---
@@ -147,57 +164,57 @@ Mindkét felületen azonos szöveg/logika. TUI: `renderStatus()`, web UI:
 [hints]                                           PROXY bind:port  ADMIN bind:port
 ```
 
-A hints sor felette, a port sor alatta, jobbra igazítva.
+The hints line above, the ports line below, right-aligned.
 
 ---
 
-## Logs tab — filter sor
+## Logs tab — filter row
 
-A Logs tab fejlécében két sor van a viewport felett:
+The Logs tab header has two rows above the viewport:
 
-**1. sor — severity + source badge-ek:**
+**Row 1 — severity + source badges:**
 ```
   INFO+   TUNNEL  ·  VPN  ·  PROXY  ·  SYS
 ```
 
-| Elem | Aktív | Inaktív |
+| Element | Active | Inactive |
 |------|-------|---------|
 | Severity (ALL / INFO+ / WARN+ / ERR) | `colorAccent (#38bdf8)` | — |
 | Source badge (TUNNEL / VPN / PROXY / SYS) | `colorVPN (#2dd4bf)`, bold | `colorMuted (#475569)` |
 
-**2. sor — szövegszűrő input:**
+**Row 2 — text filter input:**
 ```
   / Filter… — Ctrl+N to clear
 ```
 
-Fókuszált állapotban a `/` prefix `colorAccent`; fókuszon kívül `colorMuted`.
+When focused, the `/` prefix is `colorAccent`; when unfocused, `colorMuted`.
 
-**Billentyűk (Logs tab):**
+**Keys (Logs tab):**
 
-| Billentyű | Hatás |
+| Key | Effect |
 |-----------|-------|
-| `l` | Severity ciklus: ALL → INFO+ → WARN+ → ERR |
-| `t` / `v` / `p` / `s` | Forrás toggle: tunnel / vpn / proxy / system |
-| `/` | Szövegszűrő aktiválása |
-| `Esc` | Szövegszűrő elhagyása |
-| `Ctrl+N` | Szövegszűrő törlése |
+| `l` | Severity cycle: ALL → INFO+ → WARN+ → ERR |
+| `t` / `v` / `p` / `s` | Source toggle: tunnel / vpn / proxy / system |
+| `/` | Activate text filter |
+| `Esc` | Leave text filter |
+| `Ctrl+N` | Clear text filter |
 
-**AND logika:** mind a három szűrő (`level`, `source`, `grep`) egyszerre érvényes. Legalább egy source mindig aktív marad.
+**AND logic:** all three filters (`level`, `source`, `grep`) apply simultaneously. At least one source always stays active.
 
-**Web UI megfelelők:** severity chipek (kék), source chipek (teal), Filter… input — azonos vizuális logika.
+**Web UI equivalents:** severity chips (blue), source chips (teal), Filter… input — identical visual logic.
 
 ---
 
-## Színpaletta
+## Color palette
 
-| Változó | Hex | Szerep |
+| Variable | Hex | Role |
 |---------|-----|--------|
-| `--connected` / `colorConnected` | `#34d399` | connected állapot |
+| `--connected` / `colorConnected` | `#34d399` | connected state |
 | `--connecting` / `colorConnecting` | `#fbbf24` | connecting / progress |
 | `--disconnected` / `colorDisconnected` | `#f87171` | error / disconnected |
-| `--accent` / `colorAccent` | `#38bdf8` | tunnel nevek, aktív tab |
-| `colorVPN` | `#2dd4bf` | VPN nevek |
-| `colorDirect` | `#a78bfa` | direct sor/via |
-| `--muted` / `colorMuted` | `#475569` | másodlagos szöveg |
-| `colorBpsIn` | `#38bdf8` | bejövő forgalom |
-| `colorBpsOut` | `#818cf8` | kimenő forgalom |
+| `--accent` / `colorAccent` | `#38bdf8` | tunnel names, active tab |
+| `colorVPN` | `#2dd4bf` | VPN names |
+| `colorDirect` | `#a78bfa` | direct row/via |
+| `--muted` / `colorMuted` | `#475569` | secondary text |
+| `colorBpsIn` | `#38bdf8` | inbound traffic |
+| `colorBpsOut` | `#818cf8` | outbound traffic |

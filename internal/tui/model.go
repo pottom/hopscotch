@@ -72,10 +72,11 @@ var (
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 const (
-	tabStatus = 0
-	tabRoutes = 1
-	tabLogs   = 2
-	numTabs   = 3
+	tabStatus   = 0
+	tabRoutes   = 1
+	tabLogs     = 2
+	tabSettings = 3
+	numTabs     = 4
 )
 
 // headerLines returns the number of header lines for the current terminal width.
@@ -299,6 +300,9 @@ type errMsg error
 type tickMsg time.Time
 type rulesSavedMsg struct{}
 type rulesSaveErrMsg struct{ err error }
+
+type settingsSavedMsg struct{}
+type settingsSaveErrMsg struct{ err error }
 type reconnectResultMsg struct{}
 
 // editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
@@ -368,6 +372,13 @@ type Model struct {
 	editCmtFocused bool
 	editError      string
 	editSaving     bool
+
+	// Settings tab (notification toggles)
+	settingsVP      viewport.Model
+	settingsVPReady bool
+	settingsCursor  int
+	settingsSaving  bool
+	settingsError   string
 
 	tick         int
 	width        int
@@ -736,6 +747,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.resizeViewports()
 			return m, nil
 
+		case "4":
+			m.activeTab = tabSettings
+			m = m.resizeViewports()
+			return m, nil
+
 		case "e", "E":
 			if m.activeTab == tabRoutes {
 				m.editMode = true
@@ -900,6 +916,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+			if m.activeTab == tabSettings {
+				if m.settingsCursor > 0 {
+					m.settingsCursor--
+				}
+				if m.settingsVPReady {
+					m.settingsVP.SetContent(m.buildSettingsContent())
+				}
+				return m, nil
+			}
 			if m.activeTab == tabLogs && m.logVPReady {
 				m.logVP, cmd = m.logVP.Update(msg)
 			} else if m.activeTab == tabRoutes && m.routeVPReady {
@@ -922,6 +947,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+			if m.activeTab == tabSettings {
+				if m.settingsCursor < len(settingsRows)-1 {
+					m.settingsCursor++
+				}
+				if m.settingsVPReady {
+					m.settingsVP.SetContent(m.buildSettingsContent())
+				}
+				return m, nil
+			}
 			if m.activeTab == tabLogs && m.logVPReady {
 				m.logVP, cmd = m.logVP.Update(msg)
 			} else if m.activeTab == tabRoutes && m.routeVPReady {
@@ -930,6 +964,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.vp, cmd = m.vp.Update(msg)
 			}
 			return m, cmd
+
+		case "enter", " ":
+			if m.activeTab == tabSettings {
+				return m.toggleSettingsRow()
+			}
+			return m, nil
 
 		case "r", "R":
 			if m.activeTab == tabStatus && m.statusItemCount() > 0 {
@@ -979,6 +1019,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logVP, cmd = m.logVP.Update(msg)
 			} else if m.activeTab == tabRoutes && m.routeVPReady {
 				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.activeTab == tabSettings && m.settingsVPReady {
+				m.settingsVP, cmd = m.settingsVP.Update(msg)
 			}
 			return m, cmd
 		}
@@ -1003,6 +1045,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.routeVP.SetContent(m.buildRoutesEditContent())
 		}
 
+	case settingsSavedMsg:
+		m.settingsSaving = false
+		m.settingsError = ""
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
+		}
+
+	case settingsSaveErrMsg:
+		m.settingsSaving = false
+		m.settingsError = msg.err.Error()
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
+		}
+
 	case loginRequiredMsg:
 		m.err = fmt.Errorf("unauthorized — use: hopscotch status --username USER --password PASS")
 		return m, tea.Quit
@@ -1012,7 +1068,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchStatus(m.adminURL, m.httpClient)
 
 	case statusMsg:
+		prevNotifications := m.status.Notifications
 		m.status = admin.StatusResponse(msg)
+		if m.settingsSaving {
+			// Don't let a poll that raced the in-flight PUT roll back the
+			// just-toggled value before the save response arrives.
+			m.status.Notifications = prevNotifications
+		}
 		m.err = nil
 		m.ready = true
 		// Clamp cursor to valid range when tunnels/VPNs change.
@@ -1039,6 +1101,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.routeVPReady && !m.editMode {
 			m.routeVP.SetContent(m.buildRoutesContent())
+		}
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
 		}
 
 	case sseMsg:
@@ -1158,6 +1223,15 @@ func (m Model) resizeViewports() Model {
 	}
 	m.routeVP.SetContent(m.buildRoutesContent())
 
+	if !m.settingsVPReady {
+		m.settingsVP = viewport.New(m.width, vpH)
+		m.settingsVPReady = true
+	} else {
+		m.settingsVP.Width = m.width
+		m.settingsVP.Height = vpH
+	}
+	m.settingsVP.SetContent(m.buildSettingsContent())
+
 	return m
 }
 
@@ -1184,6 +1258,8 @@ func (m Model) View() string {
 		vp = m.logVP.View()
 	case tabRoutes:
 		vp = m.routeVP.View()
+	case tabSettings:
+		vp = m.settingsVP.View()
 	}
 	return m.renderHeader() + vp + m.renderFooter()
 }
@@ -1267,6 +1343,7 @@ func (m Model) renderTabBar() string {
 		{"Status", tabStatus},
 		{"Rules", tabRoutes},
 		{"Logs", tabLogs},
+		{"Settings", tabSettings},
 	}
 	var parts []string
 	for _, t := range tabs {
@@ -1288,6 +1365,8 @@ func (m Model) renderHeader() string {
 
 	switch m.activeTab {
 	case tabStatus:
+		fmt.Fprintf(&b, "\n")
+	case tabSettings:
 		fmt.Fprintf(&b, "\n")
 	case tabRoutes:
 		if m.editMode {
@@ -1361,8 +1440,12 @@ func (m Model) renderHeader() string {
 
 // renderFooter returns a single-line bar: hints on the left, ports on the right.
 func (m Model) renderFooter() string {
-	hints := "q quit  tab/1/2/3 switch"
-	if m.activeTab != tabStatus || m.statusItemCount() == 0 {
+	hints := "q quit  tab/1/2/3/4 switch"
+	if m.activeTab == tabStatus {
+		if m.statusItemCount() == 0 {
+			hints += "  ↑↓/jk scroll"
+		}
+	} else if m.activeTab != tabSettings {
 		hints += "  ↑↓/jk scroll"
 	}
 	if m.activeTab == tabRoutes {
@@ -1392,6 +1475,9 @@ func (m Model) renderFooter() string {
 			hints += "  ↑↓/jk cursor  r reconnect  p pause/resume"
 		}
 	}
+	if m.activeTab == tabSettings {
+		hints += "  ↑↓/jk cursor  space/enter toggle"
+	}
 
 	activeVP := m.vp
 	switch m.activeTab {
@@ -1399,6 +1485,8 @@ func (m Model) renderFooter() string {
 		activeVP = m.logVP
 	case tabRoutes:
 		activeVP = m.routeVP
+	case tabSettings:
+		activeVP = m.settingsVP
 	}
 	if !activeVP.AtBottom() {
 		hints += "  ↓"
@@ -1822,6 +1910,110 @@ func (m Model) saveRulesCmd() tea.Cmd {
 			return rulesSaveErrMsg{fmt.Errorf("%s", strings.TrimSpace(string(msg[:n])))}
 		}
 		return rulesSavedMsg{}
+	}
+}
+
+// settingsRows describes the 5 fixed toggle rows on the Settings tab, in
+// display order. Cursor index maps directly into this slice.
+type settingsRow struct {
+	label string
+	get   func(admin.NotificationsJSON) bool
+	set   func(*admin.NotificationsJSON, bool)
+}
+
+var settingsRows = []settingsRow{
+	{"Enabled", func(n admin.NotificationsJSON) bool { return n.Enabled }, func(n *admin.NotificationsJSON, v bool) { n.Enabled = v }},
+	{"Notify on disconnect", func(n admin.NotificationsJSON) bool { return n.OnDisconnect }, func(n *admin.NotificationsJSON, v bool) { n.OnDisconnect = v }},
+	{"Notify on reconnect", func(n admin.NotificationsJSON) bool { return n.OnReconnect }, func(n *admin.NotificationsJSON, v bool) { n.OnReconnect = v }},
+	{"Notify on auto-pause", func(n admin.NotificationsJSON) bool { return n.OnAutoPause }, func(n *admin.NotificationsJSON, v bool) { n.OnAutoPause = v }},
+	{"Play sound", func(n admin.NotificationsJSON) bool { return n.Sound }, func(n *admin.NotificationsJSON, v bool) { n.Sound = v }},
+}
+
+// buildSettingsContent renders the Settings tab: a checkbox list of
+// notification toggles. Rows below "Enabled" are dimmed and non-interactive
+// when it's off, mirroring the web UI's disabled checkboxes (see docs/DESIGN.md).
+func (m Model) buildSettingsContent() string {
+	n := m.status.Notifications
+	var b strings.Builder
+	b.WriteString("\n")
+	for i, row := range settingsRows {
+		prefix := "  "
+		if i == m.settingsCursor {
+			prefix = styleTabActive.Render("> ")
+		}
+		box := "[ ]"
+		if row.get(n) {
+			box = "[x]"
+		}
+		label := fmt.Sprintf("%s %s", box, row.label)
+		if i > 0 && !n.Enabled {
+			label = styleMuted.Render(label)
+		} else {
+			label = styleText.Render(label)
+		}
+		fmt.Fprintf(&b, "  %s%s\n", prefix, label)
+	}
+	b.WriteString("\n")
+	if m.settingsSaving {
+		b.WriteString("  " + styleConnecting.Render("saving…") + "\n")
+	} else if m.settingsError != "" {
+		b.WriteString("  " + styleDisconnected.Render("✗ "+m.settingsError) + "\n")
+	}
+	return b.String()
+}
+
+// toggleSettingsRow toggles the row at the cursor (unless it's a disabled
+// sub-option) and returns the updated model plus a Cmd that persists it.
+// Value receiver returning (Model, tea.Cmd) so callers can `return
+// m.toggleSettingsRow()` directly — a pointer-receiver mutator combined with
+// `return m, m.toggleSettingsRow()` would evaluate the bare `m` before the
+// mutation, silently dropping the toggle.
+func (m Model) toggleSettingsRow() (Model, tea.Cmd) {
+	if m.settingsCursor >= len(settingsRows) {
+		return m, nil
+	}
+	row := settingsRows[m.settingsCursor]
+	n := m.status.Notifications
+	if m.settingsCursor > 0 && !n.Enabled {
+		return m, nil // sub-options are inert while the master switch is off
+	}
+	row.set(&n, !row.get(n))
+	m.status.Notifications = n
+	m.settingsSaving = true
+	m.settingsError = ""
+	if m.settingsVPReady {
+		m.settingsVP.SetContent(m.buildSettingsContent())
+	}
+	return m, m.saveSettingsCmd()
+}
+
+// saveSettingsCmd returns a Cmd that PUTs the current notification settings
+// to the admin API — applied live and persisted to config.yaml server-side.
+func (m Model) saveSettingsCmd() tea.Cmd {
+	n := m.status.Notifications
+	settingsURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/notifications"
+	client := m.httpClient
+	return func() tea.Msg {
+		body, err := json.Marshal(n)
+		if err != nil {
+			return settingsSaveErrMsg{err}
+		}
+		req, err := http.NewRequest(http.MethodPut, settingsURL, bytes.NewReader(body))
+		if err != nil {
+			return settingsSaveErrMsg{err}
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := client.Do(req)
+		if err != nil {
+			return settingsSaveErrMsg{err}
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			var msg [256]byte
+			n, _ := res.Body.Read(msg[:])
+			return settingsSaveErrMsg{fmt.Errorf("%s", strings.TrimSpace(string(msg[:n])))}
+		}
+		return settingsSavedMsg{}
 	}
 }
 

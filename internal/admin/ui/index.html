@@ -67,6 +67,7 @@
   <a class="active" data-tab="status" href="#" onclick="switchTab('status');return false">Status</a>
   <a data-tab="patterns"  href="#" onclick="switchTab('patterns');return false">Rules</a>
   <a data-tab="logs"    href="#" onclick="switchTab('logs');return false">Logs</a>
+  <a data-tab="settings" href="#" onclick="switchTab('settings');return false">Settings</a>
   <a data-tab="docs"    href="#" onclick="switchTab('docs');return false">Docs</a>
 </nav>
 
@@ -183,6 +184,37 @@
         </tbody>
       </table>
     </div>
+  </div>
+</div>
+
+<!-- ── SETTINGS TAB ───────────────────────────────────────────────────────── -->
+<div id="panel-settings" class="tab-panel">
+  <div class="settings-wrap">
+    <div class="settings-label">Desktop notifications</div>
+    <div class="settings-hint">Native OS notifications on tunnel/VPN status changes. Changes save immediately.</div>
+
+    <label class="settings-row">
+      <input type="checkbox" x-model="$store.hop.notifications.enabled" @change="saveNotifications()">
+      <span>Enabled</span>
+    </label>
+    <label class="settings-row" :class="{ 'settings-row-disabled': !$store.hop.notifications.enabled }">
+      <input type="checkbox" x-model="$store.hop.notifications.on_disconnect" :disabled="!$store.hop.notifications.enabled" @change="saveNotifications()">
+      <span>Notify on disconnect</span>
+    </label>
+    <label class="settings-row" :class="{ 'settings-row-disabled': !$store.hop.notifications.enabled }">
+      <input type="checkbox" x-model="$store.hop.notifications.on_reconnect" :disabled="!$store.hop.notifications.enabled" @change="saveNotifications()">
+      <span>Notify on reconnect</span>
+    </label>
+    <label class="settings-row" :class="{ 'settings-row-disabled': !$store.hop.notifications.enabled }">
+      <input type="checkbox" x-model="$store.hop.notifications.on_auto_pause" :disabled="!$store.hop.notifications.enabled" @change="saveNotifications()">
+      <span>Notify on auto-pause</span>
+    </label>
+    <label class="settings-row" :class="{ 'settings-row-disabled': !$store.hop.notifications.enabled }">
+      <input type="checkbox" x-model="$store.hop.notifications.sound" :disabled="!$store.hop.notifications.enabled" @change="saveNotifications()">
+      <span>Play sound</span>
+    </label>
+
+    <span id="settings-save-status" class="settings-save-status"></span>
   </div>
 </div>
 

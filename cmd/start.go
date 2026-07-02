@@ -17,8 +17,9 @@ import (
 
 	"github.com/pottom/hopscotch/internal/admin"
 	"github.com/pottom/hopscotch/internal/config"
-	"github.com/pottom/hopscotch/internal/proxy"
 	"github.com/pottom/hopscotch/internal/netcheck"
+	"github.com/pottom/hopscotch/internal/notify"
+	"github.com/pottom/hopscotch/internal/proxy"
 	"github.com/pottom/hopscotch/internal/security"
 	"github.com/pottom/hopscotch/internal/state"
 	"github.com/pottom/hopscotch/internal/tunnel"
@@ -129,7 +130,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 		vpnStatter = vpnMgr
 		vpnReconnecter = vpnMgr
 	}
-	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent, cfg, router, mgr, vpnReconnecter, proxySrv.AuthEnabled(), pausedTracker)
+	notifier := notify.New(cfg.Notifications)
+	adminSrv := admin.NewServer(cfg.Admin.Bind, cfg.Admin.Port, cfg.Proxy.Port, mgr, vpnStatter, router, router, ReadmeContent, cfg, router, mgr, vpnReconnecter, proxySrv.AuthEnabled(), pausedTracker, notifier)
 
 	go config.WatchSIGHUP(ctx, cfg, func(old, next *config.Config) {
 		mgr.ApplyConfig(ctx, next.Tunnels)
@@ -184,6 +186,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 	g.Go(func() error { return mgr.Run(ctx) })
 	g.Go(func() error { return proxySrv.ListenAndServe(ctx) })
 	g.Go(func() error { return adminSrv.ListenAndServe(ctx) })
+
+	// Always run: notifier itself gates on cfg.Enabled per-call, and that
+	// config is live-editable (Settings tab), so the poller must already be
+	// running for a later toggle-on to take effect without a restart.
+	g.Go(func() error { return notify.Watch(ctx, notifier, mgr, vpnStatter, time.Second) })
 
 	return g.Wait()
 }
@@ -270,4 +277,3 @@ func isRunning(pid int) bool {
 	}
 	return proc.Signal(syscall.Signal(0)) == nil
 }
-

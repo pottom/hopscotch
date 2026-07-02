@@ -443,6 +443,7 @@ document.addEventListener('alpine:init', () => {
     vpns:    {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
+    notifications: { enabled: false, on_disconnect: false, on_reconnect: false, on_auto_pause: false, sound: false },
     meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', proxy_auth_enabled: false, admin_port: 0, admin_bind: '', admin_auth_enabled: false, status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
 
     tunnelList() {
@@ -568,6 +569,10 @@ async function refreshStatus() {
     store.vpns = nextVpns;
 
     store.routes = st.routes || [];
+
+    if (!notificationsSaving && st.notifications) {
+      store.notifications = st.notifications;
+    }
 
     if (TAB_INIT['patterns'] && !rulesEditMode) {
       const testerVal = document.getElementById('routes-tester-input')?.value || '';
@@ -1352,6 +1357,40 @@ window.routesTesterUpdate = function(input) {
     }
   }
   renderRoutesTable(matchIdx);
+};
+
+// ── Settings tab ──────────────────────────────────────────────────────────────
+
+// Guards refreshStatus() from overwriting an in-flight optimistic toggle with
+// a stale poll response before the PUT below has completed.
+let notificationsSaving = false;
+
+window.saveNotifications = async function() {
+  const store  = Alpine.store('hop');
+  const status = document.getElementById('settings-save-status');
+  notificationsSaving = true;
+  if (status) { status.textContent = 'Saving…'; status.className = 'settings-save-status'; }
+  try {
+    const res = await fetch('/api/notifications', {
+      method:  'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(store.notifications),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      if (status) { status.textContent = 'Error: ' + txt.trim(); status.className = 'settings-save-status settings-save-error'; }
+      return;
+    }
+    if (status) {
+      status.textContent = 'Saved ✓';
+      status.className   = 'settings-save-status settings-save-ok';
+      setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = ''; }, 1500);
+    }
+  } catch {
+    if (status) { status.textContent = 'Network error'; status.className = 'settings-save-status settings-save-error'; }
+  } finally {
+    notificationsSaving = false;
+  }
 };
 
 // ── Docs tab ──────────────────────────────────────────────────────────────────

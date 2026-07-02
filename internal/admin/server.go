@@ -42,6 +42,17 @@ type VPNStatter interface {
 	AllStats() map[string]vpn.Stats
 }
 
+// NotifyController is the admin server's only contract with internal/notify:
+// suppressing manual-reconnect false positives (see internal/admin/AGENTS.md)
+// and reading/writing the live notification settings for the Settings tab
+// (TUI and web UI). Implementations must make Suppress a no-op when
+// notifications are disabled (*notify.Notifier does).
+type NotifyController interface {
+	Suppress(kind, name string)
+	Config() config.NotificationsConfig
+	SetConfig(cfg config.NotificationsConfig)
+}
+
 const sessionCookie = "hs_session"
 
 // Server is the HTTP admin server.
@@ -65,6 +76,7 @@ type Server struct {
 	reconnecter      TunnelReconnecter
 	vpnReconnecter   VPNReconnecter // nil when no VPNs configured
 	pausedTracker    *state.PausedTracker
+	notifyCtl        NotifyController
 	// admin auth — empty means no auth required
 	adminUsername string
 	adminPassword string
@@ -73,7 +85,7 @@ type Server struct {
 
 // NewServer creates an admin Server. Only bind "127.0.0.1" unless the config
 // explicitly sets admin.bind to allow external access (needed in containers).
-func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater, reconnecter TunnelReconnecter, vpnReconnecter VPNReconnecter, proxyAuthEnabled bool, pausedTracker *state.PausedTracker) *Server {
+func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPNStatter, direct DirectStatter, routes RouteStatter, readme []byte, cfg *config.Config, ruleUpdater RuleUpdater, reconnecter TunnelReconnecter, vpnReconnecter VPNReconnecter, proxyAuthEnabled bool, pausedTracker *state.PausedTracker, notifyCtl NotifyController) *Server {
 	var sessionToken string
 	if cfg.Admin.Username != "" {
 		b := make([]byte, 32)
@@ -99,6 +111,7 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPN
 		reconnecter:      reconnecter,
 		vpnReconnecter:   vpnReconnecter,
 		pausedTracker:    pausedTracker,
+		notifyCtl:        notifyCtl,
 		adminUsername:    cfg.Admin.Username,
 		adminPassword:    cfg.Admin.Password,
 		sessionToken:     sessionToken,
@@ -161,6 +174,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	protected.HandleFunc("GET /traffic/stream", s.handleTrafficStream)
 	protected.HandleFunc("GET /logs/stream", s.handleLogStream)
 	protected.HandleFunc("PUT /api/rules", s.handleRules)
+	protected.HandleFunc("PUT /api/notifications", s.handlePutNotifications)
 	protected.HandleFunc("GET /api/validate-pattern", s.handleValidatePattern)
 	protected.HandleFunc("POST /api/tunnels/{name}/reconnect", s.handleTunnelReconnect)
 	protected.HandleFunc("POST /api/tunnels/{name}/pause", s.handleTunnelPause)

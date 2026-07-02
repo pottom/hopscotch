@@ -99,6 +99,7 @@ hopscotch is an SSH tunnel manager with a built-in SOCKS5 proxy router: pattern-
 - [internal/admin/AGENTS.md](internal/admin/AGENTS.md) — HTTP admin server (API, auth, SSE streams)
   - [internal/admin/ui/AGENTS.md](internal/admin/ui/AGENTS.md) — embedded web UI assets
 - [internal/config/AGENTS.md](internal/config/AGENTS.md) — config load/validate/write/reload
+- [internal/notify/AGENTS.md](internal/notify/AGENTS.md) — native OS desktop notifications on meaningful tunnel/VPN state transitions
 - [internal/proxy/AGENTS.md](internal/proxy/AGENTS.md) — SOCKS5 routing
 - [internal/state/AGENTS.md](internal/state/AGENTS.md) — PID file and persisted app state
 - [internal/tui/AGENTS.md](internal/tui/AGENTS.md) — terminal UI
