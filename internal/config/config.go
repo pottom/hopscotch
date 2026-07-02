@@ -28,44 +28,46 @@ func (e *ConfigError) Error() string {
 
 // TunnelConfig describes a single SSH jump-host tunnel.
 type TunnelConfig struct {
-	Name               string `yaml:"name"`
-	Host               string `yaml:"host"`
-	Port               int    `yaml:"port"`
-	User               string `yaml:"user"`
-	IdentityFile       string `yaml:"identity_file"`
-	KnownHostsFile     string `yaml:"known_hosts_file"`
-	LocalPort          int    `yaml:"local_port"`
-	DialTimeout        int    `yaml:"dial_timeout"`        // seconds; SSH TCP + handshake
-	KeepaliveInterval  int    `yaml:"keepalive_interval"`  // seconds between keepalive probes
-	KeepaliveMaxFails  int    `yaml:"keepalive_max_fails"` // consecutive failures before reconnect
-	ReconnectDelay    int  `yaml:"reconnect_delay"`     // initial backoff seconds
-	ReconnectMaxDelay int  `yaml:"reconnect_max_delay"` // backoff cap seconds
-	ForcePTY          bool     `yaml:"force_pty"`           // open a PTY shell session to satisfy SPS/SCB channel policy
-	PTYPokeInterval   int      `yaml:"pty_poke_interval"`   // seconds between synthetic keystrokes on the PTY channel (only when force_pty); keeps SCB session-recording idle timeout from tearing it down
-	RequiresVPN       string   `yaml:"requires_vpn"`        // wait for this VPN before connecting
-	PreConnect        []string `yaml:"pre_connect"`         // commands to run before each dial attempt
+	Name               string   `yaml:"name"`
+	Host               string   `yaml:"host"`
+	Port               int      `yaml:"port"`
+	User               string   `yaml:"user"`
+	IdentityFile       string   `yaml:"identity_file"`
+	KnownHostsFile     string   `yaml:"known_hosts_file"`
+	LocalPort          int      `yaml:"local_port"`
+	DialTimeout        int      `yaml:"dial_timeout"`         // seconds; SSH TCP + handshake
+	KeepaliveInterval  int      `yaml:"keepalive_interval"`   // seconds between keepalive probes
+	KeepaliveMaxFails  int      `yaml:"keepalive_max_fails"`  // consecutive failures before reconnect
+	ReconnectDelay     int      `yaml:"reconnect_delay"`      // initial backoff seconds
+	ReconnectMaxDelay  int      `yaml:"reconnect_max_delay"`  // backoff cap seconds
+	ForcePTY           bool     `yaml:"force_pty"`            // open a PTY shell session to satisfy SPS/SCB channel policy
+	PTYPokeInterval    int      `yaml:"pty_poke_interval"`    // seconds between synthetic keystrokes on the PTY channel (only when force_pty); keeps SCB session-recording idle timeout from tearing it down
+	RequiresVPN        string   `yaml:"requires_vpn"`         // wait for this VPN before connecting
+	PreConnect         []string `yaml:"pre_connect"`          // commands to run before each dial attempt
+	AutoPauseThreshold int      `yaml:"auto_pause_threshold"` // consecutive failed connection attempts before auto-pausing; 0 disables
 }
 
 // VPNConfig describes a VPN connection managed as a subprocess.
 type VPNConfig struct {
-	Name              string   `yaml:"name"`
-	Type              string   `yaml:"type"`         // currently only "openconnect"
-	Server            string   `yaml:"server"`
-	User              string   `yaml:"user"`
-	Binary            string   `yaml:"binary"`       // path to openconnect binary; default: "openconnect" (PATH)
-	AuthGroup         string   `yaml:"authgroup"`    // --authgroup value (Cisco AnyConnect groups)
-	PasswordEnv       string   `yaml:"password_env"` // env var containing the password
-	PasswordCmd       string   `yaml:"password_cmd"` // shell command whose stdout is the password
-	Certificate       string   `yaml:"certificate"`  // path to client cert (cert auth)
-	Key               string   `yaml:"key"`          // path to private key (cert auth)
-	PingHost          string   `yaml:"ping_host"`      // host[:port] TCP-probed to detect connectivity
-	ExtraArgs         []string `yaml:"extra_args"`     // passed through to openconnect verbatim
-	PreConnect        []string `yaml:"pre_connect"`    // commands to run before each connection attempt
-	PostDisconnect    []string `yaml:"post_disconnect"` // commands to run after each VPN disconnect
-	Sudo              bool     `yaml:"sudo"`           // prepend sudo (needed on most platforms)
-	DNSResolver       string   `yaml:"dns_resolver"`   // DNS server for pre-connect hostname resolution; default: 1.1.1.1:53
-	ReconnectDelay    int      `yaml:"reconnect_delay"`
-	ReconnectMaxDelay int      `yaml:"reconnect_max_delay"`
+	Name               string   `yaml:"name"`
+	Type               string   `yaml:"type"` // currently only "openconnect"
+	Server             string   `yaml:"server"`
+	User               string   `yaml:"user"`
+	Binary             string   `yaml:"binary"`          // path to openconnect binary; default: "openconnect" (PATH)
+	AuthGroup          string   `yaml:"authgroup"`       // --authgroup value (Cisco AnyConnect groups)
+	PasswordEnv        string   `yaml:"password_env"`    // env var containing the password
+	PasswordCmd        string   `yaml:"password_cmd"`    // shell command whose stdout is the password
+	Certificate        string   `yaml:"certificate"`     // path to client cert (cert auth)
+	Key                string   `yaml:"key"`             // path to private key (cert auth)
+	PingHost           string   `yaml:"ping_host"`       // host[:port] TCP-probed to detect connectivity
+	ExtraArgs          []string `yaml:"extra_args"`      // passed through to openconnect verbatim
+	PreConnect         []string `yaml:"pre_connect"`     // commands to run before each connection attempt
+	PostDisconnect     []string `yaml:"post_disconnect"` // commands to run after each VPN disconnect
+	Sudo               bool     `yaml:"sudo"`            // prepend sudo (needed on most platforms)
+	DNSResolver        string   `yaml:"dns_resolver"`    // DNS server for pre-connect hostname resolution; default: 1.1.1.1:53
+	ReconnectDelay     int      `yaml:"reconnect_delay"`
+	ReconnectMaxDelay  int      `yaml:"reconnect_max_delay"`
+	AutoPauseThreshold int      `yaml:"auto_pause_threshold"` // consecutive failed connection attempts before auto-pausing; 0 disables
 }
 
 // TargetDirect and TargetBlock are the special target values for routing rules.
@@ -77,16 +79,16 @@ const (
 // Rule maps a host pattern to a tunnel name, "direct", or "block".
 type Rule struct {
 	Pattern string `yaml:"pattern"`
-	Target  string `yaml:"target"`           // tunnel name, "direct", or "block"
+	Target  string `yaml:"target"`            // tunnel name, "direct", or "block"
 	Comment string `yaml:"comment,omitempty"` // optional human note
 }
 
 // ProxyConfig holds the SOCKS5 router configuration.
 type ProxyConfig struct {
 	Port      int    `yaml:"port"`
-	Bind      string `yaml:"bind"`       // listen address; default 0.0.0.0
-	Username  string `yaml:"username"`   // SOCKS5 auth username; leave empty to disable auth
-	Password  string `yaml:"password"`   // SOCKS5 auth password; required when username is set
+	Bind      string `yaml:"bind"`     // listen address; default 0.0.0.0
+	Username  string `yaml:"username"` // SOCKS5 auth username; leave empty to disable auth
+	Password  string `yaml:"password"` // SOCKS5 auth password; required when username is set
 	Rules     []Rule `yaml:"rules"`
 	NoProxy   string `yaml:"no_proxy"`   // passed to NO_PROXY / no_proxy on shell enable
 	ShellIcon string `yaml:"shell_icon"` // icon shown in HOPSCOTCH_ACTIVE; default ⇢
@@ -96,8 +98,8 @@ type ProxyConfig struct {
 type AdminConfig struct {
 	Port         int    `yaml:"port"`
 	Bind         string `yaml:"bind"`
-	Username     string `yaml:"username"`     // HTTP Basic Auth username; leave empty to disable
-	Password     string `yaml:"password"`     // HTTP Basic Auth password; required when username is set
+	Username     string `yaml:"username"`       // HTTP Basic Auth username; leave empty to disable
+	Password     string `yaml:"password"`       // HTTP Basic Auth password; required when username is set
 	ShowPublicIP bool   `yaml:"show_public_ip"` // periodically fetch and display public IP; default false
 }
 
@@ -249,14 +251,14 @@ func applyDefaults(cfg *Config) {
 // controls via an explicit config field to the field name shown in error messages.
 // If a user puts one of these in extra_args it would be applied twice.
 var managedVPNFlags = map[string]string{
-	"--authgroup":      "authgroup",
-	"--user":          "user",
-	"-u":              "user",
+	"--authgroup":       "authgroup",
+	"--user":            "user",
+	"-u":                "user",
 	"--passwd-on-stdin": "(automatic — set when a password is available)",
-	"--certificate":   "certificate",
-	"-c":              "certificate",
-	"--sslkey":        "key",
-	"-k":              "key",
+	"--certificate":     "certificate",
+	"-c":                "certificate",
+	"--sslkey":          "key",
+	"-k":                "key",
 }
 
 // validateVPNExtraArgs returns an error if extra_args contains a flag that is
@@ -267,7 +269,7 @@ func validateVPNExtraArgs(v VPNConfig) error {
 		flag := strings.SplitN(arg, "=", 2)[0]
 		if field, managed := managedVPNFlags[flag]; managed {
 			return &ConfigError{
-				Field: fmt.Sprintf("vpn[%s].extra_args", v.Name),
+				Field:   fmt.Sprintf("vpn[%s].extra_args", v.Name),
 				Message: fmt.Sprintf("%q is already managed via the %q config field; remove it from extra_args", arg, field),
 			}
 		}
@@ -295,6 +297,9 @@ func validate(cfg *Config) error {
 		}
 		if t.LocalPort == 0 {
 			return &ConfigError{Field: fmt.Sprintf("tunnels[%s].local_port", t.Name), Message: "local_port is required"}
+		}
+		if t.AutoPauseThreshold < 0 {
+			return &ConfigError{Field: fmt.Sprintf("tunnels[%s].auto_pause_threshold", t.Name), Message: "must be >= 0 (0 disables auto-pause)"}
 		}
 		if seen[t.Name] {
 			return &ConfigError{Field: "tunnels[].name", Message: fmt.Sprintf("duplicate tunnel name %q", t.Name)}
@@ -332,6 +337,9 @@ func validate(cfg *Config) error {
 		}
 		if v.Type != "openconnect" {
 			return &ConfigError{Field: fmt.Sprintf("vpn[%s].type", v.Name), Message: fmt.Sprintf("unsupported type %q; only \"openconnect\" is supported", v.Type)}
+		}
+		if v.AutoPauseThreshold < 0 {
+			return &ConfigError{Field: fmt.Sprintf("vpn[%s].auto_pause_threshold", v.Name), Message: "must be >= 0 (0 disables auto-pause)"}
 		}
 		if vpnNames[v.Name] {
 			return &ConfigError{Field: "vpn[].name", Message: fmt.Sprintf("duplicate vpn name %q", v.Name)}

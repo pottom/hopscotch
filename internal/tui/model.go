@@ -268,7 +268,6 @@ func blendColor(from, to lipgloss.Color, t float64) lipgloss.Color {
 	return lipgloss.Color(c1.BlendLab(c2, t).Hex())
 }
 
-
 // ── SSE types ─────────────────────────────────────────────────────────────────
 
 type sseTrafficEntry struct {
@@ -287,19 +286,19 @@ type sseVPNEntry struct {
 
 type ssePayload struct {
 	Tunnels map[string]sseTrafficEntry `json:"tunnels"`
-	VPNs    map[string]sseVPNEntry    `json:"vpns,omitempty"`
+	VPNs    map[string]sseVPNEntry     `json:"vpns,omitempty"`
 	Direct  sseTrafficEntry            `json:"direct"`
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type statusMsg         admin.StatusResponse
-type sseMsg            ssePayload
-type logLineMsg        string
-type errMsg            error
-type tickMsg           time.Time
-type rulesSavedMsg     struct{}
-type rulesSaveErrMsg   struct{ err error }
+type statusMsg admin.StatusResponse
+type sseMsg ssePayload
+type logLineMsg string
+type errMsg error
+type tickMsg time.Time
+type rulesSavedMsg struct{}
+type rulesSaveErrMsg struct{ err error }
 type reconnectResultMsg struct{}
 
 // editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
@@ -354,10 +353,10 @@ type Model struct {
 	logGrepFocused bool
 	logVP          viewport.Model
 	logVPReady     bool
-	routeVP      viewport.Model
-	routeVPReady bool
-	routeInput   textinput.Model
-	routeFocused bool
+	routeVP        viewport.Model
+	routeVPReady   bool
+	routeInput     textinput.Model
+	routeFocused   bool
 
 	// edit mode (Rules tab)
 	editMode       bool
@@ -370,11 +369,11 @@ type Model struct {
 	editError      string
 	editSaving     bool
 
-	tick    int
-	width   int
-	height  int
-	vp      viewport.Model
-	vpReady bool
+	tick         int
+	width        int
+	height       int
+	vp           viewport.Model
+	vpReady      bool
 	compact      bool
 	mirrorGraph  bool
 	statusCursor int // index into sorted tunnel names on the status tab
@@ -416,18 +415,18 @@ func New(adminURL string, client *http.Client) Model {
 	lg.Width = 60
 
 	return Model{
-		adminURL:    adminURL,
-		sseURL:      base + "/traffic/stream",
-		logURL:      base + "/logs/stream",
-		sseCh:       sseCh,
-		logCh:       logCh,
-		done:        done,
-		httpClient:  client,
-		traffic:     make(map[string]*trafficWindow),
-		compact:     true,
-		mirrorGraph: true,
-		width:       80,
-		height:      24,
+		adminURL:     adminURL,
+		sseURL:       base + "/traffic/stream",
+		logURL:       base + "/logs/stream",
+		sseCh:        sseCh,
+		logCh:        logCh,
+		done:         done,
+		httpClient:   client,
+		traffic:      make(map[string]*trafficWindow),
+		compact:      true,
+		mirrorGraph:  true,
+		width:        80,
+		height:       24,
 		routeInput:   ti,
 		editPatInput: ep,
 		editCmtInput: ec,
@@ -1230,9 +1229,9 @@ func (m Model) renderTitleLine() string {
 		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
 	appStr := "  " + styleHeader.Render("hopscotch "+versionStr)
-	meta    := m.titleLeft()
-	right   := m.renderTabBar() + "  "
-	rightW  := lipgloss.Width(right)
+	meta := m.titleLeft()
+	right := m.renderTabBar() + "  "
+	rightW := lipgloss.Width(right)
 
 	fullLeft := appStr + "  " + meta
 	if lipgloss.Width(fullLeft)+rightW <= m.width {
@@ -1444,7 +1443,6 @@ func (m Model) renderFooter() string {
 	return "\n\n  " + leftStr + strings.Repeat(" ", gap) + right
 }
 
-
 // findRouteMatch returns the index of the first rule matching the input value, or -1.
 func (m Model) findRouteMatch() int {
 	host := m.routeInput.Value()
@@ -1500,7 +1498,7 @@ func (m Model) buildRoutesContent() string {
 		default:
 			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
 			if t, ok := m.status.Tunnels[via]; ok {
-				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures)
+				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures, 0, 0, false)
 			}
 		}
 
@@ -1865,19 +1863,29 @@ type colLayout struct {
 //	w  < 70 → name + vpn + status only
 func layoutTunnelCols(width int) colLayout {
 	var l colLayout
-	l.showHost   = width >= 70
-	l.showPort   = width >= 85
+	l.showHost = width >= 70
+	l.showPort = width >= 85
 	l.showUptime = width >= 70
-	l.showRC     = width >= 98
-	l.showBPS    = width >= 110
-	l.showConn   = width >= 144
+	l.showRC = width >= 98
+	l.showBPS = width >= 110
+	l.showConn = width >= 144
 
 	fixed := colIndent + colVPNW + colStatusW
-	if l.showPort   { fixed += colPortW }
-	if l.showUptime { fixed += colUptimeW }
-	if l.showRC     { fixed += colRCW }
-	if l.showBPS    { fixed += colBpsInW + colBpsOutW }
-	if l.showConn   { fixed += colConnW }
+	if l.showPort {
+		fixed += colPortW
+	}
+	if l.showUptime {
+		fixed += colUptimeW
+	}
+	if l.showRC {
+		fixed += colRCW
+	}
+	if l.showBPS {
+		fixed += colBpsInW + colBpsOutW
+	}
+	if l.showConn {
+		fixed += colConnW
+	}
 
 	remaining := width - fixed
 	if l.showHost {
@@ -1982,24 +1990,24 @@ func (m Model) buildStatusContent() string {
 	}
 
 	// Per-render styles — widths computed from terminal size.
-	tName   := lipgloss.NewStyle().Foreground(colorBright).Width(tl.nameW)
-	tHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(tl.hostW)
-	tVPN    := lipgloss.NewStyle().Width(colVPNW)
-	tPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	tName := lipgloss.NewStyle().Foreground(colorBright).Width(tl.nameW)
+	tHost := lipgloss.NewStyle().Foreground(colorMuted).Width(tl.hostW)
+	tVPN := lipgloss.NewStyle().Width(colVPNW)
+	tPort := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
 	tStatus := lipgloss.NewStyle().Width(colStatusW)
 	tUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
-	tRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
-	tBpsIn  := lipgloss.NewStyle().Foreground(colorBpsIn).Width(colBpsInW)
+	tRC := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
+	tBpsIn := lipgloss.NewStyle().Foreground(colorBpsIn).Width(colBpsInW)
 	tBpsOut := lipgloss.NewStyle().Foreground(colorBpsOut).Width(colBpsOutW)
-	tConn   := lipgloss.NewStyle().Foreground(colorText).Width(colConnW)
+	tConn := lipgloss.NewStyle().Foreground(colorText).Width(colConnW)
 
-	vName   := lipgloss.NewStyle().Foreground(colorBright).Width(vl.nameW)
-	vHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(vl.hostW)
-	vIface  := lipgloss.NewStyle().Foreground(colorMuted).Width(colVPNW)
-	vPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	vName := lipgloss.NewStyle().Foreground(colorBright).Width(vl.nameW)
+	vHost := lipgloss.NewStyle().Foreground(colorMuted).Width(vl.hostW)
+	vIface := lipgloss.NewStyle().Foreground(colorMuted).Width(colVPNW)
+	vPort := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
 	vStatus := lipgloss.NewStyle().Width(colStatusW)
 	vUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
-	vRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
+	vRC := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
 
 	hdr := func(s lipgloss.Style, label string) string {
 		return s.Foreground(colorMuted).Render(label)
@@ -2011,12 +2019,20 @@ func (m Model) buildStatusContent() string {
 	if len(m.status.VPNs) > 0 {
 		b.WriteString("  ")
 		b.WriteString(hdr(vName, "VPN"))
-		if vl.showHost   { b.WriteString(hdr(vHost, "HOST")) }
+		if vl.showHost {
+			b.WriteString(hdr(vHost, "HOST"))
+		}
 		b.WriteString(hdr(vIface, "IFACE"))
-		if vl.showPort   { b.WriteString(hdr(vPort, "")) }
+		if vl.showPort {
+			b.WriteString(hdr(vPort, ""))
+		}
 		b.WriteString(hdr(vStatus, "STATUS"))
-		if vl.showUptime { b.WriteString(hdr(vUptime, "UPTIME")) }
-		if vl.showRC     { b.WriteString(hdr(vRC, "RC")) }
+		if vl.showUptime {
+			b.WriteString(hdr(vUptime, "UPTIME"))
+		}
+		if vl.showRC {
+			b.WriteString(hdr(vRC, "RC"))
+		}
 		b.WriteString("\n")
 		b.WriteString(m.sectionSep())
 
@@ -2051,12 +2067,20 @@ func (m Model) buildStatusContent() string {
 			}
 			b.WriteString(prefix)
 			b.WriteString(vName.Foreground(colorVPN).Render(name))
-			if vl.showHost   { b.WriteString(vHost.Render(v.Host)) }
+			if vl.showHost {
+				b.WriteString(vHost.Render(v.Host))
+			}
 			b.WriteString(vIface.Render(iface))
-			if vl.showPort   { b.WriteString(vPort.Render("")) }
-			b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)))
-			if vl.showUptime { b.WriteString(vUptime.Render(uptime)) }
-			if vl.showRC     { b.WriteString(vRC.Render(fmt.Sprintf("%d", v.Reconnects))) }
+			if vl.showPort {
+				b.WriteString(vPort.Render(""))
+			}
+			b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0, v.ConsecutiveFailures, v.AutoPauseThreshold, v.AutoPaused)))
+			if vl.showUptime {
+				b.WriteString(vUptime.Render(uptime))
+			}
+			if vl.showRC {
+				b.WriteString(vRC.Render(fmt.Sprintf("%d", v.Reconnects)))
+			}
 			b.WriteString("\n")
 
 			if v.LastError != "" && v.State != msgs.StatusConnected {
@@ -2073,14 +2097,27 @@ func (m Model) buildStatusContent() string {
 	// ── Tunnel section ────────────────────────────────────────────────────────
 	b.WriteString("  ")
 	b.WriteString(hdr(tName, "TUNNEL"))
-	if tl.showHost   { b.WriteString(hdr(tHost, "HOST")) }
+	if tl.showHost {
+		b.WriteString(hdr(tHost, "HOST"))
+	}
 	b.WriteString(hdr(tVPN, "VPN"))
-	if tl.showPort   { b.WriteString(hdr(tPort, "PORT")) }
+	if tl.showPort {
+		b.WriteString(hdr(tPort, "PORT"))
+	}
 	b.WriteString(hdr(tStatus, "STATUS"))
-	if tl.showUptime { b.WriteString(hdr(tUptime, "UPTIME")) }
-	if tl.showRC     { b.WriteString(hdr(tRC, "RC")) }
-	if tl.showBPS    { b.WriteString(hdr(tBpsIn, "↓ TOTAL")); b.WriteString(hdr(tBpsOut, "↑ TOTAL")) }
-	if tl.showConn   { b.WriteString(hdr(tConn, "CONN")) }
+	if tl.showUptime {
+		b.WriteString(hdr(tUptime, "UPTIME"))
+	}
+	if tl.showRC {
+		b.WriteString(hdr(tRC, "RC"))
+	}
+	if tl.showBPS {
+		b.WriteString(hdr(tBpsIn, "↓ TOTAL"))
+		b.WriteString(hdr(tBpsOut, "↑ TOTAL"))
+	}
+	if tl.showConn {
+		b.WriteString(hdr(tConn, "CONN"))
+	}
 	b.WriteString("\n")
 	b.WriteString(m.sectionSep())
 
@@ -2135,7 +2172,7 @@ func (m Model) buildStatusContent() string {
 		if strings.HasPrefix(t.LastError, msgs.WaitingForVPNPrefix) || t.LastError == msgs.WaitingForNetwork {
 			tunnelStatusStr = styleConnecting.Render("◌ pending")
 		} else {
-			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
+			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures, t.ConsecutiveFailures, t.AutoPauseThreshold, t.AutoPaused)
 		}
 
 		vpnLabel := "—"
@@ -2162,14 +2199,27 @@ func (m Model) buildStatusContent() string {
 		}
 		b.WriteString(prefix)
 		b.WriteString(tName.Foreground(colorAccent).Render(name))
-		if tl.showHost   { b.WriteString(tHost.Render(t.Host)) }
+		if tl.showHost {
+			b.WriteString(tHost.Render(t.Host))
+		}
 		b.WriteString(vpnColStyle.Render(vpnLabel))
-		if tl.showPort   { b.WriteString(tPort.Render(fmt.Sprintf("%d", t.LocalPort))) }
+		if tl.showPort {
+			b.WriteString(tPort.Render(fmt.Sprintf("%d", t.LocalPort)))
+		}
 		b.WriteString(tStatus.Render(tunnelStatusStr))
-		if tl.showUptime { b.WriteString(tUptime.Render(uptime)) }
-		if tl.showRC     { b.WriteString(tRC.Render(fmt.Sprintf("%d", t.ReconnectCount))) }
-		if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtTotal(bytesIn))); b.WriteString(tBpsOut.Render("↑ "+fmtTotal(bytesOut))) }
-		if tl.showConn   { b.WriteString(tConn.Render(fmtActive(active))) }
+		if tl.showUptime {
+			b.WriteString(tUptime.Render(uptime))
+		}
+		if tl.showRC {
+			b.WriteString(tRC.Render(fmt.Sprintf("%d", t.ReconnectCount)))
+		}
+		if tl.showBPS {
+			b.WriteString(tBpsIn.Render("↓ " + fmtTotal(bytesIn)))
+			b.WriteString(tBpsOut.Render("↑ " + fmtTotal(bytesOut)))
+		}
+		if tl.showConn {
+			b.WriteString(tConn.Render(fmtActive(active)))
+		}
 		b.WriteString("\n")
 
 		if errLine != "" {
@@ -2201,14 +2251,27 @@ func (m Model) buildStatusContent() string {
 	}
 	b.WriteString("  ")
 	b.WriteString(tName.Foreground(colorDirect).Render("direct"))
-	if tl.showHost   { b.WriteString(tHost.Render("")) }
+	if tl.showHost {
+		b.WriteString(tHost.Render(""))
+	}
 	b.WriteString(tVPN.Render(""))
-	if tl.showPort   { b.WriteString(tPort.Render("")) }
+	if tl.showPort {
+		b.WriteString(tPort.Render(""))
+	}
 	b.WriteString(tStatus.Render(""))
-	if tl.showUptime { b.WriteString(tUptime.Render("")) }
-	if tl.showRC     { b.WriteString(tRC.Render("")) }
-	if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtTotal(dBytesIn))); b.WriteString(tBpsOut.Render("↑ "+fmtTotal(dBytesOut))) }
-	if tl.showConn   { b.WriteString(tConn.Render(fmtActive(dActive))) }
+	if tl.showUptime {
+		b.WriteString(tUptime.Render(""))
+	}
+	if tl.showRC {
+		b.WriteString(tRC.Render(""))
+	}
+	if tl.showBPS {
+		b.WriteString(tBpsIn.Render("↓ " + fmtTotal(dBytesIn)))
+		b.WriteString(tBpsOut.Render("↑ " + fmtTotal(dBytesOut)))
+	}
+	if tl.showConn {
+		b.WriteString(tConn.Render(fmtActive(dActive)))
+	}
 	b.WriteString("\n")
 
 	if !m.compact && dw != nil {
@@ -2295,7 +2358,11 @@ func renderBadge(status string) string {
 	}
 }
 
-func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int) string {
+func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int, consecutiveFailures int, autoPauseThreshold int, autoPaused bool) string {
+	autoPauseSuffix := ""
+	if autoPauseThreshold > 0 && consecutiveFailures > 0 {
+		autoPauseSuffix = fmt.Sprintf(" ⚠%d/%d", consecutiveFailures, autoPauseThreshold)
+	}
 	switch status {
 	case msgs.StatusConnected:
 		if keepaliveFails > 0 {
@@ -2308,15 +2375,18 @@ func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int)
 			dot = "○"
 		}
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("%s next try: %ds", dot, *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("%s next try: %ds%s", dot, *reconnectIn, autoPauseSuffix))
 		}
-		return styleConnecting.Render(dot + " connecting")
+		return styleConnecting.Render(dot + " connecting" + autoPauseSuffix)
 	case msgs.StatusDisconnected:
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("○ next try: %ds", *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("○ next try: %ds%s", *reconnectIn, autoPauseSuffix))
 		}
-		return styleDisconnected.Render("○ disconnected")
+		return styleDisconnected.Render("○ disconnected" + autoPauseSuffix)
 	case msgs.StatusPaused:
+		if autoPaused {
+			return stylePaused.Render("⏸ paused (auto)" + autoPauseSuffix)
+		}
 		return stylePaused.Render("⏸ paused")
 	default:
 		return styleMuted.Render("? " + status)
@@ -2510,7 +2580,6 @@ func fetchStatus(url string, client *http.Client) tea.Cmd {
 		return statusMsg(st)
 	}
 }
-
 
 func waitForSSE(ch <-chan ssePayload) tea.Cmd {
 	return func() tea.Msg {

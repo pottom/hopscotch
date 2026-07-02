@@ -68,6 +68,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		writeLine(`hopscotch_tunnel_keepalive_failures{tunnel=%q} %d`, name, st.KeepaliveFailures)
 	}
 
+	writeLine("# HELP hopscotch_tunnel_consecutive_failures Consecutive failed connection attempts (resets to 0 on success or resume)")
+	writeLine("# TYPE hopscotch_tunnel_consecutive_failures gauge")
+	for name, st := range allStats {
+		writeLine(`hopscotch_tunnel_consecutive_failures{tunnel=%q} %d`, name, st.ConsecutiveFailures)
+	}
+
 	directSnap := s.direct.DirectSnapshot()
 	writeLine("# HELP hopscotch_direct_bytes_in_total Cumulative bytes received via direct connections")
 	writeLine("# TYPE hopscotch_direct_bytes_in_total counter")
@@ -104,6 +110,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 				uptime = time.Since(st.ConnectedAt).Seconds()
 			}
 			writeLine(`hopscotch_vpn_uptime_seconds{vpn=%q} %.0f`, name, uptime)
+		}
+
+		writeLine("# HELP hopscotch_vpn_consecutive_failures Consecutive failed connection attempts (resets to 0 on success or resume)")
+		writeLine("# TYPE hopscotch_vpn_consecutive_failures gauge")
+		for name, st := range vpnStats {
+			writeLine(`hopscotch_vpn_consecutive_failures{vpn=%q} %d`, name, st.ConsecutiveFailures)
 		}
 	}
 

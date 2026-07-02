@@ -124,6 +124,23 @@ Mindkét felületen azonos szöveg. TUI: `renderStatus()`, web UI: `tunnelStatus
 
 ---
 
+## Status tábla — Paused szöveg (kézi vs. auto-pause)
+
+```
+⏸ paused           ← kézi pause (TUI/web UI-ból)
+⏸ paused (auto)    ← auto_pause_threshold triggerelte
+```
+
+Az `(auto)` jelző csak akkor jelenik meg, ha a pause-t az app maga csinálta
+(`auto_pause_threshold` elérése miatt), nem a felhasználó. Emellett a
+threshold-hoz közeledve (connecting/disconnected állapotban, még pause előtt)
+mindkét felület megjeleníti a `⚠N/threshold` szám-jelzést is.
+
+Mindkét felületen azonos szöveg/logika. TUI: `renderStatus()`, web UI:
+`tunnelStatusHtml()` / `vpnStatusHtml()`.
+
+---
+
 ## Footer (TUI)
 
 ```

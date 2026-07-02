@@ -340,6 +340,7 @@ admin:
 | `reconnect_max_delay` | `30` | Reconnect backoff cap (seconds) |
 | `force_pty` | `false` | Open a PTY shell session — for jump hosts that enforce channel policies (SPS/SCB appliances) |
 | `pty_poke_interval` | `60` | Seconds between no-op keystrokes sent on the PTY channel (only when `force_pty` is set); keeps SCB session-recording idle timeouts from tearing down the connection |
+| `auto_pause_threshold` | `0` (disabled) | Pause the tunnel automatically after this many consecutive failed connection attempts, instead of retrying forever. The TUI/web UI show `paused (auto)` (vs. plain `paused` for a manual pause) so it's clear the app did this, not you. Resume (manually, via TUI/web UI) resets the counter and clears the auto-pause marker. |
 
 ### VPN integration
 
@@ -410,6 +411,7 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `extra_args` | — | Additional openconnect flags |
 | `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |
+| `auto_pause_threshold` | `0` (disabled) | Pause the VPN automatically after this many consecutive failed connection attempts (e.g. a permanently wrong password), instead of retrying forever. The TUI/web UI show `paused (auto)` (vs. plain `paused` for a manual pause) so it's clear the app did this, not you. Resume (manually, via TUI/web UI) resets the counter and clears the auto-pause marker. |
 
 ### Sharing the proxy on your network
 

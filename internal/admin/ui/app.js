@@ -120,13 +120,18 @@ function escHtml(s) {
   return !s ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function vpnStatusHtml(state, reconnectIn) {
+function autoPauseSuffix(consecutiveFailures, autoPauseThreshold) {
+  return (autoPauseThreshold > 0 && consecutiveFailures > 0) ? ` ⚠${consecutiveFailures}/${autoPauseThreshold}` : '';
+}
+
+function vpnStatusHtml(state, reconnectIn, consecutiveFailures, autoPauseThreshold, autoPaused) {
+  const aps = autoPauseSuffix(consecutiveFailures, autoPauseThreshold);
   if (state === 'connected') return '<span class="st-connected">● connected</span>';
-  if (state === 'paused') return '<span class="st-paused">⏸ paused</span>';
+  if (state === 'paused') return autoPaused ? `<span class="st-paused">⏸ paused (auto)${aps}</span>` : '<span class="st-paused">⏸ paused</span>';
   if (state === 'connecting' || state === 'disconnected') {
-    if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next try: ${reconnectIn}s</span>`;
-    if (state === 'connecting') return '<span class="st-connecting">connecting</span>';
-    return '<span class="st-disconnected">disconnected</span>';
+    if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next try: ${reconnectIn}s${aps}</span>`;
+    if (state === 'connecting') return `<span class="st-connecting">connecting${aps}</span>`;
+    return `<span class="st-disconnected">disconnected${aps}</span>`;
   }
   return `<span class="st-muted">${escHtml(state || '…')}</span>`;
 }
@@ -137,17 +142,18 @@ function tunnelStatusHtml(t) {
     return '<span class="st-connecting">◌ pending</span>';
   }
   const s = t.status, ri = t.reconnect_in;
+  const aps = autoPauseSuffix(t.consecutive_failures, t.auto_pause_threshold);
   if (s === 'connected') {
     return t.keepalive_failures > 0
       ? `<span class="st-warning">● connected ⚠${t.keepalive_failures}</span>`
       : '<span class="st-connected">● connected</span>';
   }
-  if (s === 'paused') return '<span class="st-paused">⏸ paused</span>';
+  if (s === 'paused') return t.auto_paused ? `<span class="st-paused">⏸ paused (auto)${aps}</span>` : '<span class="st-paused">⏸ paused</span>';
   if (s === 'connecting' || s === 'disconnected') {
-    if (ri != null && ri >= 0) return `<span class="st-connecting">○ next try: ${ri}s</span>`;
+    if (ri != null && ri >= 0) return `<span class="st-connecting">○ next try: ${ri}s${aps}</span>`;
     return s === 'connecting'
-      ? '<span class="st-connecting">connecting</span>'
-      : '<span class="st-disconnected">disconnected</span>';
+      ? `<span class="st-connecting">connecting${aps}</span>`
+      : `<span class="st-disconnected">disconnected${aps}</span>`;
   }
   return `<span class="st-muted">${escHtml(s || '…')}</span>`;
 }
@@ -229,7 +235,7 @@ function renderVPNTable() {
       `<td data-col="host">${escHtml(v.host || '—')}</td>` +
       `<td data-col="iface">${escHtml(v.tun_iface || '—')}</td>` +
       `<td data-col="port"></td>` +
-      `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
+      `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in, v.consecutive_failures, v.auto_pause_threshold, v.auto_paused)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
       `<td></td><td></td><td></td>` +
@@ -528,6 +534,9 @@ async function refreshStatus() {
         uptime_seconds:     t.uptime_seconds,
         reconnect_count:    t.reconnect_count,
         keepalive_failures: t.keepalive_failures || 0,
+        consecutive_failures: t.consecutive_failures || 0,
+        auto_pause_threshold: t.auto_pause_threshold || 0,
+        auto_paused:          t.auto_paused || false,
         last_error:         t.last_error || '',
         bps_in:             prev.bps_in       ?? 0,
         bps_out:            prev.bps_out      ?? 0,
@@ -550,6 +559,9 @@ async function refreshStatus() {
         reconnects:     v.reconnects || 0,
         uptime_seconds: v.uptime_seconds || 0,
         last_error:     v.last_error || '',
+        consecutive_failures: v.consecutive_failures || 0,
+        auto_pause_threshold: v.auto_pause_threshold || 0,
+        auto_paused:          v.auto_paused || false,
         reconnect_in:   prev.reconnect_in ?? null,
       };
     }
@@ -604,7 +616,7 @@ function connectSSE() {
         if (v.state) store.vpns[name].state = v.state;
         store.vpns[name].reconnect_in = v.reconnect_in ?? null;
         const row = findVPNRow(name);
-        if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in), true);
+        if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in, store.vpns[name].consecutive_failures, store.vpns[name].auto_pause_threshold, store.vpns[name].auto_paused), true);
       }
     }
 

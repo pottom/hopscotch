@@ -41,6 +41,7 @@
 #     #   - "--no-dtls"
 #     reconnect_delay: 15
 #     reconnect_max_delay: 120
+#     # auto_pause_threshold: 5      # pause automatically after this many consecutive failed connects; 0 (default) disables
 #
 # Run `hopscotch vpn password <name>` to store the VPN password in the OS keychain.
 
@@ -61,6 +62,7 @@ tunnels:
     # force_pty: true                # open a PTY shell — needed for SPS/SCB jump hosts
     # pty_poke_interval: 60          # seconds between no-op keystrokes on the PTY (force_pty only); prevents SCB idle-timeout from closing the recorded session
     # requires_vpn: corp-vpn         # wait for this VPN before connecting
+    # auto_pause_threshold: 5        # pause automatically after this many consecutive failed connects; 0 (default) disables
     # pre_connect:                   # commands before each dial attempt
     #   - "nc -z 10.0.0.1 22 || exit 1"   # check if host is reachable first
 

@@ -51,6 +51,16 @@ type Tunnel struct {
 	activeConns    atomic.Int64
 	forceReconnect chan struct{} // buffered(1); signals immediate reconnect
 
+	// consecutiveFailures counts failed connection attempts in a row; reset to
+	// 0 on a successful dial or a manual Resume(). Written by both the Run()
+	// goroutine and Resume() (a different goroutine), hence atomic.
+	consecutiveFailures atomic.Int32
+	// autoPaused is true while the current pause was triggered by
+	// auto_pause_threshold rather than a manual Pause() call — lets the UI
+	// distinguish the two. Written by both the Run() goroutine and Pause()/
+	// Resume() (a different goroutine), hence atomic.
+	autoPaused atomic.Bool
+
 	paused        atomic.Bool
 	pauseRequest  chan struct{} // buffered(1); signals a pause request
 	resume        chan struct{} // buffered(1); signals resume from pause
@@ -93,7 +103,19 @@ func (t *Tunnel) ForceReconnect() {
 // attempt (gate-wait/pre-connect/dial, including a mid-handshake dial)
 // immediately rather than waiting for it to finish, or interrupts an active
 // keepalive/backoff wait. The tunnel stays paused until Resume is called.
+// Called only from the admin API on a user's explicit request — marks the
+// pause as manual (as opposed to Run()'s own auto-pause) so Stats().AutoPaused
+// lets the UI show which one happened.
 func (t *Tunnel) Pause() {
+	t.autoPaused.Store(false)
+	t.pause()
+}
+
+// pause is the actual pause mechanics, shared by the manual Pause() above and
+// Run()'s auto-pause trigger — kept separate so auto-pause can set
+// autoPaused=true first without Pause() immediately overwriting it back to
+// false.
+func (t *Tunnel) pause() {
 	t.paused.Store(true)
 	t.cancelMu.Lock()
 	cancel := t.cancelAttempt
@@ -108,8 +130,13 @@ func (t *Tunnel) Pause() {
 }
 
 // Resume clears a paused tunnel and triggers an immediate reconnect attempt.
+// Resets the auto-pause failure counter so a fresh full attempt budget
+// starts, regardless of whether the tunnel was paused manually or
+// automatically.
 func (t *Tunnel) Resume() {
 	t.paused.Store(false)
+	t.consecutiveFailures.Store(0)
+	t.autoPaused.Store(false)
 	select {
 	case t.resume <- struct{}{}:
 	default:
@@ -139,6 +166,9 @@ func (t *Tunnel) Stats() Stats {
 	s.BytesIn = t.bytesIn.Load()
 	s.BytesOut = t.bytesOut.Load()
 	s.ActiveConns = t.activeConns.Load()
+	s.ConsecutiveFailures = int(t.consecutiveFailures.Load())
+	s.AutoPauseThreshold = t.cfg.AutoPauseThreshold
+	s.AutoPaused = t.autoPaused.Load()
 	return s
 }
 
@@ -307,8 +337,22 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			s := t.Stats()
 			s.LastError = dialErr.Error()
 			t.stats.Store(s)
+
+			if t.cfg.AutoPauseThreshold > 0 {
+				n := t.consecutiveFailures.Add(1)
+				if int(n) >= t.cfg.AutoPauseThreshold {
+					log.Warn("tunnel auto-paused: too many consecutive connection failures",
+						"tunnel", t.cfg.Name,
+						"failures", n,
+						"threshold", t.cfg.AutoPauseThreshold,
+					)
+					t.autoPaused.Store(true)
+					t.pause()
+				}
+			}
 		} else {
 			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
+			t.consecutiveFailures.Store(0)
 			t.keepalive(ctx)
 			if t.ptySession != nil {
 				t.ptySession.Close()
