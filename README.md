@@ -82,7 +82,7 @@ hopscotch sits between your tools and your jump hosts. Apps connect to a single 
 
 ## TUI dashboard
 
-`hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Rules**, **Logs**, **Docs**.
+`hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Rules**, **Logs**, **Settings**.
 
 ![TUI status tab](docs/tui-status.png)
 
@@ -92,7 +92,7 @@ Each tunnel shows: connection status, host, local port, uptime, reconnect counte
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `1` / `2` / `3` | Switch tabs: Status / Rules / Logs |
+| `Tab` / `1` / `2` / `3` / `4` | Switch tabs: Status / Rules / Logs / Settings |
 | `↑` `↓` / `j` `k` | **Status tab:** move cursor between tunnels and VPNs (viewport follows) · **Other tabs:** scroll |
 | `r` | **Status tab:** force reconnect selected tunnel or VPN immediately (skips backoff) |
 | `p` | **Status tab:** pause/resume selected tunnel or VPN (aborts an in-flight connect immediately) · **Logs tab:** toggle proxy source filter |
@@ -108,6 +108,8 @@ Each tunnel shows: connection status, host, local port, uptime, reconnect counte
 ## Routing patterns
 
 The **Rules tab** shows exactly which hostnames route where. Press `/` to focus the URL tester — type any hostname or URL and hopscotch highlights the matching rule in real time.
+
+![TUI rules tab](docs/tui-rules.png)
 
 The **Logs tab** streams structured log lines with three independent filters: `l` cycles the severity level (ALL / INFO+ / WARN+ / ERR), `t`/`v`/`p`/`s` toggle source categories (tunnel / vpn / proxy / system), and `/` opens a live text filter. All three apply simultaneously with AND logic over a rolling 300-line buffer.
 
@@ -202,7 +204,11 @@ The **Logs tab** buffers up to 500 log lines and filters them client-side: sever
 
 ![Admin web UI — Status](docs/ui-status.png)
 
+![Admin web UI — Rules](docs/ui-rules.png)
+
 ![Admin web UI — Logs](docs/ui-logs.png)
+
+![Admin web UI — Settings](docs/ui-settings.png)
 
 ## Installation
 
