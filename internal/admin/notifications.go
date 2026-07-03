@@ -51,13 +51,7 @@ func (s *Server) handlePutNotifications(w http.ResponseWriter, r *http.Request) 
 		Sound:        body.Sound,
 	}
 
-	s.cfgMu.Lock()
-	s.cfg.Notifications = newCfg
-	path := s.cfg.Path
-	cfgCopy := *s.cfg
-	s.cfgMu.Unlock()
-
-	if err := config.WriteConfig(&cfgCopy, path); err != nil {
+	if err := s.persistConfig(func(c *config.Config) { c.Notifications = newCfg }); err != nil {
 		http.Error(w, "failed to persist config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

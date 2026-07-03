@@ -1364,11 +1364,23 @@ window.routesTesterUpdate = function(input) {
 // Guards refreshStatus() from overwriting an in-flight optimistic toggle with
 // a stale poll response before the PUT below has completed.
 let notificationsSaving = false;
+// A toggle landed while notificationsSaving was already true; resend the
+// latest snapshot once the in-flight PUT completes instead of firing a
+// second concurrent request (which could land out of order and clobber it).
+let notificationsResendNeeded = false;
 
-window.saveNotifications = async function() {
+window.saveNotifications = function() {
+  if (notificationsSaving) {
+    notificationsResendNeeded = true;
+    return;
+  }
+  notificationsSaving = true;
+  doSaveNotifications();
+};
+
+async function doSaveNotifications() {
   const store  = Alpine.store('hop');
   const status = document.getElementById('settings-save-status');
-  notificationsSaving = true;
   if (status) { status.textContent = 'Saving…'; status.className = 'settings-save-status'; }
   try {
     const res = await fetch('/api/notifications', {
@@ -1389,9 +1401,14 @@ window.saveNotifications = async function() {
   } catch {
     if (status) { status.textContent = 'Network error'; status.className = 'settings-save-status settings-save-error'; }
   } finally {
-    notificationsSaving = false;
+    if (notificationsResendNeeded) {
+      notificationsResendNeeded = false;
+      doSaveNotifications();
+    } else {
+      notificationsSaving = false;
+    }
   }
-};
+}
 
 // ── Docs tab ──────────────────────────────────────────────────────────────────
 

@@ -104,8 +104,9 @@ type AdminConfig struct {
 }
 
 // NotificationsConfig controls native OS desktop notifications for tunnel and
-// VPN status changes. Config-file only for v1 — no TUI/web UI toggle; see
-// docs/DESIGN.md for why.
+// VPN status changes. Live-editable from the TUI/web UI Settings tab via
+// PUT /api/notifications (persists to config.yaml and applies immediately,
+// no restart needed); see docs/DESIGN.md.
 type NotificationsConfig struct {
 	Enabled      bool `yaml:"enabled"`       // master switch; default false
 	OnDisconnect bool `yaml:"on_disconnect"` // notify when a connected tunnel/VPN unexpectedly drops

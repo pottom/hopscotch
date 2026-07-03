@@ -118,6 +118,19 @@ func NewServer(bind string, port, proxyPort int, tunnels TunnelStatter, vpns VPN
 	}
 }
 
+// persistConfig applies mutate to the live config under cfgMu and writes the
+// result to config.yaml, sharing the lock/copy/write skeleton common to every
+// live-editable Settings/Rules PUT handler.
+func (s *Server) persistConfig(mutate func(*config.Config)) error {
+	s.cfgMu.Lock()
+	mutate(s.cfg)
+	path := s.cfg.Path
+	cfgCopy := *s.cfg
+	s.cfgMu.Unlock()
+
+	return config.WriteConfig(&cfgCopy, path)
+}
+
 func (s *Server) adminAuthEnabled() bool { return s.adminUsername != "" }
 
 // authenticated returns true if the request carries a valid session cookie,

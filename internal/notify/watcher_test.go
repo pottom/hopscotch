@@ -65,6 +65,20 @@ func TestDiff_Reconnect_OnlyAfterADisconnectWasNotified(t *testing.T) {
 	}
 }
 
+func TestDiff_SlowInitialConnect_NoPhantomDisconnect(t *testing.T) {
+	// Startup while still connecting (down): a slow handshake spanning
+	// multiple ticks must not be mistaken for a fresh disconnection.
+	_, seeded := diff(trackedState{}, false, snapshot{down: true})
+
+	for i := range 3 {
+		event, next := diff(seeded, true, snapshot{down: true})
+		if event != "" {
+			t.Fatalf("tick %d: event = %q, want empty — still the initial connect, not a new disconnect", i, event)
+		}
+		seeded = next
+	}
+}
+
 func TestDiff_Reconnect_AfterRealDisconnect(t *testing.T) {
 	state := trackedState{}
 	event, state := diff(state, true, snapshot{down: true})

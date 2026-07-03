@@ -88,9 +88,10 @@ func (n *Notifier) Suppress(kind, name string) {
 }
 
 // suppressed reports whether kind/name is currently within a Suppress window,
-// pruning the entry once it's stale.
+// pruning the entry once it's stale. Like Suppress, a no-op (false) when n is
+// nil or notifications are disabled.
 func (n *Notifier) suppressed(kind, name string) bool {
-	if n == nil {
+	if n == nil || !n.Config().Enabled {
 		return false
 	}
 	key := kind + "/" + name

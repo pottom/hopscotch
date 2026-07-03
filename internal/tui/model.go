@@ -303,6 +303,7 @@ type rulesSaveErrMsg struct{ err error }
 
 type settingsSavedMsg struct{}
 type settingsSaveErrMsg struct{ err error }
+type settingsSavedTimeoutMsg struct{}
 type reconnectResultMsg struct{}
 
 // editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
@@ -374,11 +375,13 @@ type Model struct {
 	editSaving     bool
 
 	// Settings tab (notification toggles)
-	settingsVP      viewport.Model
-	settingsVPReady bool
-	settingsCursor  int
-	settingsSaving  bool
-	settingsError   string
+	settingsVP           viewport.Model
+	settingsVPReady      bool
+	settingsCursor       int
+	settingsSaving       bool
+	settingsResendNeeded bool // a toggle landed while settingsSaving was already true; resend once the in-flight PUT completes
+	settingsError        string
+	settingsSavedAt      time.Time // non-zero while the transient "✓ saved" state is showing (mirrors web UI)
 
 	tick         int
 	width        int
@@ -969,7 +972,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == tabSettings {
 				return m.toggleSettingsRow()
 			}
-			return m, nil
+			if m.activeTab == tabLogs && m.logVPReady {
+				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.vpReady {
+				m.vp, cmd = m.vp.Update(msg)
+			}
+			return m, cmd
 
 		case "r", "R":
 			if m.activeTab == tabStatus && m.statusItemCount() > 0 {
@@ -1046,15 +1056,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case settingsSavedMsg:
-		m.settingsSaving = false
 		m.settingsError = ""
+		if m.settingsResendNeeded {
+			m.settingsResendNeeded = false
+			return m, m.saveSettingsCmd()
+		}
+		m.settingsSaving = false
+		m.settingsSavedAt = time.Now()
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
+		}
+		return m, settingsSavedTimeoutCmd()
+
+	case settingsSaveErrMsg:
+		m.settingsError = msg.err.Error()
+		if m.settingsResendNeeded {
+			m.settingsResendNeeded = false
+			return m, m.saveSettingsCmd()
+		}
+		m.settingsSaving = false
 		if m.settingsVPReady {
 			m.settingsVP.SetContent(m.buildSettingsContent())
 		}
 
-	case settingsSaveErrMsg:
-		m.settingsSaving = false
-		m.settingsError = msg.err.Error()
+	case settingsSavedTimeoutMsg:
+		m.settingsSavedAt = time.Time{}
 		if m.settingsVPReady {
 			m.settingsVP.SetContent(m.buildSettingsContent())
 		}
@@ -1888,28 +1914,37 @@ func (m Model) saveRulesCmd() tea.Cmd {
 		rules = []admin.RouteJSON{}
 	}
 	rulesURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/rules"
-	client := m.httpClient
+	return putJSONCmd(m.httpClient, rulesURL, map[string]interface{}{"rules": rules},
+		func() tea.Msg { return rulesSavedMsg{} },
+		func(err error) tea.Msg { return rulesSaveErrMsg{err} })
+}
+
+// putJSONCmd returns a Cmd that PUTs body as JSON to url, calling onOK on a
+// 200 response or onErr on any failure (marshal, request, transport, or a
+// non-200 status with its truncated response body as the error) — the shared
+// shape behind every Settings/Rules save in the TUI.
+func putJSONCmd(client *http.Client, url string, body interface{}, onOK func() tea.Msg, onErr func(error) tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		body, err := json.Marshal(map[string]interface{}{"rules": rules})
+		b, err := json.Marshal(body)
 		if err != nil {
-			return rulesSaveErrMsg{err}
+			return onErr(err)
 		}
-		req, err := http.NewRequest(http.MethodPut, rulesURL, bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(b))
 		if err != nil {
-			return rulesSaveErrMsg{err}
+			return onErr(err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		res, err := client.Do(req)
 		if err != nil {
-			return rulesSaveErrMsg{err}
+			return onErr(err)
 		}
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			var msg [256]byte
 			n, _ := res.Body.Read(msg[:])
-			return rulesSaveErrMsg{fmt.Errorf("%s", strings.TrimSpace(string(msg[:n])))}
+			return onErr(fmt.Errorf("%s", strings.TrimSpace(string(msg[:n]))))
 		}
-		return rulesSavedMsg{}
+		return onOK()
 	}
 }
 
@@ -1958,6 +1993,8 @@ func (m Model) buildSettingsContent() string {
 		b.WriteString("  " + styleConnecting.Render("saving…") + "\n")
 	} else if m.settingsError != "" {
 		b.WriteString("  " + styleDisconnected.Render("✗ "+m.settingsError) + "\n")
+	} else if !m.settingsSavedAt.IsZero() {
+		b.WriteString("  " + styleConnected.Render("✓ saved") + "\n")
 	}
 	return b.String()
 }
@@ -1979,11 +2016,17 @@ func (m Model) toggleSettingsRow() (Model, tea.Cmd) {
 	}
 	row.set(&n, !row.get(n))
 	m.status.Notifications = n
-	m.settingsSaving = true
 	m.settingsError = ""
 	if m.settingsVPReady {
 		m.settingsVP.SetContent(m.buildSettingsContent())
 	}
+	if m.settingsSaving {
+		// A PUT is already in flight with a now-stale snapshot; don't fire a
+		// second concurrent request, just resend the latest once it returns.
+		m.settingsResendNeeded = true
+		return m, nil
+	}
+	m.settingsSaving = true
 	return m, m.saveSettingsCmd()
 }
 
@@ -1992,29 +2035,17 @@ func (m Model) toggleSettingsRow() (Model, tea.Cmd) {
 func (m Model) saveSettingsCmd() tea.Cmd {
 	n := m.status.Notifications
 	settingsURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/notifications"
-	client := m.httpClient
-	return func() tea.Msg {
-		body, err := json.Marshal(n)
-		if err != nil {
-			return settingsSaveErrMsg{err}
-		}
-		req, err := http.NewRequest(http.MethodPut, settingsURL, bytes.NewReader(body))
-		if err != nil {
-			return settingsSaveErrMsg{err}
-		}
-		req.Header.Set("Content-Type", "application/json")
-		res, err := client.Do(req)
-		if err != nil {
-			return settingsSaveErrMsg{err}
-		}
-		defer res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			var msg [256]byte
-			n, _ := res.Body.Read(msg[:])
-			return settingsSaveErrMsg{fmt.Errorf("%s", strings.TrimSpace(string(msg[:n])))}
-		}
-		return settingsSavedMsg{}
-	}
+	return putJSONCmd(m.httpClient, settingsURL, n,
+		func() tea.Msg { return settingsSavedMsg{} },
+		func(err error) tea.Msg { return settingsSaveErrMsg{err} })
+}
+
+// settingsSavedTimeoutCmd clears the transient "✓ saved" state after a delay,
+// mirroring the web UI's 1500ms setTimeout on #settings-save-status.
+func settingsSavedTimeoutCmd() tea.Cmd {
+	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+		return settingsSavedTimeoutMsg{}
+	})
 }
 
 // Fixed column widths that never change with terminal size.

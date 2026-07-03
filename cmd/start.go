@@ -137,6 +137,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		mgr.ApplyConfig(ctx, next.Tunnels)
 		router.UpdateRules(next.Proxy.Rules)
 		refreshSSHConfig(next)
+		notifier.SetConfig(next.Notifications)
 	})
 
 	log.Info("hopscotch starting",

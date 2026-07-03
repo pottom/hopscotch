@@ -14,6 +14,7 @@ Everything under `cmd/`. `start.go` additionally owns process lifecycle (daemoni
 - `checkKeys` (SSH key permission check) must run before daemonizing — it's interactive/visible only in the foreground parent process.
 - The "already running" PID check runs unconditionally, even with `--foreground` (skipped only in container mode via `HOPSCOTCH_CONTAINER=true`, which also redirects `internal/state`'s file paths to `/tmp`). `--restart` sends SIGTERM, waits 5s, then SIGKILL, before proceeding.
 - Startup order in `runStart`: load config → resolve `internal/state.NewPausedTracker` (config dir) → construct managers → pre-apply persisted pause state to each manager *before* any `Run()` goroutine starts → construct `admin.Server` (passing the same tracker) → start all `Run()` goroutines via `errgroup`.
+- `config.WatchSIGHUP`'s reload callback in `runStart` must apply *every* live-reloadable config section, not just the ones a given change happens to touch — it currently calls `mgr.ApplyConfig`, `router.UpdateRules`, `refreshSSHConfig`, and `notifier.SetConfig`. Missing one here means a hand-edited `config.yaml` section silently keeps its stale in-memory value after a SIGHUP reload until a full restart (found for `notifier.SetConfig` via code review, not live testing — see `internal/admin/AGENTS.md`). A new live-editable section needs a matching call added here too.
 
 ## Work Guidance
 

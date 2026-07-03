@@ -49,6 +49,7 @@ func vpnSnapshot(s vpn.Stats) snapshot {
 // polls, so a flapping connection or a steady auto-paused state doesn't
 // re-fire the same notification on every tick.
 type trackedState struct {
+	wasDown           bool // curr was down as of the previous tick (independent of whether it was notified)
 	notifiedDown      bool // a "disconnected" notification was sent for the current down period
 	notifiedAutoPause bool // an "auto-paused" notification was sent for the current auto-pause period
 }
@@ -64,19 +65,28 @@ func diff(prev trackedState, seen bool, curr snapshot) (event string, next track
 
 	if !seen {
 		// First observation of this name (process startup): seed state
-		// without notifying, so the initial connect/pause never fires.
+		// without notifying, so the initial connect/pause never fires. wasDown
+		// is seeded too, so a slow initial connect (still down on the second
+		// tick) isn't mistaken for a fresh disconnection.
+		next.wasDown = curr.down
 		next.notifiedAutoPause = curr.autoPaused
 		return "", next
 	}
 
 	switch {
-	case curr.down && !prev.notifiedDown:
+	case curr.down && !prev.wasDown:
+		next.wasDown = true
 		next.notifiedDown = true
 		event = "disconnected"
-	case curr.connected && prev.notifiedDown:
+	case curr.down:
+		// Continuing down streak (real or seeded at startup): already
+		// accounted for, don't re-fire.
+	case curr.connected && prev.wasDown && prev.notifiedDown:
+		next.wasDown = false
 		next.notifiedDown = false
 		event = "reconnected"
 	case curr.connected:
+		next.wasDown = false
 		next.notifiedDown = false
 	}
 
@@ -123,6 +133,9 @@ func Watch(ctx context.Context, n *Notifier, tunnels TunnelStatter, vpns VPNStat
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if !n.Config().Enabled {
+				continue
+			}
 			for name, s := range tunnels.AllStats() {
 				prev, seen := tunnelState[name]
 				event, next := diff(prev, seen, tunnelSnapshot(s))
