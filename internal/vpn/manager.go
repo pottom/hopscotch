@@ -39,6 +39,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			ReconnectDelay:     cfg.ReconnectDelay,
 			ReconnectMaxDelay:  cfg.ReconnectMaxDelay,
 			AutoPauseThreshold: cfg.AutoPauseThreshold,
+			AutoResumeAfter:    cfg.AutoResumeAfter,
 		})
 	}
 	return m

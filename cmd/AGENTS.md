@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`cobra`-based CLI: all hopscotch subcommands (`start`, `stop`, `status`, `logs`, `ping`, `vpn`, `trust`, `update`, `validate`, `ssh-config`, `shell-init`, `enable`, `disable`, `proxy-connect`). `root.go` wires global flags (`--config`, `--verbose`, `--log-file`) and gates logger init in `PersistentPreRunE`.
+`cobra`-based CLI: all hopscotch subcommands (`start`, `stop`, `status`, `logs`, `ping`, `vpn`, `tunnel`, `trust`, `update`, `validate`, `ssh-config`, `shell-init`, `enable`, `disable`, `proxy-connect`). `root.go` wires global flags (`--config`, `--verbose`, `--log-file`) and gates logger init in `PersistentPreRunE`.
 
 ## Ownership
 
@@ -15,6 +15,7 @@ Everything under `cmd/`. `start.go` additionally owns process lifecycle (daemoni
 - The "already running" PID check runs unconditionally, even with `--foreground` (skipped only in container mode via `HOPSCOTCH_CONTAINER=true`, which also redirects `internal/state`'s file paths to `/tmp`). `--restart` sends SIGTERM, waits 5s, then SIGKILL, before proceeding.
 - Startup order in `runStart`: load config → resolve `internal/state.NewPausedTracker` (config dir) → construct managers → pre-apply persisted pause state to each manager *before* any `Run()` goroutine starts → construct `admin.Server` (passing the same tracker) → start all `Run()` goroutines via `errgroup`.
 - `config.WatchSIGHUP`'s reload callback in `runStart` must apply *every* live-reloadable config section, not just the ones a given change happens to touch — it currently calls `mgr.ApplyConfig`, `router.UpdateRules`, `refreshSSHConfig`, and `notifier.SetConfig`. Missing one here means a hand-edited `config.yaml` section silently keeps its stale in-memory value after a SIGHUP reload until a full restart (found for `notifier.SetConfig` via code review, not live testing — see `internal/admin/AGENTS.md`). A new live-editable section needs a matching call added here too.
+- `tunnel.go`'s `hopscotch tunnel add` is a CLI-side config editor (append a `TunnelConfig`, `config.ApplyDefaults` + `config.Validate` the whole in-memory `*Config` before `config.WriteConfig` — never write first and validate after) — it does not touch a running daemon at all; the new tunnel only takes effect after a SIGHUP reload or restart, same as any other hand-edit. `config.ApplyDefaults`/`config.Validate` are exported specifically so a CLI wizard can normalize/check an in-memory config before persisting it — reuse them (don't re-open `Load`'s file-parsing path or hand-roll validation) for any future `<subcommand> add`-style command (e.g. a hypothetical `hopscotch vpn add`).
 
 ## Work Guidance
 

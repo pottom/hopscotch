@@ -105,6 +105,136 @@ func TestTunnelAutoPauseResumeResetsCounter(t *testing.T) {
 	}
 }
 
+func TestTunnelAutoResumeAfterCooldown(t *testing.T) {
+	host, port := closedPort(t)
+
+	cfg := testTunnelCfg("autoresume", 1097)
+	cfg.Host = host
+	cfg.Port = port
+	cfg.DialTimeout = 2
+	cfg.ReconnectDelay = 1
+	cfg.ReconnectMaxDelay = 1
+	cfg.AutoPauseThreshold = 2
+	cfg.AutoResumeAfter = 1
+
+	tun := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		tun.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitForStatus(t, tun, StatusPaused, 5*time.Second)
+	if !tun.Stats().AutoPaused {
+		t.Fatal("expected an auto-pause before testing auto-resume")
+	}
+
+	// After the 1s cooldown it should retry on its own — AutoPaused clears
+	// (same reset Resume() does) even though the port is still closed and
+	// it'll likely auto-pause again shortly after.
+	deadline := time.After(5 * time.Second)
+	for {
+		if !tun.Stats().AutoPaused {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("tunnel never auto-resumed after the cooldown")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func TestTunnelAutoResumeDisabledByDefault(t *testing.T) {
+	host, port := closedPort(t)
+
+	cfg := testTunnelCfg("autoresume-disabled", 1098)
+	cfg.Host = host
+	cfg.Port = port
+	cfg.DialTimeout = 2
+	cfg.ReconnectDelay = 1
+	cfg.ReconnectMaxDelay = 1
+	cfg.AutoPauseThreshold = 2
+	// AutoResumeAfter left at zero value (disabled).
+
+	tun := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		tun.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitForStatus(t, tun, StatusPaused, 5*time.Second)
+
+	// Well past what any cooldown would need if the feature were mistakenly
+	// active — confirm it never resumes on its own.
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-time.After(50 * time.Millisecond):
+			if tun.Stats().Status != StatusPaused {
+				t.Fatal("tunnel left paused state despite auto_resume_after being unset (0)")
+			}
+		}
+	}
+}
+
+func TestTunnelManualPauseDuringCooldownIsNotOverridden(t *testing.T) {
+	host, port := closedPort(t)
+
+	cfg := testTunnelCfg("autoresume-manual-override", 1099)
+	cfg.Host = host
+	cfg.Port = port
+	cfg.DialTimeout = 2
+	cfg.ReconnectDelay = 1
+	cfg.ReconnectMaxDelay = 1
+	cfg.AutoPauseThreshold = 2
+	cfg.AutoResumeAfter = 1
+
+	tun := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		tun.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitForStatus(t, tun, StatusPaused, 5*time.Second)
+	if !tun.Stats().AutoPaused {
+		t.Fatal("expected an auto-pause before testing the manual-override race")
+	}
+
+	// A human explicitly re-pauses while the cooldown is armed — this must
+	// stick; the timer firing afterward must not silently resume it.
+	tun.Pause()
+
+	time.Sleep(2 * time.Second) // > AutoResumeAfter, so the stale timer fires during this window
+
+	st := tun.Stats()
+	if st.Status != StatusPaused {
+		t.Errorf("Status = %v, want %v (manual pause must survive the auto-resume timer firing)", st.Status, StatusPaused)
+	}
+	if st.AutoPaused {
+		t.Error("AutoPaused = true, want false (Pause() marks it manual)")
+	}
+}
+
 func TestTunnelAutoPauseDisabledByDefault(t *testing.T) {
 	host, port := closedPort(t)
 

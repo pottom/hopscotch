@@ -347,6 +347,7 @@ admin:
 | `force_pty` | `false` | Open a PTY shell session — for jump hosts that enforce channel policies (SPS/SCB appliances) |
 | `pty_poke_interval` | `60` | Seconds between no-op keystrokes sent on the PTY channel (only when `force_pty` is set); keeps SCB session-recording idle timeouts from tearing down the connection |
 | `auto_pause_threshold` | `0` (disabled) | Pause the tunnel automatically after this many consecutive failed connection attempts, instead of retrying forever. The TUI/web UI show `paused (auto)` (vs. plain `paused` for a manual pause) so it's clear the app did this, not you. Resume (manually, via TUI/web UI) resets the counter and clears the auto-pause marker. |
+| `auto_resume_after` | `0` (disabled) | Seconds after an *automatic* pause before hopscotch retries on its own — for a flaky link that's expected to come back (vs. one that needs a human to look at it). Only applies to auto-pauses; a manual pause (TUI/web UI) always waits for you regardless of this setting. |
 
 ### VPN integration
 
@@ -418,6 +419,7 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |
 | `auto_pause_threshold` | `0` (disabled) | Pause the VPN automatically after this many consecutive failed connection attempts (e.g. a permanently wrong password), instead of retrying forever. The TUI/web UI show `paused (auto)` (vs. plain `paused` for a manual pause) so it's clear the app did this, not you. Resume (manually, via TUI/web UI) resets the counter and clears the auto-pause marker. |
+| `auto_resume_after` | `0` (disabled) | Seconds after an *automatic* pause before hopscotch retries on its own. Only applies to auto-pauses; a manual pause always waits for you regardless of this setting. |
 
 ### Sharing the proxy on your network
 
@@ -455,6 +457,8 @@ hopscotch enable                   # activate proxy in current shell
 hopscotch disable                  # deactivate proxy, restore previous env
 hopscotch shell-init               # print shell integration (eval once in .zshrc)
 hopscotch vpn password <name>      # store or update VPN password in OS keychain
+hopscotch tunnel add                # interactive wizard: add a tunnel to the config file
+hopscotch tunnel add <name> --host db.internal --user alice --local-port 1081 -y  # non-interactive (scripting)
 hopscotch update                   # check for newer release and update the binary
 hopscotch update --check           # check only, do not download
 hopscotch trust <name|host|all>    # add SSH host key to known_hosts

@@ -45,6 +45,7 @@ type TunnelConfig struct {
 	RequiresVPN        string   `yaml:"requires_vpn"`         // wait for this VPN before connecting
 	PreConnect         []string `yaml:"pre_connect"`          // commands to run before each dial attempt
 	AutoPauseThreshold int      `yaml:"auto_pause_threshold"` // consecutive failed connection attempts before auto-pausing; 0 disables
+	AutoResumeAfter    int      `yaml:"auto_resume_after"`    // seconds after an auto-pause before retrying automatically; 0 disables (stays paused until a manual reconnect/resume)
 }
 
 // VPNConfig describes a VPN connection managed as a subprocess.
@@ -68,6 +69,7 @@ type VPNConfig struct {
 	ReconnectDelay     int      `yaml:"reconnect_delay"`
 	ReconnectMaxDelay  int      `yaml:"reconnect_max_delay"`
 	AutoPauseThreshold int      `yaml:"auto_pause_threshold"` // consecutive failed connection attempts before auto-pausing; 0 disables
+	AutoResumeAfter    int      `yaml:"auto_resume_after"`    // seconds after an auto-pause before retrying automatically; 0 disables (stays paused until a manual reconnect/resume)
 }
 
 // TargetDirect and TargetBlock are the special target values for routing rules.
@@ -125,6 +127,23 @@ type Config struct {
 
 	// resolved path, not from YAML
 	Path string `yaml:"-"`
+}
+
+// Validate runs the same structural checks Load applies after parsing
+// (unique names/ports, required fields, cross-references) against an
+// already-in-memory Config — e.g. one a CLI wizard just modified, before
+// writing it to disk with WriteConfig.
+func Validate(cfg *Config) error {
+	return validate(cfg)
+}
+
+// ApplyDefaults fills zero-valued optional fields with their defaults — the
+// same pass Load runs after parsing. Useful before writing an in-memory
+// Config a CLI wizard built by hand, so a newly-added entry serializes with
+// the same concrete values as one that came from a real Load, instead of
+// bare zeros sitting next to its siblings' resolved defaults.
+func ApplyDefaults(cfg *Config) {
+	applyDefaults(cfg)
 }
 
 // Load finds and parses the config file, applying defaults.
@@ -314,6 +333,9 @@ func validate(cfg *Config) error {
 		if t.AutoPauseThreshold < 0 {
 			return &ConfigError{Field: fmt.Sprintf("tunnels[%s].auto_pause_threshold", t.Name), Message: "must be >= 0 (0 disables auto-pause)"}
 		}
+		if t.AutoResumeAfter < 0 {
+			return &ConfigError{Field: fmt.Sprintf("tunnels[%s].auto_resume_after", t.Name), Message: "must be >= 0 (0 disables auto-resume)"}
+		}
 		if seen[t.Name] {
 			return &ConfigError{Field: "tunnels[].name", Message: fmt.Sprintf("duplicate tunnel name %q", t.Name)}
 		}
@@ -353,6 +375,9 @@ func validate(cfg *Config) error {
 		}
 		if v.AutoPauseThreshold < 0 {
 			return &ConfigError{Field: fmt.Sprintf("vpn[%s].auto_pause_threshold", v.Name), Message: "must be >= 0 (0 disables auto-pause)"}
+		}
+		if v.AutoResumeAfter < 0 {
+			return &ConfigError{Field: fmt.Sprintf("vpn[%s].auto_resume_after", v.Name), Message: "must be >= 0 (0 disables auto-resume)"}
 		}
 		if vpnNames[v.Name] {
 			return &ConfigError{Field: "vpn[].name", Message: fmt.Sprintf("duplicate vpn name %q", v.Name)}

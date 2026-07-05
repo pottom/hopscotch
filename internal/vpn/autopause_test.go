@@ -75,6 +75,110 @@ func TestVPNAutoPauseResumeResetsCounter(t *testing.T) {
 	}
 }
 
+func TestVPNAutoResumeAfterCooldown(t *testing.T) {
+	cfg := testConnConfig("autoresume")
+	cfg.AutoPauseThreshold = 2
+	cfg.AutoResumeAfter = 1
+	conn := newConnection(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		conn.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitForVPNState(t, conn, StatePaused, 5*time.Second)
+	if !conn.Stats().AutoPaused {
+		t.Fatal("expected an auto-pause before testing auto-resume")
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		if !conn.Stats().AutoPaused {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("vpn never auto-resumed after the cooldown")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func TestVPNAutoResumeDisabledByDefault(t *testing.T) {
+	cfg := testConnConfig("autoresume-disabled")
+	cfg.AutoPauseThreshold = 2
+	// AutoResumeAfter left at zero value (disabled).
+	conn := newConnection(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		conn.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitForVPNState(t, conn, StatePaused, 5*time.Second)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-time.After(50 * time.Millisecond):
+			if conn.State() != StatePaused {
+				t.Fatal("vpn left paused state despite auto_resume_after being unset (0)")
+			}
+		}
+	}
+}
+
+func TestVPNManualPauseDuringCooldownIsNotOverridden(t *testing.T) {
+	cfg := testConnConfig("autoresume-manual-override")
+	cfg.AutoPauseThreshold = 2
+	cfg.AutoResumeAfter = 1
+	conn := newConnection(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		conn.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitForVPNState(t, conn, StatePaused, 5*time.Second)
+	if !conn.Stats().AutoPaused {
+		t.Fatal("expected an auto-pause before testing the manual-override race")
+	}
+
+	// A human explicitly re-pauses while the cooldown is armed — this must
+	// stick; the timer firing afterward must not silently resume it.
+	conn.Pause()
+
+	time.Sleep(2 * time.Second) // > AutoResumeAfter, so the stale timer fires during this window
+
+	st := conn.Stats()
+	if st.State != StatePaused {
+		t.Errorf("State = %v, want %v (manual pause must survive the auto-resume timer firing)", st.State, StatePaused)
+	}
+	if st.AutoPaused {
+		t.Error("AutoPaused = true, want false (Pause() marks it manual)")
+	}
+}
+
 func TestVPNAutoPauseDisabledByDefault(t *testing.T) {
 	cfg := testConnConfig("autopause-disabled")
 	// AutoPauseThreshold left at zero value (disabled).

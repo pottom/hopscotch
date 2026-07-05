@@ -72,6 +72,7 @@ type connConfig struct {
 	ReconnectDelay     int
 	ReconnectMaxDelay  int
 	AutoPauseThreshold int // consecutive failed connection attempts before auto-pausing; 0 disables
+	AutoResumeAfter    int // seconds after an auto-pause before retrying automatically; 0 disables
 }
 
 // Connection manages one VPN subprocess.
@@ -235,12 +236,33 @@ func (c *Connection) Run(ctx context.Context) error {
 			c.setState(StatePaused)
 			c.lastError.Store("")
 			c.nextReconnectAt.Store(time.Time{})
+
+			// Only an auto-pause (never a manual Pause()) is eligible to retry on
+			// its own — a human's explicit pause stays paused until they act.
+			var autoResume <-chan time.Time
+			if c.autoPaused.Load() && c.cfg.AutoResumeAfter > 0 {
+				autoResume = time.After(time.Duration(c.cfg.AutoResumeAfter) * time.Second)
+			}
+
 			select {
 			case <-ctx.Done():
 				c.setState(StateDisconnected)
 				return nil
 			case <-c.resume:
 				b.reset()
+			case <-autoResume:
+				// Re-check: a manual Pause() may have landed while the cooldown was
+				// armed, which must not be overridden by this timer firing anyway.
+				if c.autoPaused.Load() {
+					log.Info("vpn auto-resuming after cooldown",
+						"vpn", c.cfg.Name,
+						"cooldown", c.cfg.AutoResumeAfter,
+					)
+					c.paused.Store(false)
+					c.consecutiveFailures.Store(0)
+					c.autoPaused.Store(false)
+					b.reset()
+				}
 			}
 			continue
 		}

@@ -252,6 +252,14 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			s.LastError = ""
 			s.NextReconnectAt = time.Time{}
 			t.stats.Store(s)
+
+			// Only an auto-pause (never a manual Pause()) is eligible to retry on
+			// its own — a human's explicit pause stays paused until they act.
+			var autoResume <-chan time.Time
+			if t.autoPaused.Load() && t.cfg.AutoResumeAfter > 0 {
+				autoResume = t.clock.After(time.Duration(t.cfg.AutoResumeAfter) * time.Second)
+			}
+
 			select {
 			case <-ctx.Done():
 				t.setStatus(StatusDisconnected)
@@ -259,6 +267,20 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			case <-t.resume:
 				backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
 				t.setStatus(StatusConnecting)
+			case <-autoResume:
+				// Re-check: a manual Pause() may have landed while the cooldown was
+				// armed, which must not be overridden by this timer firing anyway.
+				if t.autoPaused.Load() {
+					log.Info("tunnel auto-resuming after cooldown",
+						"tunnel", t.cfg.Name,
+						"cooldown", t.cfg.AutoResumeAfter,
+					)
+					t.paused.Store(false)
+					t.consecutiveFailures.Store(0)
+					t.autoPaused.Store(false)
+					backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
+					t.setStatus(StatusConnecting)
+				}
 			}
 			continue
 		}
