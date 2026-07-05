@@ -7,12 +7,10 @@ Output .hopscotch-demo-tui.gif
 
 Set Shell "bash"
 Set FontFamily "Menlo"
-Set FontSize 15
-Set Width 1600
-Set Height 780
+Set FontSize 20
+Set Width 2100
+Set Height 1100
 Set Padding 20
-Set WindowBar Colorful
-Set BorderRadius 8
 
 Type "dist/hopscotch status --config $HOPSCOTCH_CONFIG" Enter
 Sleep 3s
