@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DOCS_DIR="$REPO_ROOT/docs"
 
-FAKE_DOMAIN="hopscotch-demo.internal"
+FAKE_DOMAIN="hs.test"  # .test is IANA/RFC 2606-reserved for non-production use — short too, so it fits the TUI's Host column without wrapping
 SSHD_PORT=2299
 PROXY_PORT=18080
 ADMIN_PORT=18089

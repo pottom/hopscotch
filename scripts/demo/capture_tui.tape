@@ -8,7 +8,7 @@ Output .hopscotch-demo-tui.gif
 Set Shell "bash"
 Set FontFamily "Menlo"
 Set FontSize 15
-Set Width 1400
+Set Width 1600
 Set Height 780
 Set Padding 20
 Set WindowBar Colorful
