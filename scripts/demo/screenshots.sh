@@ -28,6 +28,11 @@ PROXY_PORT=18080
 ADMIN_PORT=18089
 RESPONDER_PORT=18100
 VPN_PING_PORT=18101
+BACKUP_VPN_PING_PORT=18102
+AUTH_PROXY_PORT=18082
+AUTH_ADMIN_PORT=18092
+AUTH_USERNAME="demo"
+AUTH_PASSWORD="hopscotch-demo"
 
 STATE_FILE="/tmp/hopscotch-demo-state.env"  # scratch dir + PIDs, shared across subcommands
 
@@ -93,6 +98,19 @@ while True:
 " > "$scratch/vpn-ping.log" 2>&1 &
   local vpnping_pid=$!
 
+  log "starting backup-vpn ping-target listener on 127.0.0.1:$BACKUP_VPN_PING_PORT..."
+  python3 -c "
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(('127.0.0.1', $BACKUP_VPN_PING_PORT))
+s.listen(5)
+while True:
+    conn, _ = s.accept()
+    conn.close()
+" > "$scratch/backup-vpn-ping.log" 2>&1 &
+  local backupvpnping_pid=$!
+
   log "adding temporary /etc/hosts block (sudo)..."
   local hosts_block
   hosts_block="$HOSTS_MARKER_BEGIN (scripts/demo/screenshots.sh — safe to delete this block)
@@ -117,10 +135,15 @@ SCRATCH=$scratch
 SSHD_PID=$sshd_pid
 RESPONDER_PID=$responder_pid
 VPNPING_PID=$vpnping_pid
+BACKUPVPNPING_PID=$backupvpnping_pid
 PROXY_PORT=$PROXY_PORT
 ADMIN_PORT=$ADMIN_PORT
 RESPONDER_PORT=$RESPONDER_PORT
 FAKE_DOMAIN=$FAKE_DOMAIN
+AUTH_PROXY_PORT=$AUTH_PROXY_PORT
+AUTH_ADMIN_PORT=$AUTH_ADMIN_PORT
+AUTH_USERNAME=$AUTH_USERNAME
+AUTH_PASSWORD=$AUTH_PASSWORD
 EOF
 
   cat > "$scratch/config.yaml" <<EOF
@@ -180,6 +203,13 @@ vpn:
     ping_host: 127.0.0.1:$VPN_PING_PORT
     password_env: HOPSCOTCH_DEMO_VPN_PASSWORD
 
+  - name: backup-vpn
+    type: openconnect
+    server: vpn-backup.$FAKE_DOMAIN
+    binary: $SCRIPT_DIR/fake-openconnect.sh
+    ping_host: 127.0.0.1:$BACKUP_VPN_PING_PORT
+    password_env: HOPSCOTCH_DEMO_VPN_PASSWORD
+
 proxy:
   port: $PROXY_PORT
   bind: 127.0.0.1
@@ -236,6 +266,44 @@ EOF
   local hopscotch_pid=$!
   echo "HOPSCOTCH_PID=$hopscotch_pid" >> "$STATE_FILE"
 
+  # Second, minimal instance with admin auth enabled, purely to screenshot the
+  # login page (docs/ui-login.png) — kept separate so the main instance's
+  # admin API stays unauthenticated and every curl call above/in warm() keeps
+  # working unchanged. Reuses db-primary's tunnel definition; connecting isn't
+  # needed since only the pre-login page gets captured. Lives in its own
+  # subdir (own PausedTracker state.json) with its own $HOME (own PID/cache
+  # dir, since HOPSCOTCH_CONTAINER's /tmp path is fixed and would otherwise
+  # collide with the main instance's PID file and falsely trigger
+  # "already running").
+  mkdir -p "$scratch/auth/home"
+  cat > "$scratch/auth/config.yaml" <<EOF
+tunnels:
+  - name: db-primary
+    host: db-primary.$FAKE_DOMAIN
+    port: $SSHD_PORT
+    user: $(whoami)
+    identity_file: $scratch/id_ed25519
+    known_hosts_file: $scratch/known_hosts
+    local_port: 16001
+
+proxy:
+  port: $AUTH_PROXY_PORT
+  bind: 127.0.0.1
+
+admin:
+  port: $AUTH_ADMIN_PORT
+  bind: 127.0.0.1
+  username: $AUTH_USERNAME
+  password: $AUTH_PASSWORD
+EOF
+
+  log "starting second (auth-enabled) hopscotch instance for the login screenshot..."
+  HOME="$scratch/auth/home" \
+    "$REPO_ROOT/dist/hopscotch" start --foreground --config "$scratch/auth/config.yaml" \
+    > "$scratch/auth/hopscotch.log" 2>&1 &
+  local auth_hopscotch_pid=$!
+  echo "AUTH_HOPSCOTCH_PID=$auth_hopscotch_pid" >> "$STATE_FILE"
+
   log "setup done. state: $STATE_FILE"
 }
 
@@ -251,6 +319,17 @@ warm() {
     tries=$((tries + 1))
     if [ "$tries" -gt 30 ]; then
       echo "hopscotch admin API never came up — see $SCRATCH/hopscotch.log" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+
+  log "waiting for the auth-enabled instance's admin API (login page)..."
+  tries=0
+  until curl -sf "http://127.0.0.1:$AUTH_ADMIN_PORT/login" > /dev/null 2>&1; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 30 ]; then
+      echo "auth instance's admin API never came up — see $SCRATCH/auth/hopscotch.log" >&2
       exit 1
     fi
     sleep 1
@@ -282,6 +361,9 @@ print('yes' if ready else 'no')
 
   log "pausing staging-jump (manual pause demo state)..."
   curl -sf -X POST "http://127.0.0.1:$ADMIN_PORT/api/tunnels/staging-jump/pause" > /dev/null
+
+  log "pausing backup-vpn (manual pause demo state)..."
+  curl -sf -X POST "http://127.0.0.1:$ADMIN_PORT/api/vpns/backup-vpn/pause" > /dev/null
 
   log "waiting for edge-cache to auto-pause (real connection-refused failures)..."
   tries=0
@@ -354,7 +436,7 @@ capture() {
   rm -f "$REPO_ROOT/.hopscotch-demo-tui.gif"  # vhs's Output artifact — only the mid-tape Screenshots matter
 
   log "capturing web UI screenshots (Playwright)..."
-  NODE_PATH="$(npm root -g)" node "$SCRIPT_DIR/capture_web.js" "$ADMIN_PORT" "$DOCS_DIR"
+  NODE_PATH="$(npm root -g)" node "$SCRIPT_DIR/capture_web.js" "$ADMIN_PORT" "$DOCS_DIR" "$AUTH_ADMIN_PORT"
 
   # docs/AGENTS.md: screenshots must stay identical in both docs/ (GitHub
   # README) and internal/admin/ui/docs/ (the served in-app copy).
@@ -373,7 +455,7 @@ teardown() {
   source "$STATE_FILE"
 
   log "tearing down..."
-  for pid_var in TRAFFIC_PID HOPSCOTCH_PID VPNPING_PID RESPONDER_PID SSHD_PID; do
+  for pid_var in TRAFFIC_PID HOPSCOTCH_PID AUTH_HOPSCOTCH_PID VPNPING_PID BACKUPVPNPING_PID RESPONDER_PID SSHD_PID; do
     local pid="${!pid_var:-}"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill -TERM "$pid" 2>/dev/null || true

@@ -1350,7 +1350,7 @@ window.routesTesterUpdate = function(input) {
   let matchIdx = findMatchIdx(input);
   if (result) {
     if (matchIdx !== undefined) {
-      const via = routes[matchIdx].tunnel || routes[matchIdx].via || 'direct';
+      const via = routes[matchIdx].target || 'direct';
       result.innerHTML = `<span class="routes-tester-match">✓ rule ${matchIdx + 1} matched &rarr; <strong>${via}</strong></span>`;
     } else {
       result.innerHTML = `<span class="routes-tester-nomatch">no rule matched &rarr; direct (fallback)</span>`;
