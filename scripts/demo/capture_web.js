@@ -20,7 +20,9 @@ async function main() {
 
   await page.goto(baseURL);
   await waitForReady(page);
-  await page.waitForTimeout(500); // let one SSE tick land so bps numbers aren't blank
+  await page.click('tr.data-row[data-name="db-primary"]'); // expand its traffic chart
+  await page.waitForSelector('tr.graph-row[data-name="db-primary"] canvas');
+  await page.waitForTimeout(10000); // let enough SSE ticks land for a real waveform, not a flat line
   await page.screenshot({ path: `${docsDir}/ui-status.png` });
 
   await page.evaluate(() => window.switchTab('patterns'));

@@ -99,6 +99,7 @@ while True:
 127.0.0.1 db-primary.$FAKE_DOMAIN
 127.0.0.1 api-gateway.$FAKE_DOMAIN
 127.0.0.1 edge-cache.$FAKE_DOMAIN
+127.0.0.1 cache-warm.$FAKE_DOMAIN
 127.0.0.1 jump.staging.$FAKE_DOMAIN
 127.0.0.1 static-assets.$FAKE_DOMAIN
 $HOSTS_MARKER_END"
@@ -162,6 +163,15 @@ tunnels:
     local_port: 15004
     auto_pause_threshold: 1
 
+  - name: cache-warm
+    host: cache-warm.$FAKE_DOMAIN
+    port: 19998
+    user: $(whoami)
+    identity_file: $scratch/id_ed25519
+    known_hosts_file: $scratch/known_hosts
+    local_port: 15005
+    auto_pause_threshold: 0
+
 vpn:
   - name: corp-vpn
     type: openconnect
@@ -182,6 +192,8 @@ proxy:
       comment: Internal API gateway
     - pattern: edge-cache.$FAKE_DOMAIN
       target: edge-cache
+    - pattern: cache-warm.$FAKE_DOMAIN
+      target: cache-warm
     - pattern: "10.42.0.0/16"
       target: block
       comment: Legacy test range, intentionally blocked
@@ -289,6 +301,25 @@ print('yes' if d.get('tunnels',{}).get('edge-cache',{}).get('auto_paused') else 
     sleep 1
   done
   log "  auto-paused."
+
+  log "waiting for cache-warm to show a live retry error (auto-pause disabled — keeps failing/retrying)..."
+  tries=0
+  while true; do
+    local errored
+    errored=$(curl -sf "http://127.0.0.1:$ADMIN_PORT/status" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('yes' if d.get('tunnels',{}).get('cache-warm',{}).get('last_error') else 'no')
+")
+    [ "$errored" = "yes" ] && break
+    tries=$((tries + 1))
+    if [ "$tries" -gt 30 ]; then
+      echo "cache-warm never showed a retry error — see $SCRATCH/hopscotch.log" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  log "  erroring/retrying as expected."
 
   log "starting traffic generator (background, steady pace)..."
   (

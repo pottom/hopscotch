@@ -15,6 +15,9 @@ Set Padding 20
 Type "dist/hopscotch status --config $HOPSCOTCH_CONFIG" Enter
 Sleep 3s
 
+Type "f"
+Sleep 10s
+
 Screenshot docs/tui-status.png
 
 Type "2"
