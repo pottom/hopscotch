@@ -2,6 +2,7 @@ package vpn
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -177,6 +178,45 @@ func TestVPNManualPauseDuringCooldownIsNotOverridden(t *testing.T) {
 	if st.AutoPaused {
 		t.Error("AutoPaused = true, want false (Pause() marks it manual)")
 	}
+}
+
+// TestVPNPauseResumeRaceWithAutoResume hammers Pause()/Resume() from several
+// goroutines concurrently with Run()'s own auto-pause/auto-resume cycling.
+// Regression test for the pauseMu fix (mirrors
+// tunnel.TestTunnelPauseResumeRaceWithAutoResume): confirms the new locking
+// doesn't deadlock under concurrent callers and gives `go test -race` many
+// chances to flag anything the fix missed.
+func TestVPNPauseResumeRaceWithAutoResume(t *testing.T) {
+	cfg := testConnConfig("pause-resume-race")
+	cfg.AutoPauseThreshold = 1
+	cfg.AutoResumeAfter = 1
+	conn := newConnection(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		conn.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	stopAt := time.Now().Add(2 * time.Second)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for time.Now().Before(stopAt) {
+				conn.Pause()
+				conn.Resume()
+				_ = conn.Stats()
+			}
+		})
+	}
+
+	wg.Wait()
 }
 
 func TestVPNAutoPauseDisabledByDefault(t *testing.T) {

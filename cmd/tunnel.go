@@ -3,7 +3,9 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -186,13 +188,30 @@ func runTunnelAdd(_ *cobra.Command, args []string) error {
 
 	candidate := *cfg
 	candidate.Tunnels = append(append([]config.TunnelConfig{}, cfg.Tunnels...), newTunnel)
-	config.ApplyDefaults(&candidate)
-	if err := config.Validate(&candidate); err != nil {
+
+	// Validate against a defaulted copy, not candidate itself: ApplyDefaults
+	// expands a leading "~/" to an absolute home path and fills in numeric
+	// defaults (port 22, timeouts, ...) in place, and Load() already reapplies
+	// the same defaults on every read. Running it on candidate would bake the
+	// expanded/defaulted values into the file we're about to write, replacing
+	// the user's portable "~/..." with this machine's literal home directory.
+	// Deep-copy VPNs (not just Tunnels) into this scratch copy too, since a
+	// bare struct-copy of Config only copies slice headers — ApplyDefaults
+	// would otherwise mutate cfg.VPNs's shared backing array in place.
+	validated := candidate
+	validated.Tunnels = append([]config.TunnelConfig{}, candidate.Tunnels...)
+	validated.VPNs = append([]config.VPNConfig{}, candidate.VPNs...)
+	config.ApplyDefaults(&validated)
+	if err := config.Validate(&validated); err != nil {
 		return fmt.Errorf("new tunnel is invalid, not saved: %w", err)
 	}
 
 	if identityFile != "" {
-		if err := security.CheckKeyFiles([]string{identityFile}); err != nil {
+		expanded := identityFile
+		if home, herr := os.UserHomeDir(); herr == nil && home != "" && strings.HasPrefix(expanded, "~/") {
+			expanded = filepath.Join(home, expanded[2:])
+		}
+		if err := security.CheckKeyFiles([]string{expanded}); err != nil {
 			fmt.Println(muted.Render("  warning: " + err.Error()))
 		}
 	}
@@ -223,14 +242,20 @@ func fieldString(reader *bufio.Reader, label, flagVal string, yes, required bool
 			fmt.Printf("%s: ", label)
 		}
 		line, err := reader.ReadString('\n')
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return "", fmt.Errorf("reading input: %w", err)
 		}
+		// ReadString returns whatever it read before hitting EOF (e.g. the
+		// last line of piped input with no trailing newline) alongside the
+		// error — only bail on a real read error, not on EOF with data.
 		line = strings.TrimSpace(line)
 		if line == "" {
 			line = flagVal
 		}
 		if line == "" && required {
+			if err == io.EOF {
+				return "", fmt.Errorf("%s is required, but reached end of input", label)
+			}
 			fmt.Println("  required, try again")
 			continue
 		}
@@ -247,15 +272,18 @@ func fieldInt(reader *bufio.Reader, label string, defaultVal int, yes bool) (int
 	for {
 		fmt.Printf("%s [%d]: ", label, defaultVal)
 		line, err := reader.ReadString('\n')
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return 0, fmt.Errorf("reading input: %w", err)
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
 			return defaultVal, nil
 		}
-		n, err := strconv.Atoi(line)
-		if err != nil {
+		n, convErr := strconv.Atoi(line)
+		if convErr != nil {
+			if err == io.EOF {
+				return 0, fmt.Errorf("%s: %q is not a number, and reached end of input", label, line)
+			}
 			fmt.Println("  not a number, try again")
 			continue
 		}

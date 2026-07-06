@@ -44,6 +44,11 @@ log() { echo "[demo] $*"; }
 # ── setup ──────────────────────────────────────────────────────────────────────
 
 setup() {
+  if [ -f "$STATE_FILE" ]; then
+    log "found a leftover state file from a previous run — tearing it down first..."
+    teardown
+  fi
+
   local scratch
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/hopscotch-demo.XXXXXX")
   log "scratch dir: $scratch"

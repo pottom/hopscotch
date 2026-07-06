@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -233,6 +234,55 @@ func TestTunnelManualPauseDuringCooldownIsNotOverridden(t *testing.T) {
 	if st.AutoPaused {
 		t.Error("AutoPaused = true, want false (Pause() marks it manual)")
 	}
+}
+
+// TestTunnelPauseResumeRaceWithAutoResume hammers Pause()/Resume() from
+// several goroutines concurrently with Run()'s own auto-pause/auto-resume
+// cycling (a short AutoResumeAfter keeps that cycle firing throughout the
+// test). This is a regression test for the pauseMu fix: the auto-resume
+// timer's check-then-mutate of paused/autoPaused/consecutiveFailures used to
+// run outside any lock, so a concurrent Pause()/Resume() could interleave
+// with it mid-sequence. Run under `go test -race`, this both confirms the
+// new locking doesn't deadlock under concurrent callers and gives the race
+// detector many chances to flag any unsynchronized access the fix missed.
+func TestTunnelPauseResumeRaceWithAutoResume(t *testing.T) {
+	host, port := closedPort(t)
+
+	cfg := testTunnelCfg("pause-resume-race", 1100)
+	cfg.Host = host
+	cfg.Port = port
+	cfg.DialTimeout = 1
+	cfg.ReconnectDelay = 1
+	cfg.ReconnectMaxDelay = 1
+	cfg.AutoPauseThreshold = 1
+	cfg.AutoResumeAfter = 1
+
+	tun := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		tun.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	stopAt := time.Now().Add(2 * time.Second)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for time.Now().Before(stopAt) {
+				tun.Pause()
+				tun.Resume()
+				_ = tun.Stats()
+			}
+		})
+	}
+
+	wg.Wait()
 }
 
 func TestTunnelAutoPauseDisabledByDefault(t *testing.T) {

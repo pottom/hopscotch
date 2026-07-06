@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -100,6 +101,15 @@ type Connection struct {
 	// distinguish the two. Written by both the Run() goroutine and Pause()/
 	// Resume() (a different goroutine), hence atomic.
 	autoPaused atomic.Bool
+
+	// pauseMu serializes every read-then-write transition of the pause state
+	// (paused/autoPaused/consecutiveFailures): Pause(), Resume(), Run()'s
+	// auto-pause trigger, and Run()'s auto-resume-timer fire all take it for
+	// their whole check+mutate sequence, so none of them can interleave and
+	// leave the three fields in a self-contradictory combination (e.g. a
+	// concurrent Resume() landing between the auto-resume case's re-check of
+	// autoPaused and its own Store calls).
+	pauseMu sync.Mutex
 }
 
 func newConnection(cfg connConfig) *Connection {
@@ -132,15 +142,17 @@ func (c *Connection) ForceReconnect() {
 // pause as manual (as opposed to Run()'s own auto-pause) so Stats().AutoPaused
 // lets the UI show which one happened.
 func (c *Connection) Pause() {
+	c.pauseMu.Lock()
+	defer c.pauseMu.Unlock()
 	c.autoPaused.Store(false)
-	c.pause()
+	c.pauseLocked()
 }
 
-// pause is the actual pause mechanics, shared by the manual Pause() above and
-// Run()'s auto-pause trigger — kept separate so auto-pause can set
+// pauseLocked is the actual pause mechanics, shared by the manual Pause()
+// above and Run()'s auto-pause trigger — kept separate so auto-pause can set
 // autoPaused=true first without Pause() immediately overwriting it back to
-// false.
-func (c *Connection) pause() {
+// false. Callers must hold pauseMu.
+func (c *Connection) pauseLocked() {
 	c.paused.Store(true)
 	select {
 	case c.pauseRequest <- struct{}{}:
@@ -153,6 +165,8 @@ func (c *Connection) pause() {
 // starts, regardless of whether the connection was paused manually or
 // automatically.
 func (c *Connection) Resume() {
+	c.pauseMu.Lock()
+	defer c.pauseMu.Unlock()
 	c.paused.Store(false)
 	c.consecutiveFailures.Store(0)
 	c.autoPaused.Store(false)
@@ -251,8 +265,10 @@ func (c *Connection) Run(ctx context.Context) error {
 			case <-c.resume:
 				b.reset()
 			case <-autoResume:
-				// Re-check: a manual Pause() may have landed while the cooldown was
-				// armed, which must not be overridden by this timer firing anyway.
+				// Re-check under pauseMu: a manual Pause()/Resume() may have landed
+				// while the cooldown was armed, and must not be clobbered by this
+				// timer firing concurrently with it.
+				c.pauseMu.Lock()
 				if c.autoPaused.Load() {
 					log.Info("vpn auto-resuming after cooldown",
 						"vpn", c.cfg.Name,
@@ -263,6 +279,7 @@ func (c *Connection) Run(ctx context.Context) error {
 					c.autoPaused.Store(false)
 					b.reset()
 				}
+				c.pauseMu.Unlock()
 			}
 			continue
 		}
@@ -334,8 +351,10 @@ func (c *Connection) Run(ctx context.Context) error {
 					"failures", n,
 					"threshold", c.cfg.AutoPauseThreshold,
 				)
+				c.pauseMu.Lock()
 				c.autoPaused.Store(true)
-				c.pause()
+				c.pauseLocked()
+				c.pauseMu.Unlock()
 				pausedThisRound = true
 			}
 		}

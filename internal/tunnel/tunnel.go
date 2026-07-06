@@ -66,6 +66,15 @@ type Tunnel struct {
 	resume        chan struct{} // buffered(1); signals resume from pause
 	cancelMu      sync.Mutex
 	cancelAttempt context.CancelFunc // cancels the in-flight gate-wait/pre-connect/dial; nil when none active
+
+	// pauseMu serializes every read-then-write transition of the pause state
+	// (paused/autoPaused/consecutiveFailures): Pause(), Resume(), Run()'s
+	// auto-pause trigger, and Run()'s auto-resume-timer fire all take it for
+	// their whole check+mutate sequence, so none of them can interleave and
+	// leave the three fields in a self-contradictory combination (e.g. a
+	// concurrent Resume() landing between the auto-resume case's re-check of
+	// autoPaused and its own Store calls).
+	pauseMu sync.Mutex
 }
 
 // New creates a Tunnel with a real system clock.
@@ -107,15 +116,17 @@ func (t *Tunnel) ForceReconnect() {
 // pause as manual (as opposed to Run()'s own auto-pause) so Stats().AutoPaused
 // lets the UI show which one happened.
 func (t *Tunnel) Pause() {
+	t.pauseMu.Lock()
+	defer t.pauseMu.Unlock()
 	t.autoPaused.Store(false)
-	t.pause()
+	t.pauseLocked()
 }
 
-// pause is the actual pause mechanics, shared by the manual Pause() above and
-// Run()'s auto-pause trigger — kept separate so auto-pause can set
+// pauseLocked is the actual pause mechanics, shared by the manual Pause()
+// above and Run()'s auto-pause trigger — kept separate so auto-pause can set
 // autoPaused=true first without Pause() immediately overwriting it back to
-// false.
-func (t *Tunnel) pause() {
+// false. Callers must hold pauseMu.
+func (t *Tunnel) pauseLocked() {
 	t.paused.Store(true)
 	t.cancelMu.Lock()
 	cancel := t.cancelAttempt
@@ -134,6 +145,8 @@ func (t *Tunnel) pause() {
 // starts, regardless of whether the tunnel was paused manually or
 // automatically.
 func (t *Tunnel) Resume() {
+	t.pauseMu.Lock()
+	defer t.pauseMu.Unlock()
 	t.paused.Store(false)
 	t.consecutiveFailures.Store(0)
 	t.autoPaused.Store(false)
@@ -268,8 +281,10 @@ func (t *Tunnel) Run(ctx context.Context) error {
 				backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
 				t.setStatus(StatusConnecting)
 			case <-autoResume:
-				// Re-check: a manual Pause() may have landed while the cooldown was
-				// armed, which must not be overridden by this timer firing anyway.
+				// Re-check under pauseMu: a manual Pause()/Resume() may have landed
+				// while the cooldown was armed, and must not be clobbered by this
+				// timer firing concurrently with it.
+				t.pauseMu.Lock()
 				if t.autoPaused.Load() {
 					log.Info("tunnel auto-resuming after cooldown",
 						"tunnel", t.cfg.Name,
@@ -281,6 +296,7 @@ func (t *Tunnel) Run(ctx context.Context) error {
 					backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
 					t.setStatus(StatusConnecting)
 				}
+				t.pauseMu.Unlock()
 			}
 			continue
 		}
@@ -368,8 +384,10 @@ func (t *Tunnel) Run(ctx context.Context) error {
 						"failures", n,
 						"threshold", t.cfg.AutoPauseThreshold,
 					)
+					t.pauseMu.Lock()
 					t.autoPaused.Store(true)
-					t.pause()
+					t.pauseLocked()
+					t.pauseMu.Unlock()
 				}
 			}
 		} else {

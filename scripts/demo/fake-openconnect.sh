@@ -8,10 +8,15 @@
 # SIGTERM, it never has to speak the real VPN protocol.
 set -euo pipefail
 
-trap 'exit 0' TERM INT
+SLEEP_PID=""
+# Plain `exit 0` doesn't kill a backgrounded child — bash disowns it on exit
+# and it's reparented as an orphan, so screenshots.sh's teardown would leave
+# a stray `sleep 3600` running for up to an hour after every capture run.
+trap '[ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null; exit 0' TERM INT
 
 echo "fake-openconnect: pretending to connect (demo fixture, not a real VPN)"
 while true; do
   sleep 3600 &
-  wait $!
+  SLEEP_PID=$!
+  wait "$SLEEP_PID"
 done
