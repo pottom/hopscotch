@@ -90,7 +90,7 @@ hopscotch is an SSH tunnel manager with a built-in SOCKS5 proxy router: pattern-
 ## User Preferences
 
 - **TUI/web UI parity is a hard rule** — same colors, text, ordering, state logic on both surfaces unless `docs/DESIGN.md` documents an accepted technical-constraint exception. A UI divergence not listed there is a bug. See `internal/tui/AGENTS.md`, `internal/admin/ui/AGENTS.md`.
-- **Screenshots/mocks**: hand-crafted SVGs built with real instance data — never generate via browser automation/screenshotting. Update both `docs/` and `internal/admin/ui/docs/` together. See `docs/AGENTS.md`.
+- **Screenshots**: TUI/web-UI screenshots are real captures via `scripts/demo/screenshots.sh` (vhs for the TUI, Playwright for the web UI) against a fully synthetic fixture — never hand-drawn or edited. Architecture/flow diagrams are the exception and stay hand-crafted SVGs. Update both `docs/` and `internal/admin/ui/docs/` together. See `docs/AGENTS.md`, `scripts/AGENTS.md`.
 - **VPN/tunnel reconnect debugging**: use `scripts/hs-watch.sh` for automated, timed observation instead of eyeballing live logs — reconnect/backoff/ping timing is easy to misjudge manually. See `internal/vpn/AGENTS.md`.
 
 ## Child DOX Index

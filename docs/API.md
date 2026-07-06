@@ -314,3 +314,13 @@ above, and is **not** persisted (it's a computed reaction, re-evaluated fresh
 on every restart, not a stored user intent). `GET /status`'s `auto_paused`
 field is how you tell an auto-pause apart from a manual one when
 `status`/`state == "paused"`.
+
+`auto_resume_after` (seconds, per-tunnel/VPN config, 0 disables) is the
+sibling of `auto_pause_threshold`: once an *auto*-pause fires, the daemon
+retries on its own after this many seconds instead of waiting for
+`POST /.../resume`. It's config-only and does **not** appear anywhere in the
+`GET /status` JSON — there is currently no field exposing a countdown or
+deadline for when the next automatic retry will happen; the only externally
+visible signal is `status`/`state` eventually leaving `"paused"` on its own.
+A *manual* pause (`POST /.../pause`) is never eligible for auto-resume,
+regardless of this setting — only the daemon's own auto-pause is.
