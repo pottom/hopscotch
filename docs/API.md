@@ -49,7 +49,7 @@ readiness probe — a VPN retry loop or a bad jump host will fail it).
 ```json
 {
   "status": "healthy",
-  "version": "v0.8.0",
+  "version": "v0.9.0",
   "uptime": "2h13m5s",
   "tunnels": {
     "prod-jump": "connected",
@@ -73,7 +73,7 @@ everything (tunnels, VPNs, routes, notification settings, header metadata).
 ```json
 {
   "status": "healthy",
-  "version": "v0.8.0",
+  "version": "v0.9.0",
   "latest_version": "",
   "uptime": "2h13m5s",
   "pid": 14975,

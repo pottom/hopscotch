@@ -70,6 +70,8 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 | **Self-update** | `hopscotch update` atomically replaces the binary. Container-aware — prints a notice instead of updating inside Docker. |
 | **Force reconnect** | `r` in TUI or ↻ button in web UI reconnects a tunnel or VPN immediately, skipping the backoff timer. |
 | **Pause/resume** | `p` in TUI or ⏸/▶ button in web UI manually pauses a tunnel or VPN — even mid-connect — until resumed. |
+| **Auto-pause / resume** | Stop retrying a tunnel or VPN that keeps failing after N attempts (`auto_pause_threshold`); optionally retry on its own after a cooldown (`auto_resume_after`). |
+| **Desktop notifications** | Native OS notifications on unexpected disconnect, recovery, or auto-pause — toggle per-event from the Settings tab or config. |
 | **Prometheus metrics** | `/metrics` endpoint with per-tunnel bytes, connections, reconnects, keepalive failures, uptime. |
 
 One binary. Zero services. Zero background daemons beyond itself.
@@ -86,7 +88,7 @@ hopscotch sits between your tools and your jump hosts. Apps connect to a single 
 
 ![TUI status tab](docs/tui-status.png)
 
-Each tunnel shows: connection status, host, local port, uptime, reconnect counter, cumulative bytes transferred (↓ in / ↑ out since process start), and active connection count. When a graph is open, the live per-second rate appears above the braille graph. A reason line appears when something's wrong — like `waiting for VPN: corp-vpn`. A `⚡v0.8.0` badge appears next to the version when an update is available.
+Each tunnel shows: connection status, host, local port, uptime, reconnect counter, cumulative bytes transferred (↓ in / ↑ out since process start), and active connection count. When a graph is open, the live per-second rate appears above the braille graph. A reason line appears when something's wrong — like `waiting for VPN: corp-vpn`. A `⚡v0.9.0` badge appears next to the version when an update is available.
 
 ### TUI key bindings
 
@@ -420,6 +422,29 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |
 | `auto_pause_threshold` | `0` (disabled) | Pause the VPN automatically after this many consecutive failed connection attempts (e.g. a permanently wrong password), instead of retrying forever. The TUI/web UI show `paused (auto)` (vs. plain `paused` for a manual pause) so it's clear the app did this, not you. Resume (manually, via TUI/web UI) resets the counter and clears the auto-pause marker. |
 | `auto_resume_after` | `0` (disabled) | Seconds after an *automatic* pause before hopscotch retries on its own. Only applies to auto-pauses; a manual pause always waits for you regardless of this setting. |
+
+### Notifications
+
+Native OS desktop notifications on meaningful tunnel/VPN state changes. Disabled by default. Also live-editable from the TUI/web UI **Settings** tab — changes there apply immediately and are written back to `config.yaml`.
+
+```yaml
+notifications:
+  enabled: true
+  on_disconnect: true    # a connected tunnel/VPN unexpectedly drops
+  on_reconnect: true     # a tunnel/VPN recovers after being down
+  on_auto_pause: true    # auto_pause_threshold triggers a pause
+  sound: false           # also play the OS default notification sound
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Master switch. When off, every notification event is a no-op. |
+| `on_disconnect` | `false` | Notify when a connected tunnel/VPN unexpectedly drops. |
+| `on_reconnect` | `false` | Notify when a tunnel/VPN recovers after being down. |
+| `on_auto_pause` | `false` | Notify when `auto_pause_threshold` auto-pauses a tunnel/VPN. |
+| `sound` | `false` | Play the OS default notification sound alongside the banner. |
+
+The hopscotch logo is shown on Linux and Windows. On macOS the notification text works fine but no custom icon is shown — modern macOS blocks custom notification icons for unbundled CLI/daemon tools like hopscotch.
 
 ### Sharing the proxy on your network
 
