@@ -450,13 +450,22 @@ func (t *Tunnel) Run(ctx context.Context) error {
 
 		// If this was an SSH auth failure, watch for new agent keys (e.g. YubiKey
 		// insertion) so we can retry immediately instead of waiting out the backoff.
+		// The watcher polls SSH_AUTH_SOCK (e.g. gpg-agent) every couple seconds, so
+		// it MUST be scoped to this iteration and cancelled once the select below
+		// unblocks (stopWatch()) — tying it to the tunnel-lifetime ctx leaks one
+		// polling goroutine per backoff cycle, piling up connections until the agent
+		// goes unresponsive.
 		var agentChanged <-chan struct{}
+		stopWatch := func() {}
 		if isAuthError(s.LastError) {
-			agentChanged = watchAgentKeys(ctx)
+			var watchCtx context.Context
+			watchCtx, stopWatch = context.WithCancel(ctx)
+			agentChanged = watchAgentKeys(watchCtx)
 		}
 
 		select {
 		case <-ctx.Done():
+			stopWatch()
 			t.setStatus(StatusDisconnected)
 			return nil
 		case <-agentChanged:
@@ -467,6 +476,7 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		case <-t.pauseRequest:
 			log.Info("pause requested, skipping delay", "tunnel", t.cfg.Name)
 		}
+		stopWatch()
 	}
 }
 
