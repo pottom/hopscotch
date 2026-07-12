@@ -55,6 +55,7 @@ func TestStatusString(t *testing.T) {
 		{StatusConnected, "connected"},
 		{StatusConnecting, "connecting"},
 		{StatusDisconnected, "disconnected"},
+		{StatusPaused, "paused"},
 	}
 	for _, tc := range tests {
 		if got := tc.s.String(); got != tc.want {

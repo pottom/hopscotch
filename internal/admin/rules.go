@@ -36,13 +36,7 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.cfgMu.Lock()
-	s.cfg.Proxy.Rules = body.Rules
-	path := s.cfg.Path
-	cfgCopy := *s.cfg
-	s.cfgMu.Unlock()
-
-	if err := config.WriteConfig(&cfgCopy, path); err != nil {
+	if err := s.persistConfig(func(c *config.Config) { c.Proxy.Rules = body.Rules }); err != nil {
 		http.Error(w, "failed to persist config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -21,23 +21,25 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 	m := &Manager{connections: make(map[string]*Connection, len(vpnCfgs))}
 	for _, cfg := range vpnCfgs {
 		m.connections[cfg.Name] = newConnection(connConfig{
-			Name:              cfg.Name,
-			Binary:            cfg.Binary,
-			Server:            cfg.Server,
-			User:              cfg.User,
-			AuthGroup:         cfg.AuthGroup,
-			PasswordEnv:       cfg.PasswordEnv,
-			PasswordCmd:       cfg.PasswordCmd,
-			Certificate:       cfg.Certificate,
-			Key:               cfg.Key,
-			PingHost:          cfg.PingHost,
-			ExtraArgs:         cfg.ExtraArgs,
-			PreConnect:        cfg.PreConnect,
-			PostDisconnect:    cfg.PostDisconnect,
-			Sudo:              cfg.Sudo,
-			DNSResolver:       cfg.DNSResolver,
-			ReconnectDelay:    cfg.ReconnectDelay,
-			ReconnectMaxDelay: cfg.ReconnectMaxDelay,
+			Name:               cfg.Name,
+			Binary:             cfg.Binary,
+			Server:             cfg.Server,
+			User:               cfg.User,
+			AuthGroup:          cfg.AuthGroup,
+			PasswordEnv:        cfg.PasswordEnv,
+			PasswordCmd:        cfg.PasswordCmd,
+			Certificate:        cfg.Certificate,
+			Key:                cfg.Key,
+			PingHost:           cfg.PingHost,
+			ExtraArgs:          cfg.ExtraArgs,
+			PreConnect:         cfg.PreConnect,
+			PostDisconnect:     cfg.PostDisconnect,
+			Sudo:               cfg.Sudo,
+			DNSResolver:        cfg.DNSResolver,
+			ReconnectDelay:     cfg.ReconnectDelay,
+			ReconnectMaxDelay:  cfg.ReconnectMaxDelay,
+			AutoPauseThreshold: cfg.AutoPauseThreshold,
+			AutoResumeAfter:    cfg.AutoResumeAfter,
 		})
 	}
 	return m
@@ -64,6 +66,28 @@ func (m *Manager) ForceReconnect(name string) bool {
 		return false
 	}
 	conn.ForceReconnect()
+	return true
+}
+
+// Pause stops the named VPN from retrying, tearing down any in-flight or
+// active subprocess immediately. Returns false if the VPN name is not found.
+func (m *Manager) Pause(name string) bool {
+	conn, ok := m.connections[name]
+	if !ok {
+		return false
+	}
+	conn.Pause()
+	return true
+}
+
+// Resume clears a paused VPN connection and triggers an immediate reconnect.
+// Returns false if the VPN name is not found.
+func (m *Manager) Resume(name string) bool {
+	conn, ok := m.connections[name]
+	if !ok {
+		return false
+	}
+	conn.Resume()
 	return true
 }
 

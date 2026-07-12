@@ -41,14 +41,40 @@ type Tunnel struct {
 	clock          Clock
 	vpnGate        func(ctx context.Context) error // non-nil when requires_vpn is set
 	vpnIsConnected func() bool                     // non-nil when requires_vpn is set; instant state check
-	stats          atomic.Value // holds Stats (without traffic counters)
-	client         *ssh.Client  // guarded by the reconnect loop (single goroutine writer)
-	ptySession     *ssh.Session // held open when force_pty is set; closed after keepalive exits
+	stats          atomic.Value                    // holds Stats (without traffic counters)
+	client         *ssh.Client                     // guarded by the reconnect loop (single goroutine writer)
+	ptySession     *ssh.Session                    // held open when force_pty is set; closed after keepalive exits
+	ptyStdin       io.WriteCloser                  // stdin of ptySession; used to keep the PTY channel's data flow alive
 	// Traffic counters — always-incrementing, read by Stats().
 	bytesIn        atomic.Uint64
 	bytesOut       atomic.Uint64
 	activeConns    atomic.Int64
 	forceReconnect chan struct{} // buffered(1); signals immediate reconnect
+
+	// consecutiveFailures counts failed connection attempts in a row; reset to
+	// 0 on a successful dial or a manual Resume(). Written by both the Run()
+	// goroutine and Resume() (a different goroutine), hence atomic.
+	consecutiveFailures atomic.Int32
+	// autoPaused is true while the current pause was triggered by
+	// auto_pause_threshold rather than a manual Pause() call — lets the UI
+	// distinguish the two. Written by both the Run() goroutine and Pause()/
+	// Resume() (a different goroutine), hence atomic.
+	autoPaused atomic.Bool
+
+	paused        atomic.Bool
+	pauseRequest  chan struct{} // buffered(1); signals a pause request
+	resume        chan struct{} // buffered(1); signals resume from pause
+	cancelMu      sync.Mutex
+	cancelAttempt context.CancelFunc // cancels the in-flight gate-wait/pre-connect/dial; nil when none active
+
+	// pauseMu serializes every read-then-write transition of the pause state
+	// (paused/autoPaused/consecutiveFailures): Pause(), Resume(), Run()'s
+	// auto-pause trigger, and Run()'s auto-resume-timer fire all take it for
+	// their whole check+mutate sequence, so none of them can interleave and
+	// leave the three fields in a self-contradictory combination (e.g. a
+	// concurrent Resume() landing between the auto-resume case's re-check of
+	// autoPaused and its own Store calls).
+	pauseMu sync.Mutex
 }
 
 // New creates a Tunnel with a real system clock.
@@ -66,6 +92,8 @@ func NewWithGate(cfg config.TunnelConfig, gate func(ctx context.Context) error, 
 		vpnGate:        gate,
 		vpnIsConnected: isConnected,
 		forceReconnect: make(chan struct{}, 1),
+		pauseRequest:   make(chan struct{}, 1),
+		resume:         make(chan struct{}, 1),
 	}
 	t.stats.Store(Stats{Status: StatusConnecting, LocalPort: cfg.LocalPort, Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)})
 	return t
@@ -80,6 +108,70 @@ func (t *Tunnel) ForceReconnect() {
 	}
 }
 
+// Pause stops the tunnel from retrying. It aborts an in-flight connect
+// attempt (gate-wait/pre-connect/dial, including a mid-handshake dial)
+// immediately rather than waiting for it to finish, or interrupts an active
+// keepalive/backoff wait. The tunnel stays paused until Resume is called.
+// Called only from the admin API on a user's explicit request — marks the
+// pause as manual (as opposed to Run()'s own auto-pause) so Stats().AutoPaused
+// lets the UI show which one happened.
+func (t *Tunnel) Pause() {
+	t.pauseMu.Lock()
+	defer t.pauseMu.Unlock()
+	t.autoPaused.Store(false)
+	t.pauseLocked()
+}
+
+// pauseLocked is the actual pause mechanics, shared by the manual Pause()
+// above and Run()'s auto-pause trigger — kept separate so auto-pause can set
+// autoPaused=true first without Pause() immediately overwriting it back to
+// false. Callers must hold pauseMu.
+func (t *Tunnel) pauseLocked() {
+	t.paused.Store(true)
+	t.cancelMu.Lock()
+	cancel := t.cancelAttempt
+	t.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	select {
+	case t.pauseRequest <- struct{}{}:
+	default:
+	}
+}
+
+// Resume clears a paused tunnel and triggers an immediate reconnect attempt.
+// Resets the auto-pause failure counter so a fresh full attempt budget
+// starts, regardless of whether the tunnel was paused manually or
+// automatically.
+func (t *Tunnel) Resume() {
+	t.pauseMu.Lock()
+	defer t.pauseMu.Unlock()
+	t.paused.Store(false)
+	t.consecutiveFailures.Store(0)
+	t.autoPaused.Store(false)
+	select {
+	case t.resume <- struct{}{}:
+	default:
+	}
+}
+
+// beginAttempt derives a cancelable context from parent and stores its cancel
+// func so Pause can abort the in-flight attempt immediately. The returned end
+// func must be called exactly once when the attempt-scoped work is done.
+func (t *Tunnel) beginAttempt(parent context.Context) (ctx context.Context, end func()) {
+	ctx, cancel := context.WithCancel(parent)
+	t.cancelMu.Lock()
+	t.cancelAttempt = cancel
+	t.cancelMu.Unlock()
+	return ctx, func() {
+		cancel()
+		t.cancelMu.Lock()
+		t.cancelAttempt = nil
+		t.cancelMu.Unlock()
+	}
+}
+
 // Stats returns a snapshot of the tunnel's current metrics including traffic.
 func (t *Tunnel) Stats() Stats {
 	s := t.stats.Load().(Stats)
@@ -87,6 +179,9 @@ func (t *Tunnel) Stats() Stats {
 	s.BytesIn = t.bytesIn.Load()
 	s.BytesOut = t.bytesOut.Load()
 	s.ActiveConns = t.activeConns.Load()
+	s.ConsecutiveFailures = int(t.consecutiveFailures.Load())
+	s.AutoPauseThreshold = t.cfg.AutoPauseThreshold
+	s.AutoPaused = t.autoPaused.Load()
 	return s
 }
 
@@ -114,7 +209,6 @@ func (t *Tunnel) DialContext(_ context.Context, network, addr string) (net.Conn,
 	t.activeConns.Add(1)
 	return &countingConn{Conn: conn, tunnel: t}, nil
 }
-
 
 // countingConn wraps net.Conn to track bytes transferred and active connection count.
 type countingConn struct {
@@ -165,6 +259,59 @@ func (t *Tunnel) Run(ctx context.Context) error {
 	)
 
 	for {
+		if t.paused.Load() {
+			s := t.Stats()
+			s.Status = StatusPaused
+			s.LastError = ""
+			s.NextReconnectAt = time.Time{}
+			t.stats.Store(s)
+
+			// Only an auto-pause (never a manual Pause()) is eligible to retry on
+			// its own — a human's explicit pause stays paused until they act.
+			var autoResume <-chan time.Time
+			if t.autoPaused.Load() && t.cfg.AutoResumeAfter > 0 {
+				autoResume = t.clock.After(time.Duration(t.cfg.AutoResumeAfter) * time.Second)
+			}
+
+			select {
+			case <-ctx.Done():
+				t.setStatus(StatusDisconnected)
+				return nil
+			case <-t.resume:
+				backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
+				t.setStatus(StatusConnecting)
+			case <-autoResume:
+				// Re-check under pauseMu: a manual Pause()/Resume() may have landed
+				// while the cooldown was armed, and must not be clobbered by this
+				// timer firing concurrently with it.
+				t.pauseMu.Lock()
+				if t.autoPaused.Load() {
+					log.Info("tunnel auto-resuming after cooldown",
+						"tunnel", t.cfg.Name,
+						"cooldown", t.cfg.AutoResumeAfter,
+					)
+					t.paused.Store(false)
+					t.consecutiveFailures.Store(0)
+					t.autoPaused.Store(false)
+					backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
+					t.setStatus(StatusConnecting)
+				}
+				t.pauseMu.Unlock()
+			}
+			continue
+		}
+
+		// Discard a stale pause signal left over from a Pause() call whose effect
+		// (cancelling the in-flight attempt, or the paused-wait above) was already
+		// applied — otherwise a later select (keepalive/backoff-wait) could misread
+		// it as a brand new pause request.
+		select {
+		case <-t.pauseRequest:
+		default:
+		}
+
+		attemptCtx, endAttempt := t.beginAttempt(ctx)
+
 		// Wait for VPN if this tunnel has a dependency, but only if the VPN
 		// isn't already connected (e.g. after an SSH auth failure the VPN stays up).
 		if t.vpnGate != nil && (t.vpnIsConnected == nil || !t.vpnIsConnected()) {
@@ -174,10 +321,16 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			t.stats.Store(s)
 
 			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN)
-			if err := t.vpnGate(ctx); err != nil {
-				// ctx cancelled — clean shutdown.
-				t.setStatus(StatusDisconnected)
-				return nil
+			if err := t.vpnGate(attemptCtx); err != nil {
+				endAttempt()
+				if ctx.Err() != nil {
+					// ctx cancelled — clean shutdown.
+					t.setStatus(StatusDisconnected)
+					return nil
+				}
+				// Otherwise the attempt was cancelled by Pause(); re-enter the
+				// loop, where the paused branch above takes over.
+				continue
 			}
 
 			s = t.Stats()
@@ -188,10 +341,14 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		}
 
 		// Run pre_connect commands before each dial attempt.
-		if err := t.runPreConnect(ctx); err != nil {
-			if ctx.Err() != nil {
-				t.setStatus(StatusDisconnected)
-				return nil
+		if err := t.runPreConnect(attemptCtx); err != nil {
+			if attemptCtx.Err() != nil {
+				endAttempt()
+				if ctx.Err() != nil {
+					t.setStatus(StatusDisconnected)
+					return nil
+				}
+				continue
 			}
 			s := t.Stats()
 			s.LastError = "pre_connect: " + err.Error()
@@ -204,20 +361,43 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		s0.NextReconnectAt = time.Time{}
 		t.stats.Store(s0)
 
-		if err := t.dial(ctx); err != nil {
+		dialErr := t.dial(attemptCtx)
+		endAttempt()
+
+		if dialErr != nil {
+			if ctx.Err() == nil && t.paused.Load() {
+				continue
+			}
 			log.Warn("tunnel dial failed",
 				"tunnel", t.cfg.Name,
-				"err", err,
+				"err", dialErr,
 			)
 			s := t.Stats()
-			s.LastError = err.Error()
+			s.LastError = dialErr.Error()
 			t.stats.Store(s)
+
+			if t.cfg.AutoPauseThreshold > 0 {
+				n := t.consecutiveFailures.Add(1)
+				if int(n) >= t.cfg.AutoPauseThreshold {
+					log.Warn("tunnel auto-paused: too many consecutive connection failures",
+						"tunnel", t.cfg.Name,
+						"failures", n,
+						"threshold", t.cfg.AutoPauseThreshold,
+					)
+					t.pauseMu.Lock()
+					t.autoPaused.Store(true)
+					t.pauseLocked()
+					t.pauseMu.Unlock()
+				}
+			}
 		} else {
 			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
+			t.consecutiveFailures.Store(0)
 			t.keepalive(ctx)
 			if t.ptySession != nil {
 				t.ptySession.Close()
 				t.ptySession = nil
+				t.ptyStdin = nil
 			}
 		}
 
@@ -228,6 +408,11 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		t.stats.Store(s)
 		t.client = nil
 
+		if t.paused.Load() {
+			// Status will be set to StatusPaused at the top of the loop.
+			continue
+		}
+
 		// If there's no network at all, wait for it and reset backoff.
 		// Skip the countdown after restore — waiting for the network already
 		// served as the delay.
@@ -235,9 +420,15 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			s.LastError = msgs.WaitingForNetwork
 			t.stats.Store(s)
 			log.Info("tunnel waiting for network", "tunnel", t.cfg.Name)
-			if err := netcheck.WaitForUplink(ctx); err != nil {
-				t.setStatus(StatusDisconnected)
-				return nil
+			waitCtx, endWait := t.beginAttempt(ctx)
+			err := netcheck.WaitForUplink(waitCtx)
+			endWait()
+			if err != nil {
+				if ctx.Err() != nil {
+					t.setStatus(StatusDisconnected)
+					return nil
+				}
+				continue
 			}
 			s = t.Stats()
 			s.LastError = ""
@@ -259,13 +450,22 @@ func (t *Tunnel) Run(ctx context.Context) error {
 
 		// If this was an SSH auth failure, watch for new agent keys (e.g. YubiKey
 		// insertion) so we can retry immediately instead of waiting out the backoff.
+		// The watcher polls SSH_AUTH_SOCK (e.g. gpg-agent) every couple seconds, so
+		// it MUST be scoped to this iteration and cancelled once the select below
+		// unblocks (stopWatch()) — tying it to the tunnel-lifetime ctx leaks one
+		// polling goroutine per backoff cycle, piling up connections until the agent
+		// goes unresponsive.
 		var agentChanged <-chan struct{}
+		stopWatch := func() {}
 		if isAuthError(s.LastError) {
-			agentChanged = watchAgentKeys(ctx)
+			var watchCtx context.Context
+			watchCtx, stopWatch = context.WithCancel(ctx)
+			agentChanged = watchAgentKeys(watchCtx)
 		}
 
 		select {
 		case <-ctx.Done():
+			stopWatch()
 			t.setStatus(StatusDisconnected)
 			return nil
 		case <-agentChanged:
@@ -273,14 +473,26 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		case <-t.clock.After(delay):
 		case <-t.forceReconnect:
 			log.Info("force reconnect requested, skipping delay", "tunnel", t.cfg.Name)
+		case <-t.pauseRequest:
+			log.Info("pause requested, skipping delay", "tunnel", t.cfg.Name)
 		}
+		stopWatch()
 	}
 }
 
 func (t *Tunnel) dial(ctx context.Context) error {
-	sshCfg, err := t.buildSSHConfig()
+	sshCfg, agentConn, err := t.buildSSHConfig()
 	if err != nil {
 		return fmt.Errorf("building SSH config: %w", err)
+	}
+	// agentConn backs the agent-based AuthMethod's signer; it's only needed
+	// during the handshake below (publickey auth happens there, not after),
+	// so it can be closed once this attempt is done either way. Leaving it
+	// open here previously leaked one connection to SSH_AUTH_SOCK (e.g.
+	// gpg-agent) per connect attempt — fatal for flaky tunnels that retry
+	// every few seconds.
+	if agentConn != nil {
+		defer agentConn.Close()
 	}
 
 	addr := fmt.Sprintf("%s:%d", t.cfg.Host, t.cfg.Port)
@@ -298,7 +510,7 @@ func (t *Tunnel) dial(ctx context.Context) error {
 		return fmt.Errorf("TCP dial %s: %w", addr, err)
 	}
 
-	sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, sshCfg)
+	sshConn, chans, reqs, err := t.handshake(ctx, tcpConn, addr, sshCfg)
 	if err != nil {
 		tcpConn.Close()
 		return fmt.Errorf("SSH handshake: %w", err)
@@ -324,7 +536,7 @@ func (t *Tunnel) dial(ctx context.Context) error {
 	now := t.clock.Now()
 	t.stats.Store(Stats{
 		Status:         StatusConnected,
-		ConnectedAt:    now,
+		ConnectedAt:    now.Round(0), // strip monotonic reading so uptime survives system sleep
 		LocalPort:      t.cfg.LocalPort,
 		Host:           addr,
 		ReconnectCount: t.Stats().ReconnectCount,
@@ -332,6 +544,33 @@ func (t *Tunnel) dial(ctx context.Context) error {
 
 	log.Info("tunnel connected", "tunnel", t.cfg.Name, "addr", addr)
 	return nil
+}
+
+// handshake performs the SSH handshake on an already-established TCP
+// connection, aborting immediately if ctx is cancelled (e.g. by Pause)
+// instead of blocking until the handshake times out or completes on its
+// own — ssh.NewClientConn takes no context, so closing conn is the only way
+// to interrupt it mid-handshake.
+func (t *Tunnel) handshake(ctx context.Context, conn net.Conn, addr string, cfg *ssh.ClientConfig) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	type result struct {
+		sshConn ssh.Conn
+		chans   <-chan ssh.NewChannel
+		reqs    <-chan *ssh.Request
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+		ch <- result{sshConn, chans, reqs, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.sshConn, r.chans, r.reqs, r.err
+	case <-ctx.Done():
+		conn.Close()
+		<-ch // drain the goroutine; NewClientConn unblocks once conn is closed
+		return nil, nil, nil, ctx.Err()
+	}
 }
 
 func (t *Tunnel) openPTYSession() error {
@@ -358,6 +597,11 @@ func (t *Tunnel) openPTYSession() error {
 		sess.Close()
 		return fmt.Errorf("request pty: %w", err)
 	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		sess.Close()
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
 	// Drain stdout/stderr before Shell() so the SCB shell doesn't block on a full buffer.
 	sess.Stdout = io.Discard
 	sess.Stderr = io.Discard
@@ -366,14 +610,30 @@ func (t *Tunnel) openPTYSession() error {
 		return fmt.Errorf("start shell: %w", err)
 	}
 	t.ptySession = sess
+	t.ptyStdin = stdin
 	log.Debug("PTY session opened with agent forwarding", "tunnel", t.cfg.Name)
 	return nil
+}
+
+// pokePTY writes a no-op keystroke (space immediately erased with backspace)
+// into the PTY channel so devices that record/monitor the session (e.g. an
+// SCB jump host) see data traffic and don't tear it down as idle. The SSH
+// transport-level "keepalive@openssh.com" request travels outside this
+// channel and doesn't count as activity on it.
+func (t *Tunnel) pokePTY() {
+	if t.ptyStdin == nil {
+		return
+	}
+	if _, err := t.ptyStdin.Write([]byte{' ', '\b'}); err != nil {
+		log.Debug("PTY keepalive write failed", "tunnel", t.cfg.Name, "err", err)
+	}
 }
 
 func (t *Tunnel) keepalive(ctx context.Context) {
 	interval := time.Duration(t.cfg.KeepaliveInterval) * time.Second
 	probeTimeout := time.Duration(t.cfg.DialTimeout) * time.Second
 	fails := 0
+	lastPoke := t.clock.Now()
 
 	// depLost receives a reason string when network or VPN dependency is lost.
 	// Buffered so watchDeps can send without blocking even if keepalive already exited.
@@ -403,7 +663,19 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 			default:
 			}
 			return
+		case <-t.pauseRequest:
+			log.Info("pause requested", "tunnel", t.cfg.Name)
+			t.client.Close()
+			return
 		case <-t.clock.After(interval):
+		}
+
+		if t.cfg.ForcePTY {
+			pokeInterval := time.Duration(t.cfg.PTYPokeInterval) * time.Second
+			if t.clock.Now().Sub(lastPoke) >= pokeInterval {
+				t.pokePTY()
+				lastPoke = t.clock.Now()
+			}
 		}
 
 		err := t.sendKeepalive(ctx, probeTimeout)
@@ -485,15 +757,21 @@ func (t *Tunnel) sendKeepalive(ctx context.Context, timeout time.Duration) error
 	}
 }
 
-func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, error) {
-	auths, err := t.authMethods()
+// buildSSHConfig returns the client config along with the agent connection
+// (if any) backing an agent-based AuthMethod. The caller must close it once
+// the handshake using this config is done.
+func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, io.Closer, error) {
+	auths, agentConn, err := t.authMethods()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	hostKey, err := t.hostKeyCallback()
 	if err != nil {
-		return nil, err
+		if agentConn != nil {
+			agentConn.Close()
+		}
+		return nil, nil, err
 	}
 
 	return &ssh.ClientConfig{
@@ -502,23 +780,24 @@ func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, error) {
 		HostKeyCallback: hostKey,
 		Timeout:         time.Duration(t.cfg.DialTimeout) * time.Second,
 		ClientVersion:   "SSH-2.0-OpenSSH_9.6",
-	}, nil
+	}, agentConn, nil
 }
 
-func (t *Tunnel) authMethods() ([]ssh.AuthMethod, error) {
+func (t *Tunnel) authMethods() ([]ssh.AuthMethod, io.Closer, error) {
 	var methods []ssh.AuthMethod
 
 	// Explicit identity file takes highest priority.
 	if t.cfg.IdentityFile != "" {
 		signer, err := loadSigner(t.cfg.IdentityFile)
 		if err != nil {
-			return nil, fmt.Errorf("loading identity file %s: %w", t.cfg.IdentityFile, err)
+			return nil, nil, fmt.Errorf("loading identity file %s: %w", t.cfg.IdentityFile, err)
 		}
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
 
 	// SSH agent (YubiKey, gpg-agent, ssh-agent) — preferred over file keys.
-	if m := agentAuthMethod(); m != nil {
+	m, agentConn := agentAuthMethod()
+	if m != nil {
 		methods = append(methods, m)
 	}
 
@@ -535,28 +814,33 @@ func (t *Tunnel) authMethods() ([]ssh.AuthMethod, error) {
 	}
 
 	if len(methods) == 0 {
-		return nil, fmt.Errorf("no SSH authentication method available for tunnel %q; is ssh-agent running?", t.cfg.Name)
+		if agentConn != nil {
+			agentConn.Close()
+		}
+		return nil, nil, fmt.Errorf("no SSH authentication method available for tunnel %q; is ssh-agent running?", t.cfg.Name)
 	}
 
-	return methods, nil
+	return methods, agentConn, nil
 }
 
-// agentAuthMethod returns an ssh.AuthMethod backed by the running SSH agent,
-// or nil if SSH_AUTH_SOCK is not set or the socket cannot be opened.
-func agentAuthMethod() ssh.AuthMethod {
+// agentAuthMethod returns an ssh.AuthMethod backed by the running SSH agent
+// plus the connection backing it (nil, nil if SSH_AUTH_SOCK is not set or the
+// socket cannot be opened). The caller owns the connection and must close it
+// once it's no longer needed — agent.NewClient does not take ownership.
+func agentAuthMethod() (ssh.AuthMethod, io.Closer) {
 	sock := os.Getenv("SSH_AUTH_SOCK")
 	if sock == "" {
-		return nil
+		return nil, nil
 	}
 
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
 		log.Debug("ssh-agent not available", "socket", sock, "err", err)
-		return nil
+		return nil, nil
 	}
 
 	log.Debug("using ssh-agent", "socket", sock)
-	return ssh.PublicKeysCallback(agent.NewClient(conn).Signers)
+	return ssh.PublicKeysCallback(agent.NewClient(conn).Signers), conn
 }
 
 func (t *Tunnel) hostKeyCallback() (ssh.HostKeyCallback, error) {
@@ -596,7 +880,6 @@ func loadSigner(path string) (ssh.Signer, error) {
 	}
 	return ssh.ParsePrivateKey(data)
 }
-
 
 // probeTCPForwarding opens a test direct-tcpip channel immediately after
 // connecting to detect AllowTcpForwarding=no (or PermitOpen=none) on the server.

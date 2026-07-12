@@ -32,6 +32,8 @@ classDef proc_sh  fill:#1e1500,stroke:#fbbf24,stroke-width:1px,color:#cbd5e1
 classDef proc_sd  fill:#200f0f,stroke:#f87171,stroke-width:1px,color:#cbd5e1
 classDef dec      fill:#111827,stroke:#475569,stroke-width:1px,color:#94a3b8
 classDef parallel fill:#0d1117,stroke:#334155,stroke-width:2px,color:#64748b,font-style:italic
+classDef proc_pause fill:#1c1f26,stroke:#94a3b8,stroke-width:1px,color:#cbd5e1
+classDef term_ext fill:#1e1500,stroke:#fbbf24,stroke-width:1px,color:#fbbf24,stroke-dasharray: 3 3
 
 %% ═══════════════════════════════════════════════════════════
 %% INDÍTÁS
@@ -57,7 +59,8 @@ subgraph SU["🚀  INDÍTÁS — hopscotch start"]
   su9 -->|igen| su11[PID fájl mentése]
   su11 --> su12["signal.NotifyContext: SIGTERM, SIGINT"]
   su12 --> su13["VPNManager, TunnelManager,\nRouter, ProxyServer, AdminServer"]
-  su13 --> su14[SIGHUP watcher goroutine]
+  su13 --> su13p["PausedTracker: state.json beolvasása\n→ mgr.Pause(name) minden perzisztált\ntunnel/VPN-re, MIELŐTT bármelyik\nRun() goroutine elindulna\n(csak manuális pause perzisztálódik —\nauto-pause nem, ld. internal/state/AGENTS.md)"]
+  su13p --> su14[SIGHUP watcher goroutine]
   su14 --> su15[update check goroutine async]
   su15 --> su16{publicIP watcher?}
   su16 -->|igen| su17[netcheck.StartPublicIPWatcher 60s]
@@ -70,7 +73,17 @@ end
 %% ═══════════════════════════════════════════════════════════
 subgraph VPN["🔒  VPN — Connection.Run (minden VPN-re külön goroutine)"]
   direction TB
-  vn0([VPN goroutine indul]) --> vn1[setState: Connecting]
+  vn0([VPN goroutine indul]) --> vn_p{"paused?\n(minden loop elején)"}
+  vn_p -->|nem| vn1[setState: Connecting]
+  vn_p -->|igen| vn_pw["setState: Paused\nlastError, nextReconnectAt clear"]
+  vn_pw --> vn_psel{{"select:\nctx.Done / resume signal /\nauto-resume cooldown (csak ha\nautoPaused ÉS auto_resume_after&gt;0)"}}
+  vn_psel -->|ctx.Done| vn_pend([exit Disconnected])
+  vn_psel -->|resume signal| vn_pr["paused=false, consecutiveFailures=0\nautoPaused=false, backoff reset"]
+  vn_pr --> vn1
+  vn_psel -->|"cooldown lejárt\n(re-check: autoPaused még igaz?)"| vn_par["igen → ugyanaz a reset mint\nresume-nál (inline, nem Resume()\nhívás — ld. lentebb miért)"]
+  vn_par --> vn1
+  adm_vp_pause(["Admin API / TUI / Web UI\nPOST /api/vpns/NAME/pause"]):::term_ext -.-> vn_pw
+  adm_vp_resume(["POST /api/vpns/NAME/resume"]):::term_ext -.-> vn_psel
   vn1 --> vn2["orphaned openconnect procs kill"]
   vn2 --> vn3["tun-interfész snapshot: utun*, tun* before"]
   vn3 --> vn4[runPreConnect parancsok]
@@ -98,7 +111,13 @@ subgraph VPN["🔒  VPN — Connection.Run (minden VPN-re külön goroutine)"]
   vn9 -->|természetes / hiba| vn12[runPostDisconnect]
   wu -->|killedByUplink| vn12
 
-  vn12 --> vn13{hálózat van?}
+  vn12 --> vn_apchk{"connectedAt after beforeRun?\n(azaz: ez a run tényleg Connected volt-e)"}
+  vn_apchk -->|igen| vn_apreset["backoff reset\nconsecutiveFailures = 0"]
+  vn_apreset --> vn13
+  vn_apchk -->|nem, és pausedThisRound=false| vn_apthr{"auto_pause_threshold&gt;0 ÉS\nconsecutiveFailures+1 &gt;= threshold?"}
+  vn_apthr -->|nem| vn13
+  vn_apthr -->|igen| vn_appause["autoPaused=true, pause()\n(reconnects.Add(1) már megtörtént)"]
+  vn_appause --> vn_pw
   vn13 -->|nem| vn14["WaitForUplink ctx\nlastError = waiting for network"]
   vn14 --> vn14c{ctx cancel?}
   vn14c -->|igen| vn_end2([exit])
@@ -116,7 +135,17 @@ end
 %% ═══════════════════════════════════════════════════════════
 subgraph TUN["🔑  SSH TUNNEL — Tunnel.Run (minden tunnel-re külön goroutine)"]
   direction TB
-  tn0([Tunnel goroutine indul]) --> tn1{requires_vpn beállítva?}
+  tn0([Tunnel goroutine indul]) --> tn_p{"paused?\n(minden loop elején,\nlegelső ellenőrzés)"}
+  tn_p -->|nem| tn1{requires_vpn beállítva?}
+  tn_p -->|igen| tn_pw["Status = Paused\nLastError, NextReconnectAt clear"]
+  tn_pw --> tn_psel{{"select:\nctx.Done / resume channel /\nauto-resume cooldown (t.clock.After,\ncsak ha autoPaused ÉS auto_resume_after&gt;0)"}}
+  tn_psel -->|ctx.Done| tn_pend([exit Disconnected])
+  tn_psel -->|resume signal| tn_pr["backoff reset\nStatus = Connecting"]
+  tn_pr --> tn1
+  tn_psel -->|"cooldown lejárt\n(re-check: autoPaused még igaz?\nha közben manuális Pause() jött,\nnem szabad felülírni — lásd megjegyzés)"| tn_par["igen → paused=false,\nconsecutiveFailures=0, autoPaused=false\nbackoff reset, Status=Connecting\n(inline reset, NEM Resume() hívás —\naz bufferelt resume csatornára írna,\nami a következő pause-ot azonnal\nfeloldaná)"]
+  tn_par --> tn1
+  adm_tn_pause(["Admin API / TUI / Web UI\nPOST /api/tunnels/NAME/pause"]):::term_ext -.-> tn_pw
+  adm_tn_resume(["POST /api/tunnels/NAME/resume"]):::term_ext -.-> tn_psel
   tn1 -->|igen| tn2{VPN már connected?}
   tn2 -->|nem| tn3["lastError = waiting for VPN: ...\nvpnGate → WaitConnected 1s poll"]
   tn3 --> tn3c{ctx cancel?}
@@ -129,13 +158,18 @@ subgraph TUN["🔑  SSH TUNNEL — Tunnel.Run (minden tunnel-re külön goroutin
   tn6 --> tn7["dial ctx:\n1. buildSSHConfig:\n   identity_file → ssh-agent → default key\n2. net.Dial TCP, KeepAlive 15s\n3. ssh.NewClientConn handshake\n4. force_pty: openPTYSession + agent -A\n5. probeTCPForwarding: dial 127.0.0.1:1 through SSH\n   hiba → isTCPForwardingDenied → lastError"]
   tn7 --> tn7e{dial OK?}
   tn7e -->|hiba| tn7b["lastError = err\nlog Warn tunnel dial failed"]
-  tn7b --> tn8
+  tn7b --> tn7f{"auto_pause_threshold&gt;0 ÉS\nconsecutiveFailures+1 &gt;= threshold?"}
+  tn7f -->|nem| tn8
+  tn7f -->|igen| tn7g["autoPaused=true, pause()"]
+  tn7g --> tn_pw
   tn7e -->|OK| tn7ok["Status = Connected\nConnectedAt = now\nbackoff reset"]
   tn7ok --> ka0
 
   subgraph KA["💓  KEEPALIVE — Tunnel.keepalive"]
     direction TB
     ka0([keepalive start]) --> kad["watchDeps goroutine 2s poll:\n1. netcheck.HasUplink\n2. vpnIsConnected"]
+    ka0 --> ka_pty{force_pty?}
+    ka_pty -->|igen| kapoke["PTY poke goroutine:\npty_poke_interval-enként\nspace+backspace write a PTY-ra\n(SCB idle-timeout ellen,\nfüggetlen a keepalive_interval-tól)"]
     kad --> ka1{interval tick}
     ka1 --> ka2["sendKeepalive: keepalive at openssh.com\ntimeout = dial_timeout"]
     ka2 --> ka3{OK?}
@@ -240,26 +274,28 @@ su18 --> sh0
 
 %% ── class assignments ───────────────────────────────────────
 class su0 term_neu
-class su1,su2,su5,su6,su7,su8,su10,su11,su12,su13,su14,su15,su17 proc_su
+class su1,su2,su5,su6,su7,su8,su10,su11,su12,su13,su13p,su14,su15,su17 proc_su
 class su1e,su3,su4,su9,su16 dec
 class su1x,su6x term_err
 class su18 parallel
 
 class vn0 term_neu
-class vn1,vn2,vn3,vn4,vn4b,vn5,vn6,vn7,ws,wu,ppy,ppn,vn10,vn11,vn12,vn14,vn14r,vn15 proc_vp
-class vn4e,vn5e,pp,vn9,vn13,vn14c,vn16 dec
+class vn1,vn2,vn3,vn4,vn4b,vn5,vn6,vn7,ws,wu,ppy,ppn,vn10,vn11,vn12,vn14,vn14r,vn15,vn_apreset proc_vp
+class vn4e,vn5e,pp,vn9,vn13,vn14c,vn16,vn_p,vn_apchk,vn_apthr dec
 class vn_rc term_err
-class vn_end,vn_end2,vn_end3 term_ok
+class vn_end,vn_end2,vn_end3,vn_pend term_ok
 class vn8 parallel
+class vn_pw,vn_psel,vn_pr,vn_par,vn_appause proc_pause
 
 class tn0 term_neu
-class tn1,tn2,tn3c,tn7e,tn9,tn10c,tn12,tn14,tn16c dec
+class tn1,tn2,tn3c,tn7e,tn9,tn10c,tn12,tn14,tn16c,tn_p,tn7f dec
 class tn3,tn4,tn5,tn6,tn7,tn7b,tn7ok,tn7ok2,tn8,tn10,tn10r,tn13,tn15,tn16 proc_tn
-class tn_end0,tn_end1,tn_end2,tn_end3 term_ok
+class tn_end0,tn_end1,tn_end2,tn_end3,tn_pend term_ok
+class tn_pw,tn_psel,tn_pr,tn_par,tn7g proc_pause
 
 class ka0 term_neu
-class kad,ka2,ka4,ka5,ka7,kadl,kadl2,kadx,kafcx proc_ka
-class ka1,ka3,ka6,kafc dec
+class kad,ka2,ka4,ka5,ka7,kadl,kadl2,kadx,kafcx,kapoke proc_ka
+class ka1,ka3,ka6,kafc,ka_pty dec
 class kaex term_neu
 
 class pr0 term_neu

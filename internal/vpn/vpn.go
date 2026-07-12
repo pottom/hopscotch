@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,13 +18,16 @@ import (
 
 // Stats is a point-in-time snapshot of one VPN connection.
 type Stats struct {
-	State           State
-	Reconnects      int
-	ConnectedAt     time.Time // zero if never connected
-	Server          string    // hostname extracted from server URL
-	NextReconnectAt time.Time // non-zero only while waiting to reconnect
-	LastError       string    // last error from subprocess; empty when connected
-	TunIface        string    // tunnel interface name (e.g. utun2, tun0); empty until detected
+	State               State
+	Reconnects          int
+	ConnectedAt         time.Time // zero if never connected
+	Server              string    // hostname extracted from server URL
+	NextReconnectAt     time.Time // non-zero only while waiting to reconnect
+	LastError           string    // last error from subprocess; empty when connected
+	TunIface            string    // tunnel interface name (e.g. utun2, tun0); empty until detected
+	ConsecutiveFailures int       // consecutive failed connection attempts; resets to 0 on success or resume
+	AutoPauseThreshold  int       // config value; 0 = auto-pause disabled
+	AutoPaused          bool      // true if the current pause (if any) was triggered by auto_pause_threshold, not a manual Pause()
 }
 
 // State represents the lifecycle state of a VPN connection.
@@ -33,6 +37,7 @@ const (
 	StateDisconnected State = iota
 	StateConnecting
 	StateConnected
+	StatePaused // manually paused; not retrying until resumed
 )
 
 func (s State) String() string {
@@ -41,6 +46,8 @@ func (s State) String() string {
 		return "connecting"
 	case StateConnected:
 		return "connected"
+	case StatePaused:
+		return "paused"
 	default:
 		return "disconnected"
 	}
@@ -48,42 +55,69 @@ func (s State) String() string {
 
 // connConfig holds all parameters for one VPN connection.
 type connConfig struct {
-	Name              string
-	Binary            string // path to openconnect binary; default: "openconnect"
-	Server            string
-	User              string
-	AuthGroup         string
-	PasswordEnv       string
-	PasswordCmd       string
-	Certificate       string
-	Key               string
-	PingHost          string   // host[:port] TCP-probed to confirm VPN connectivity
-	ExtraArgs         []string
-	PreConnect        []string // commands to run before each connection attempt
-	PostDisconnect    []string // commands to run after each VPN disconnect
-	Sudo              bool
-	DNSResolver       string // host:port; default "1.1.1.1:53"
-	ReconnectDelay    int
-	ReconnectMaxDelay int
+	Name               string
+	Binary             string // path to openconnect binary; default: "openconnect"
+	Server             string
+	User               string
+	AuthGroup          string
+	PasswordEnv        string
+	PasswordCmd        string
+	Certificate        string
+	Key                string
+	PingHost           string // host[:port] TCP-probed to confirm VPN connectivity
+	ExtraArgs          []string
+	PreConnect         []string // commands to run before each connection attempt
+	PostDisconnect     []string // commands to run after each VPN disconnect
+	Sudo               bool
+	DNSResolver        string // host:port; default "1.1.1.1:53"
+	ReconnectDelay     int
+	ReconnectMaxDelay  int
+	AutoPauseThreshold int // consecutive failed connection attempts before auto-pausing; 0 disables
+	AutoResumeAfter    int // seconds after an auto-pause before retrying automatically; 0 disables
 }
 
 // Connection manages one VPN subprocess.
 type Connection struct {
-	cfg              connConfig
-	state            atomic.Int32
-	reconnects       atomic.Int32
-	connectedAt      atomic.Value // stores time.Time; zero until first connect
-	nextReconnectAt  atomic.Value // stores time.Time; non-zero while waiting to reconnect
-	lastError        atomic.Value // stores string; last subprocess error
-	tunIface         atomic.Value // stores string; tunnel interface name
-	tunIfacesBefore  atomic.Value // stores map[string]bool; tun interfaces before this runOnce
-	forceReconnect   chan struct{}
+	cfg             connConfig
+	state           atomic.Int32
+	reconnects      atomic.Int32
+	connectedAt     atomic.Value // stores time.Time; zero until first connect
+	nextReconnectAt atomic.Value // stores time.Time; non-zero while waiting to reconnect
+	lastError       atomic.Value // stores string; last subprocess error
+	tunIface        atomic.Value // stores string; tunnel interface name
+	tunIfacesBefore atomic.Value // stores map[string]bool; tun interfaces before this runOnce
+	forceReconnect  chan struct{}
+	paused          atomic.Bool
+	pauseRequest    chan struct{} // buffered(1); signals a pause request
+	resume          chan struct{} // buffered(1); signals resume from pause
+
+	// consecutiveFailures counts connection attempts in a row that never
+	// reached StateConnected; reset to 0 on a successful connect or a manual
+	// Resume(). Written by both the Run() goroutine and Resume() (a
+	// different goroutine), hence atomic.
+	consecutiveFailures atomic.Int32
+	// autoPaused is true while the current pause was triggered by
+	// auto_pause_threshold rather than a manual Pause() call — lets the UI
+	// distinguish the two. Written by both the Run() goroutine and Pause()/
+	// Resume() (a different goroutine), hence atomic.
+	autoPaused atomic.Bool
+
+	// pauseMu serializes every read-then-write transition of the pause state
+	// (paused/autoPaused/consecutiveFailures): Pause(), Resume(), Run()'s
+	// auto-pause trigger, and Run()'s auto-resume-timer fire all take it for
+	// their whole check+mutate sequence, so none of them can interleave and
+	// leave the three fields in a self-contradictory combination (e.g. a
+	// concurrent Resume() landing between the auto-resume case's re-check of
+	// autoPaused and its own Store calls).
+	pauseMu sync.Mutex
 }
 
 func newConnection(cfg connConfig) *Connection {
 	c := &Connection{
 		cfg:            cfg,
 		forceReconnect: make(chan struct{}, 1),
+		pauseRequest:   make(chan struct{}, 1),
+		resume:         make(chan struct{}, 1),
 	}
 	c.connectedAt.Store(time.Time{})
 	c.nextReconnectAt.Store(time.Time{})
@@ -97,6 +131,47 @@ func newConnection(cfg connConfig) *Connection {
 func (c *Connection) ForceReconnect() {
 	select {
 	case c.forceReconnect <- struct{}{}:
+	default:
+	}
+}
+
+// Pause stops the VPN from retrying, tearing down an in-flight or active
+// subprocess via the same graceful (SIGTERM-then-SIGKILL) shutdown path used
+// on ForceReconnect/shutdown. The connection stays paused until Resume.
+// Called only from the admin API on a user's explicit request — marks the
+// pause as manual (as opposed to Run()'s own auto-pause) so Stats().AutoPaused
+// lets the UI show which one happened.
+func (c *Connection) Pause() {
+	c.pauseMu.Lock()
+	defer c.pauseMu.Unlock()
+	c.autoPaused.Store(false)
+	c.pauseLocked()
+}
+
+// pauseLocked is the actual pause mechanics, shared by the manual Pause()
+// above and Run()'s auto-pause trigger — kept separate so auto-pause can set
+// autoPaused=true first without Pause() immediately overwriting it back to
+// false. Callers must hold pauseMu.
+func (c *Connection) pauseLocked() {
+	c.paused.Store(true)
+	select {
+	case c.pauseRequest <- struct{}{}:
+	default:
+	}
+}
+
+// Resume clears a paused VPN connection and triggers an immediate reconnect.
+// Resets the auto-pause failure counter so a fresh full attempt budget
+// starts, regardless of whether the connection was paused manually or
+// automatically.
+func (c *Connection) Resume() {
+	c.pauseMu.Lock()
+	defer c.pauseMu.Unlock()
+	c.paused.Store(false)
+	c.consecutiveFailures.Store(0)
+	c.autoPaused.Store(false)
+	select {
+	case c.resume <- struct{}{}:
 	default:
 	}
 }
@@ -136,20 +211,23 @@ func (c *Connection) Stats() Stats {
 		server = u.Host
 	}
 	return Stats{
-		State:           State(c.state.Load()),
-		Reconnects:      int(c.reconnects.Load()),
-		ConnectedAt:     c.connectedAt.Load().(time.Time),
-		Server:          server,
-		NextReconnectAt: c.nextReconnectAt.Load().(time.Time),
-		LastError:       c.lastError.Load().(string),
-		TunIface:        c.tunIface.Load().(string),
+		State:               State(c.state.Load()),
+		Reconnects:          int(c.reconnects.Load()),
+		ConnectedAt:         c.connectedAt.Load().(time.Time),
+		Server:              server,
+		NextReconnectAt:     c.nextReconnectAt.Load().(time.Time),
+		LastError:           c.lastError.Load().(string),
+		TunIface:            c.tunIface.Load().(string),
+		ConsecutiveFailures: int(c.consecutiveFailures.Load()),
+		AutoPauseThreshold:  c.cfg.AutoPauseThreshold,
+		AutoPaused:          c.autoPaused.Load(),
 	}
 }
 
 func (c *Connection) setState(s State) {
 	if s == StateConnected {
 		if State(c.state.Load()) != StateConnected {
-			c.connectedAt.Store(time.Now())
+			c.connectedAt.Store(time.Now().Round(0)) // strip monotonic reading so uptime survives system sleep
 		}
 		c.nextReconnectAt.Store(time.Time{})
 		c.lastError.Store("")
@@ -168,16 +246,64 @@ func (c *Connection) Run(ctx context.Context) error {
 	}
 
 	for {
+		if c.paused.Load() {
+			c.setState(StatePaused)
+			c.lastError.Store("")
+			c.nextReconnectAt.Store(time.Time{})
+
+			// Only an auto-pause (never a manual Pause()) is eligible to retry on
+			// its own — a human's explicit pause stays paused until they act.
+			var autoResume <-chan time.Time
+			if c.autoPaused.Load() && c.cfg.AutoResumeAfter > 0 {
+				autoResume = time.After(time.Duration(c.cfg.AutoResumeAfter) * time.Second)
+			}
+
+			select {
+			case <-ctx.Done():
+				c.setState(StateDisconnected)
+				return nil
+			case <-c.resume:
+				b.reset()
+			case <-autoResume:
+				// Re-check under pauseMu: a manual Pause()/Resume() may have landed
+				// while the cooldown was armed, and must not be clobbered by this
+				// timer firing concurrently with it.
+				c.pauseMu.Lock()
+				if c.autoPaused.Load() {
+					log.Info("vpn auto-resuming after cooldown",
+						"vpn", c.cfg.Name,
+						"cooldown", c.cfg.AutoResumeAfter,
+					)
+					c.paused.Store(false)
+					c.consecutiveFailures.Store(0)
+					c.autoPaused.Store(false)
+					b.reset()
+				}
+				c.pauseMu.Unlock()
+			}
+			continue
+		}
+
+		// Discard a stale pause signal left over from a Pause() call whose effect
+		// (the paused-wait above, or a teardown already in progress) was already
+		// applied — otherwise a later select in this loop could misread it as a
+		// brand new pause request.
+		select {
+		case <-c.pauseRequest:
+		default:
+		}
+
 		c.setState(StateConnecting)
 		beforeRun := time.Now()
 
-		// Run the subprocess in a goroutine so forceReconnect can interrupt it
-		// even while the VPN is connected (not just during the backoff countdown).
+		// Run the subprocess in a goroutine so forceReconnect/Pause can interrupt
+		// it even while the VPN is connected (not just during the backoff countdown).
 		runCtx, cancelRun := context.WithCancel(ctx)
 		errCh := make(chan error, 1)
 		go func() { errCh <- c.runOnce(runCtx) }()
 
 		forceSkipDelay := false
+		pausedThisRound := false
 		select {
 		case err := <-errCh:
 			cancelRun()
@@ -198,9 +324,15 @@ func (c *Connection) Run(ctx context.Context) error {
 			cancelRun()
 			<-errCh // wait for subprocess to exit
 			forceSkipDelay = true
+		case <-c.pauseRequest:
+			// Reuse the same graceful subprocess teardown as shutdown/ForceReconnect.
+			log.Info("pause requested", "vpn", c.cfg.Name)
+			cancelRun()
+			<-errCh // wait for subprocess to exit
+			pausedThisRound = true
 		}
 
-		if !forceSkipDelay {
+		if !forceSkipDelay && !pausedThisRound {
 			c.setState(StateDisconnected)
 		}
 		c.reconnects.Add(1)
@@ -210,6 +342,26 @@ func (c *Connection) Run(ctx context.Context) error {
 		// accumulate reconnect delay.
 		if c.connectedAt.Load().(time.Time).After(beforeRun) {
 			b.reset()
+			c.consecutiveFailures.Store(0)
+		} else if !pausedThisRound && c.cfg.AutoPauseThreshold > 0 {
+			n := c.consecutiveFailures.Add(1)
+			if int(n) >= c.cfg.AutoPauseThreshold {
+				log.Warn("vpn auto-paused: too many consecutive connection failures",
+					"vpn", c.cfg.Name,
+					"failures", n,
+					"threshold", c.cfg.AutoPauseThreshold,
+				)
+				c.pauseMu.Lock()
+				c.autoPaused.Store(true)
+				c.pauseLocked()
+				c.pauseMu.Unlock()
+				pausedThisRound = true
+			}
+		}
+
+		if pausedThisRound {
+			// Status will be set to StatePaused at the top of the loop.
+			continue
 		}
 
 		if forceSkipDelay {
@@ -244,6 +396,9 @@ func (c *Connection) Run(ctx context.Context) error {
 		case <-c.forceReconnect:
 			c.nextReconnectAt.Store(time.Time{})
 			log.Info("force reconnect requested, skipping delay", "vpn", c.cfg.Name)
+		case <-c.pauseRequest:
+			c.nextReconnectAt.Store(time.Time{})
+			log.Info("pause requested, skipping delay", "vpn", c.cfg.Name)
 		}
 	}
 }

@@ -90,6 +90,32 @@ func (m *Manager) ForceReconnect(name string) bool {
 	return true
 }
 
+// Pause stops the named tunnel from retrying, aborting any in-flight connect
+// attempt immediately. Returns false if no tunnel with that name exists.
+func (m *Manager) Pause(name string) bool {
+	m.mu.RLock()
+	t := m.tunnels[name]
+	m.mu.RUnlock()
+	if t == nil {
+		return false
+	}
+	t.Pause()
+	return true
+}
+
+// Resume clears a paused tunnel and triggers an immediate reconnect attempt.
+// Returns false if no tunnel with that name exists.
+func (m *Manager) Resume(name string) bool {
+	m.mu.RLock()
+	t := m.tunnels[name]
+	m.mu.RUnlock()
+	if t == nil {
+		return false
+	}
+	t.Resume()
+	return true
+}
+
 // AllStats returns a snapshot of every tunnel's stats keyed by name.
 func (m *Manager) AllStats() map[string]Stats {
 	m.mu.RLock()

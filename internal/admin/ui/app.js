@@ -120,12 +120,18 @@ function escHtml(s) {
   return !s ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function vpnStatusHtml(state, reconnectIn) {
+function autoPauseSuffix(consecutiveFailures, autoPauseThreshold) {
+  return (autoPauseThreshold > 0 && consecutiveFailures > 0) ? ` ⚠${consecutiveFailures}/${autoPauseThreshold}` : '';
+}
+
+function vpnStatusHtml(state, reconnectIn, consecutiveFailures, autoPauseThreshold, autoPaused) {
+  const aps = autoPauseSuffix(consecutiveFailures, autoPauseThreshold);
   if (state === 'connected') return '<span class="st-connected">● connected</span>';
+  if (state === 'paused') return autoPaused ? `<span class="st-paused">⏸ paused (auto)${aps}</span>` : '<span class="st-paused">⏸ paused</span>';
   if (state === 'connecting' || state === 'disconnected') {
-    if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next try: ${reconnectIn}s</span>`;
-    if (state === 'connecting') return '<span class="st-connecting">connecting</span>';
-    return '<span class="st-disconnected">disconnected</span>';
+    if (reconnectIn != null && reconnectIn >= 0) return `<span class="st-connecting">○ next try: ${reconnectIn}s${aps}</span>`;
+    if (state === 'connecting') return `<span class="st-connecting">connecting${aps}</span>`;
+    return `<span class="st-disconnected">disconnected${aps}</span>`;
   }
   return `<span class="st-muted">${escHtml(state || '…')}</span>`;
 }
@@ -136,18 +142,38 @@ function tunnelStatusHtml(t) {
     return '<span class="st-connecting">◌ pending</span>';
   }
   const s = t.status, ri = t.reconnect_in;
+  const aps = autoPauseSuffix(t.consecutive_failures, t.auto_pause_threshold);
   if (s === 'connected') {
     return t.keepalive_failures > 0
       ? `<span class="st-warning">● connected ⚠${t.keepalive_failures}</span>`
       : '<span class="st-connected">● connected</span>';
   }
+  if (s === 'paused') return t.auto_paused ? `<span class="st-paused">⏸ paused (auto)${aps}</span>` : '<span class="st-paused">⏸ paused</span>';
   if (s === 'connecting' || s === 'disconnected') {
-    if (ri != null && ri >= 0) return `<span class="st-connecting">○ next try: ${ri}s</span>`;
+    if (ri != null && ri >= 0) return `<span class="st-connecting">○ next try: ${ri}s${aps}</span>`;
     return s === 'connecting'
-      ? '<span class="st-connecting">connecting</span>'
-      : '<span class="st-disconnected">disconnected</span>';
+      ? `<span class="st-connecting">connecting${aps}</span>`
+      : `<span class="st-disconnected">disconnected${aps}</span>`;
   }
   return `<span class="st-muted">${escHtml(s || '…')}</span>`;
+}
+
+// tunnelActionHtml / vpnActionHtml render the reconnect/pause/resume buttons
+// for the action column, swapping to a single resume button while paused.
+function tunnelActionHtml(name, status) {
+  if (status === 'paused') {
+    return `<button class="reconnect-btn" title="Resume" onclick="event.stopPropagation();resumeTunnel('${escHtml(name)}')">▶</button>`;
+  }
+  return `<button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectTunnel('${escHtml(name)}')">↻</button>` +
+    `<button class="reconnect-btn" title="Pause" onclick="event.stopPropagation();pauseTunnel('${escHtml(name)}')">⏸</button>`;
+}
+
+function vpnActionHtml(name, state) {
+  if (state === 'paused') {
+    return `<button class="reconnect-btn" title="Resume" onclick="event.stopPropagation();resumeVPN('${escHtml(name)}')">▶</button>`;
+  }
+  return `<button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectVPN('${escHtml(name)}')">↻</button>` +
+    `<button class="reconnect-btn" title="Pause" onclick="event.stopPropagation();pauseVPN('${escHtml(name)}')">⏸</button>`;
 }
 
 function vpnDepHtml(vpn, state) {
@@ -209,11 +235,11 @@ function renderVPNTable() {
       `<td data-col="host">${escHtml(v.host || '—')}</td>` +
       `<td data-col="iface">${escHtml(v.tun_iface || '—')}</td>` +
       `<td data-col="port"></td>` +
-      `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in)}</td>` +
+      `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in, v.consecutive_failures, v.auto_pause_threshold, v.auto_paused)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
       `<td></td><td></td><td></td>` +
-      `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectVPN('${escHtml(name)}')">↻</button></td>`;
+      `<td class="col-action-cell" data-col="action">${vpnActionHtml(name, v.state)}</td>`;
     tbody.appendChild(tr);
     // message sub-row — only when not connected and last_error is set
     const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
@@ -282,7 +308,7 @@ function buildTunnelRows(names) {
         `<td class="bps-in"  data-col="bps-in">${fmtTotal(t.bytes_in  || 0)}</td>` +
         `<td class="bps-out" data-col="bps-out">${fmtTotal(t.bytes_out || 0)}</td>` +
         `<td data-col="active">${t.active || 0}</td>` +
-        `<td class="col-action-cell"><button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectTunnel('${escHtml(name)}')">↻</button></td>`;
+        `<td class="col-action-cell" data-col="action">${tunnelActionHtml(name, t.status)}</td>`;
     }
     tbody.appendChild(tr);
     // message sub-row — shown for errors (red └ ✗) and progress msgs (amber ◌)
@@ -325,6 +351,7 @@ function updateTunnelRows() {
     setCell(row, 'bps-in',  fmtTotal(t.bytes_in  || 0));
     setCell(row, 'bps-out', fmtTotal(t.bytes_out || 0));
     setCell(row, 'active', t.active || 0);
+    setCell(row, 'action', tunnelActionHtml(name, t.status), true);
     // update msg sub-row
     const mRow = row.nextElementSibling?.classList.contains('msg-row') ? row.nextElementSibling : null;
     if (mRow) {
@@ -367,6 +394,34 @@ window.reconnectVPN = async function(name) {
   } catch (_) {}
 };
 
+window.pauseTunnel = async function(name) {
+  try {
+    await fetch('/api/tunnels/' + encodeURIComponent(name) + '/pause', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.resumeTunnel = async function(name) {
+  try {
+    await fetch('/api/tunnels/' + encodeURIComponent(name) + '/resume', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.pauseVPN = async function(name) {
+  try {
+    await fetch('/api/vpns/' + encodeURIComponent(name) + '/pause', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.resumeVPN = async function(name) {
+  try {
+    await fetch('/api/vpns/' + encodeURIComponent(name) + '/resume', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
 window.toggleRowGraph = function(row) {
   const expanded = row.classList.toggle('expanded');
   if (expanded) {
@@ -388,6 +443,7 @@ document.addEventListener('alpine:init', () => {
     vpns:    {},
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
+    notifications: { enabled: false, on_disconnect: false, on_reconnect: false, on_auto_pause: false, sound: false },
     meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', proxy_auth_enabled: false, admin_port: 0, admin_bind: '', admin_auth_enabled: false, status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
 
     tunnelList() {
@@ -479,6 +535,9 @@ async function refreshStatus() {
         uptime_seconds:     t.uptime_seconds,
         reconnect_count:    t.reconnect_count,
         keepalive_failures: t.keepalive_failures || 0,
+        consecutive_failures: t.consecutive_failures || 0,
+        auto_pause_threshold: t.auto_pause_threshold || 0,
+        auto_paused:          t.auto_paused || false,
         last_error:         t.last_error || '',
         bps_in:             prev.bps_in       ?? 0,
         bps_out:            prev.bps_out      ?? 0,
@@ -501,12 +560,19 @@ async function refreshStatus() {
         reconnects:     v.reconnects || 0,
         uptime_seconds: v.uptime_seconds || 0,
         last_error:     v.last_error || '',
+        consecutive_failures: v.consecutive_failures || 0,
+        auto_pause_threshold: v.auto_pause_threshold || 0,
+        auto_paused:          v.auto_paused || false,
         reconnect_in:   prev.reconnect_in ?? null,
       };
     }
     store.vpns = nextVpns;
 
     store.routes = st.routes || [];
+
+    if (!notificationsSaving && st.notifications) {
+      store.notifications = st.notifications;
+    }
 
     if (TAB_INIT['patterns'] && !rulesEditMode) {
       const testerVal = document.getElementById('routes-tester-input')?.value || '';
@@ -555,7 +621,7 @@ function connectSSE() {
         if (v.state) store.vpns[name].state = v.state;
         store.vpns[name].reconnect_in = v.reconnect_in ?? null;
         const row = findVPNRow(name);
-        if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in), true);
+        if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in, store.vpns[name].consecutive_failures, store.vpns[name].auto_pause_threshold, store.vpns[name].auto_paused), true);
       }
     }
 
@@ -1284,7 +1350,7 @@ window.routesTesterUpdate = function(input) {
   let matchIdx = findMatchIdx(input);
   if (result) {
     if (matchIdx !== undefined) {
-      const via = routes[matchIdx].tunnel || routes[matchIdx].via || 'direct';
+      const via = routes[matchIdx].target || 'direct';
       result.innerHTML = `<span class="routes-tester-match">✓ rule ${matchIdx + 1} matched &rarr; <strong>${via}</strong></span>`;
     } else {
       result.innerHTML = `<span class="routes-tester-nomatch">no rule matched &rarr; direct (fallback)</span>`;
@@ -1292,6 +1358,57 @@ window.routesTesterUpdate = function(input) {
   }
   renderRoutesTable(matchIdx);
 };
+
+// ── Settings tab ──────────────────────────────────────────────────────────────
+
+// Guards refreshStatus() from overwriting an in-flight optimistic toggle with
+// a stale poll response before the PUT below has completed.
+let notificationsSaving = false;
+// A toggle landed while notificationsSaving was already true; resend the
+// latest snapshot once the in-flight PUT completes instead of firing a
+// second concurrent request (which could land out of order and clobber it).
+let notificationsResendNeeded = false;
+
+window.saveNotifications = function() {
+  if (notificationsSaving) {
+    notificationsResendNeeded = true;
+    return;
+  }
+  notificationsSaving = true;
+  doSaveNotifications();
+};
+
+async function doSaveNotifications() {
+  const store  = Alpine.store('hop');
+  const status = document.getElementById('settings-save-status');
+  if (status) { status.textContent = 'Saving…'; status.className = 'settings-save-status'; }
+  try {
+    const res = await fetch('/api/notifications', {
+      method:  'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(store.notifications),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      if (status) { status.textContent = 'Error: ' + txt.trim(); status.className = 'settings-save-status settings-save-error'; }
+      return;
+    }
+    if (status) {
+      status.textContent = 'Saved ✓';
+      status.className   = 'settings-save-status settings-save-ok';
+      setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = ''; }, 1500);
+    }
+  } catch {
+    if (status) { status.textContent = 'Network error'; status.className = 'settings-save-status settings-save-error'; }
+  } finally {
+    if (notificationsResendNeeded) {
+      notificationsResendNeeded = false;
+      doSaveNotifications();
+    } else {
+      notificationsSaving = false;
+    }
+  }
+}
 
 // ── Docs tab ──────────────────────────────────────────────────────────────────
 

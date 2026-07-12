@@ -69,6 +69,9 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 | **Hot reload** | Config reloads on `SIGHUP` or file change, tunnels re-configured in place, no restart. |
 | **Self-update** | `hopscotch update` atomically replaces the binary. Container-aware — prints a notice instead of updating inside Docker. |
 | **Force reconnect** | `r` in TUI or ↻ button in web UI reconnects a tunnel or VPN immediately, skipping the backoff timer. |
+| **Pause/resume** | `p` in TUI or ⏸/▶ button in web UI manually pauses a tunnel or VPN — even mid-connect — until resumed. |
+| **Auto-pause / resume** | Stop retrying a tunnel or VPN that keeps failing after N attempts (`auto_pause_threshold`); optionally retry on its own after a cooldown (`auto_resume_after`). |
+| **Desktop notifications** | Native OS notifications on unexpected disconnect, recovery, or auto-pause — toggle per-event from the Settings tab or config. |
 | **Prometheus metrics** | `/metrics` endpoint with per-tunnel bytes, connections, reconnects, keepalive failures, uptime. |
 
 One binary. Zero services. Zero background daemons beyond itself.
@@ -81,19 +84,20 @@ hopscotch sits between your tools and your jump hosts. Apps connect to a single 
 
 ## TUI dashboard
 
-`hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Rules**, **Logs**, **Docs**.
+`hopscotch status` opens a live terminal dashboard. Four tabs: **Status**, **Rules**, **Logs**, **Settings**.
 
 ![TUI status tab](docs/tui-status.png)
 
-Each tunnel shows: connection status, host, local port, uptime, reconnect counter, cumulative bytes transferred (↓ in / ↑ out since process start), and active connection count. When a graph is open, the live per-second rate appears above the braille graph. A reason line appears when something's wrong — like `waiting for VPN: corp-vpn`. A `⚡v0.8.0` badge appears next to the version when an update is available.
+Each tunnel shows: connection status, host, local port, uptime, reconnect counter, cumulative bytes transferred (↓ in / ↑ out since process start), and active connection count. When a graph is open, the live per-second rate appears above the braille graph. A reason line appears when something's wrong — like `waiting for VPN: corp-vpn`. A `⚡v0.9.0` badge appears next to the version when an update is available.
 
 ### TUI key bindings
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `1` / `2` / `3` | Switch tabs: Status / Rules / Logs |
+| `Tab` / `1` / `2` / `3` / `4` | Switch tabs: Status / Rules / Logs / Settings |
 | `↑` `↓` / `j` `k` | **Status tab:** move cursor between tunnels and VPNs (viewport follows) · **Other tabs:** scroll |
 | `r` | **Status tab:** force reconnect selected tunnel or VPN immediately (skips backoff) |
+| `p` | **Status tab:** pause/resume selected tunnel or VPN (aborts an in-flight connect immediately) · **Logs tab:** toggle proxy source filter |
 | `f` | **Status tab:** toggle graphs on/off (compact mode) |
 | `g` | **Status tab:** toggle mirror graph (dual-channel ↔ download only) |
 | `/` | **Rules tab:** focus URL tester · **Logs tab:** focus text filter |
@@ -106,6 +110,8 @@ Each tunnel shows: connection status, host, local port, uptime, reconnect counte
 ## Routing patterns
 
 The **Rules tab** shows exactly which hostnames route where. Press `/` to focus the URL tester — type any hostname or URL and hopscotch highlights the matching rule in real time.
+
+![TUI rules tab](docs/tui-rules.png)
 
 The **Logs tab** streams structured log lines with three independent filters: `l` cycles the severity level (ALL / INFO+ / WARN+ / ERR), `t`/`v`/`p`/`s` toggle source categories (tunnel / vpn / proxy / system), and `/` opens a live text filter. All three apply simultaneously with AND logic over a rolling 300-line buffer.
 
@@ -194,13 +200,17 @@ The generated file stays in sync: hopscotch refreshes it automatically on every 
 
 ## Web admin UI
 
-`http://localhost:9090` — mirrors the TUI with tunnel cards, live traffic graphs, a Rules tab with interactive URL tester, VPN status, and a Logs tab with real-time structured output. Pure SSE, no polling.
+`http://localhost:9090` — mirrors the TUI with tunnel cards, live traffic graphs, a Rules tab with interactive URL tester, VPN status, a Settings tab for desktop notifications, and a Logs tab with real-time structured output. Pure SSE, no polling. Everything here — and the TUI — goes through the same HTTP API; see [`docs/API.md`](docs/API.md) for the full reference if you want to script against it directly.
 
 The **Logs tab** buffers up to 500 log lines and filters them client-side: severity buttons (ALL / INFO / WARN / ERR), source chips (TUNNEL / VPN / PROXY / SYSTEM), and a text filter all apply simultaneously with AND logic. Auto-scroll pauses when you scroll up; a `↓ live` badge reappears at the bottom-right to resume it. The active tab and selected log level are saved in `localStorage` and restored on reload.
 
 ![Admin web UI — Status](docs/ui-status.png)
 
+![Admin web UI — Rules](docs/ui-rules.png)
+
 ![Admin web UI — Logs](docs/ui-logs.png)
+
+![Admin web UI — Settings](docs/ui-settings.png)
 
 ## Installation
 
@@ -337,6 +347,9 @@ admin:
 | `reconnect_delay` | `5` | Initial reconnect backoff (doubles each attempt) |
 | `reconnect_max_delay` | `30` | Reconnect backoff cap (seconds) |
 | `force_pty` | `false` | Open a PTY shell session — for jump hosts that enforce channel policies (SPS/SCB appliances) |
+| `pty_poke_interval` | `60` | Seconds between no-op keystrokes sent on the PTY channel (only when `force_pty` is set); keeps SCB session-recording idle timeouts from tearing down the connection |
+| `auto_pause_threshold` | `0` (disabled) | Pause the tunnel automatically after this many consecutive failed connection attempts, instead of retrying forever. The TUI/web UI show `paused (auto)` (vs. plain `paused` for a manual pause) so it's clear the app did this, not you. Resume (manually, via TUI/web UI) resets the counter and clears the auto-pause marker. |
+| `auto_resume_after` | `0` (disabled) | Seconds after an *automatic* pause before hopscotch retries on its own — for a flaky link that's expected to come back (vs. one that needs a human to look at it). Only applies to auto-pauses; a manual pause (TUI/web UI) always waits for you regardless of this setting. |
 
 ### VPN integration
 
@@ -407,6 +420,31 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `extra_args` | — | Additional openconnect flags |
 | `reconnect_delay` | `15` | Initial reconnect backoff (seconds) |
 | `reconnect_max_delay` | `120` | Reconnect backoff cap (seconds) |
+| `auto_pause_threshold` | `0` (disabled) | Pause the VPN automatically after this many consecutive failed connection attempts (e.g. a permanently wrong password), instead of retrying forever. The TUI/web UI show `paused (auto)` (vs. plain `paused` for a manual pause) so it's clear the app did this, not you. Resume (manually, via TUI/web UI) resets the counter and clears the auto-pause marker. |
+| `auto_resume_after` | `0` (disabled) | Seconds after an *automatic* pause before hopscotch retries on its own. Only applies to auto-pauses; a manual pause always waits for you regardless of this setting. |
+
+### Notifications
+
+Native OS desktop notifications on meaningful tunnel/VPN state changes. Disabled by default. Also live-editable from the TUI/web UI **Settings** tab — changes there apply immediately and are written back to `config.yaml`.
+
+```yaml
+notifications:
+  enabled: true
+  on_disconnect: true    # a connected tunnel/VPN unexpectedly drops
+  on_reconnect: true     # a tunnel/VPN recovers after being down
+  on_auto_pause: true    # auto_pause_threshold triggers a pause
+  sound: false           # also play the OS default notification sound
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Master switch. When off, every notification event is a no-op. |
+| `on_disconnect` | `false` | Notify when a connected tunnel/VPN unexpectedly drops. |
+| `on_reconnect` | `false` | Notify when a tunnel/VPN recovers after being down. |
+| `on_auto_pause` | `false` | Notify when `auto_pause_threshold` auto-pauses a tunnel/VPN. |
+| `sound` | `false` | Play the OS default notification sound alongside the banner. |
+
+The hopscotch logo is shown on Linux and Windows. On macOS the notification text works fine but no custom icon is shown — modern macOS blocks custom notification icons for unbundled CLI/daemon tools like hopscotch.
 
 ### Sharing the proxy on your network
 
@@ -444,6 +482,8 @@ hopscotch enable                   # activate proxy in current shell
 hopscotch disable                  # deactivate proxy, restore previous env
 hopscotch shell-init               # print shell integration (eval once in .zshrc)
 hopscotch vpn password <name>      # store or update VPN password in OS keychain
+hopscotch tunnel add                # interactive wizard: add a tunnel to the config file
+hopscotch tunnel add <name> --host db.internal --user alice --local-port 1081 -y  # non-interactive (scripting)
 hopscotch update                   # check for newer release and update the binary
 hopscotch update --check           # check only, do not download
 hopscotch trust <name|host|all>    # add SSH host key to known_hosts

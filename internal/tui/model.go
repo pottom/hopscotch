@@ -38,6 +38,7 @@ var (
 	colorConnected    = lipgloss.Color("#34d399")
 	colorConnecting   = lipgloss.Color("#fbbf24")
 	colorDisconnected = lipgloss.Color("#f87171")
+	colorPaused       = lipgloss.Color("#94a3b8")
 	colorMuted        = lipgloss.Color("#475569")
 	colorAccent       = lipgloss.Color("#38bdf8")
 	colorVPN          = lipgloss.Color("#2dd4bf")
@@ -52,6 +53,7 @@ var (
 	styleConnected    = lipgloss.NewStyle().Foreground(colorConnected)
 	styleConnecting   = lipgloss.NewStyle().Foreground(colorConnecting)
 	styleDisconnected = lipgloss.NewStyle().Foreground(colorDisconnected)
+	stylePaused       = lipgloss.NewStyle().Foreground(colorPaused)
 
 	styleBadgeHealthy  = lipgloss.NewStyle().Foreground(colorConnected).Bold(true)
 	styleBadgeDegraded = lipgloss.NewStyle().Foreground(colorConnecting).Bold(true)
@@ -70,10 +72,11 @@ var (
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 const (
-	tabStatus = 0
-	tabRoutes = 1
-	tabLogs   = 2
-	numTabs   = 3
+	tabStatus   = 0
+	tabRoutes   = 1
+	tabLogs     = 2
+	tabSettings = 3
+	numTabs     = 4
 )
 
 // headerLines returns the number of header lines for the current terminal width.
@@ -266,7 +269,6 @@ func blendColor(from, to lipgloss.Color, t float64) lipgloss.Color {
 	return lipgloss.Color(c1.BlendLab(c2, t).Hex())
 }
 
-
 // ── SSE types ─────────────────────────────────────────────────────────────────
 
 type sseTrafficEntry struct {
@@ -285,19 +287,23 @@ type sseVPNEntry struct {
 
 type ssePayload struct {
 	Tunnels map[string]sseTrafficEntry `json:"tunnels"`
-	VPNs    map[string]sseVPNEntry    `json:"vpns,omitempty"`
+	VPNs    map[string]sseVPNEntry     `json:"vpns,omitempty"`
 	Direct  sseTrafficEntry            `json:"direct"`
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type statusMsg         admin.StatusResponse
-type sseMsg            ssePayload
-type logLineMsg        string
-type errMsg            error
-type tickMsg           time.Time
-type rulesSavedMsg     struct{}
-type rulesSaveErrMsg   struct{ err error }
+type statusMsg admin.StatusResponse
+type sseMsg ssePayload
+type logLineMsg string
+type errMsg error
+type tickMsg time.Time
+type rulesSavedMsg struct{}
+type rulesSaveErrMsg struct{ err error }
+
+type settingsSavedMsg struct{}
+type settingsSaveErrMsg struct{ err error }
+type settingsSavedTimeoutMsg struct{}
 type reconnectResultMsg struct{}
 
 // editRule wraps a route with diff metadata (mirrors web UI soft-delete model).
@@ -352,10 +358,10 @@ type Model struct {
 	logGrepFocused bool
 	logVP          viewport.Model
 	logVPReady     bool
-	routeVP      viewport.Model
-	routeVPReady bool
-	routeInput   textinput.Model
-	routeFocused bool
+	routeVP        viewport.Model
+	routeVPReady   bool
+	routeInput     textinput.Model
+	routeFocused   bool
 
 	// edit mode (Rules tab)
 	editMode       bool
@@ -368,11 +374,20 @@ type Model struct {
 	editError      string
 	editSaving     bool
 
-	tick    int
-	width   int
-	height  int
-	vp      viewport.Model
-	vpReady bool
+	// Settings tab (notification toggles)
+	settingsVP           viewport.Model
+	settingsVPReady      bool
+	settingsCursor       int
+	settingsSaving       bool
+	settingsResendNeeded bool // a toggle landed while settingsSaving was already true; resend once the in-flight PUT completes
+	settingsError        string
+	settingsSavedAt      time.Time // non-zero while the transient "✓ saved" state is showing (mirrors web UI)
+
+	tick         int
+	width        int
+	height       int
+	vp           viewport.Model
+	vpReady      bool
 	compact      bool
 	mirrorGraph  bool
 	statusCursor int // index into sorted tunnel names on the status tab
@@ -414,18 +429,18 @@ func New(adminURL string, client *http.Client) Model {
 	lg.Width = 60
 
 	return Model{
-		adminURL:    adminURL,
-		sseURL:      base + "/traffic/stream",
-		logURL:      base + "/logs/stream",
-		sseCh:       sseCh,
-		logCh:       logCh,
-		done:        done,
-		httpClient:  client,
-		traffic:     make(map[string]*trafficWindow),
-		compact:     true,
-		mirrorGraph: true,
-		width:       80,
-		height:      24,
+		adminURL:     adminURL,
+		sseURL:       base + "/traffic/stream",
+		logURL:       base + "/logs/stream",
+		sseCh:        sseCh,
+		logCh:        logCh,
+		done:         done,
+		httpClient:   client,
+		traffic:      make(map[string]*trafficWindow),
+		compact:      true,
+		mirrorGraph:  true,
+		width:        80,
+		height:       24,
 		routeInput:   ti,
 		editPatInput: ep,
 		editCmtInput: ec,
@@ -735,6 +750,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.resizeViewports()
 			return m, nil
 
+		case "4":
+			m.activeTab = tabSettings
+			m = m.resizeViewports()
+			return m, nil
+
 		case "e", "E":
 			if m.activeTab == tabRoutes {
 				m.editMode = true
@@ -791,6 +811,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logSources["proxy"] = !m.logSources["proxy"]
 				m.ensureMinLogSource()
 				m.rebuildLogVP()
+				return m, nil
+			}
+			if m.activeTab == tabStatus && m.statusItemCount() > 0 {
+				nVPNs := len(m.status.VPNs)
+				if m.statusCursor < nVPNs {
+					// cursor is on a VPN row
+					vpnNames := m.vpnNamesSorted()
+					name := vpnNames[m.statusCursor]
+					v, ok := m.status.VPNs[name]
+					if !ok {
+						return m, nil
+					}
+					if v.State == msgs.StatusPaused {
+						v.State = msgs.StatusConnecting
+						m.status.VPNs[name] = v
+						if m.vpReady {
+							m.vp.SetContent(m.buildStatusContent())
+						}
+						return m, m.resumeVPNCmd(name)
+					}
+					v.State = msgs.StatusPaused
+					v.LastError = ""
+					m.status.VPNs[name] = v
+					if w := m.traffic[name]; w != nil {
+						w.reconnectIn = nil
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, m.pauseVPNCmd(name)
+				}
+				// cursor is on a tunnel row
+				tunnelNames := m.tunnelNamesByPort()
+				tunnelIdx := m.statusCursor - nVPNs
+				if tunnelIdx < len(tunnelNames) {
+					name := tunnelNames[tunnelIdx]
+					t, ok := m.status.Tunnels[name]
+					if !ok {
+						return m, nil
+					}
+					if t.Status == msgs.StatusPaused {
+						t.Status = msgs.StatusConnecting
+						m.status.Tunnels[name] = t
+						if m.vpReady {
+							m.vp.SetContent(m.buildStatusContent())
+						}
+						return m, m.resumeTunnelCmd(name)
+					}
+					t.Status = msgs.StatusPaused
+					t.LastError = ""
+					m.status.Tunnels[name] = t
+					if w := m.traffic[name]; w != nil {
+						w.reconnectIn = nil
+					}
+					if m.vpReady {
+						m.vp.SetContent(m.buildStatusContent())
+					}
+					return m, m.pauseTunnelCmd(name)
+				}
 			}
 			return m, nil
 
@@ -840,6 +919,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+			if m.activeTab == tabSettings {
+				if m.settingsCursor > 0 {
+					m.settingsCursor--
+				}
+				if m.settingsVPReady {
+					m.settingsVP.SetContent(m.buildSettingsContent())
+				}
+				return m, nil
+			}
 			if m.activeTab == tabLogs && m.logVPReady {
 				m.logVP, cmd = m.logVP.Update(msg)
 			} else if m.activeTab == tabRoutes && m.routeVPReady {
@@ -861,6 +949,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				}
+			}
+			if m.activeTab == tabSettings {
+				if m.settingsCursor < len(settingsRows)-1 {
+					m.settingsCursor++
+				}
+				if m.settingsVPReady {
+					m.settingsVP.SetContent(m.buildSettingsContent())
+				}
+				return m, nil
+			}
+			if m.activeTab == tabLogs && m.logVPReady {
+				m.logVP, cmd = m.logVP.Update(msg)
+			} else if m.activeTab == tabRoutes && m.routeVPReady {
+				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.vpReady {
+				m.vp, cmd = m.vp.Update(msg)
+			}
+			return m, cmd
+
+		case "enter", " ":
+			if m.activeTab == tabSettings {
+				return m.toggleSettingsRow()
 			}
 			if m.activeTab == tabLogs && m.logVPReady {
 				m.logVP, cmd = m.logVP.Update(msg)
@@ -919,6 +1029,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logVP, cmd = m.logVP.Update(msg)
 			} else if m.activeTab == tabRoutes && m.routeVPReady {
 				m.routeVP, cmd = m.routeVP.Update(msg)
+			} else if m.activeTab == tabSettings && m.settingsVPReady {
+				m.settingsVP, cmd = m.settingsVP.Update(msg)
 			}
 			return m, cmd
 		}
@@ -943,6 +1055,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.routeVP.SetContent(m.buildRoutesEditContent())
 		}
 
+	case settingsSavedMsg:
+		m.settingsError = ""
+		if m.settingsResendNeeded {
+			m.settingsResendNeeded = false
+			return m, m.saveSettingsCmd()
+		}
+		m.settingsSaving = false
+		m.settingsSavedAt = time.Now()
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
+		}
+		return m, settingsSavedTimeoutCmd()
+
+	case settingsSaveErrMsg:
+		m.settingsError = msg.err.Error()
+		if m.settingsResendNeeded {
+			m.settingsResendNeeded = false
+			return m, m.saveSettingsCmd()
+		}
+		m.settingsSaving = false
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
+		}
+
+	case settingsSavedTimeoutMsg:
+		m.settingsSavedAt = time.Time{}
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
+		}
+
 	case loginRequiredMsg:
 		m.err = fmt.Errorf("unauthorized — use: hopscotch status --username USER --password PASS")
 		return m, tea.Quit
@@ -952,7 +1094,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchStatus(m.adminURL, m.httpClient)
 
 	case statusMsg:
+		prevNotifications := m.status.Notifications
 		m.status = admin.StatusResponse(msg)
+		if m.settingsSaving {
+			// Don't let a poll that raced the in-flight PUT roll back the
+			// just-toggled value before the save response arrives.
+			m.status.Notifications = prevNotifications
+		}
 		m.err = nil
 		m.ready = true
 		// Clamp cursor to valid range when tunnels/VPNs change.
@@ -979,6 +1127,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.routeVPReady && !m.editMode {
 			m.routeVP.SetContent(m.buildRoutesContent())
+		}
+		if m.settingsVPReady {
+			m.settingsVP.SetContent(m.buildSettingsContent())
 		}
 
 	case sseMsg:
@@ -1098,6 +1249,15 @@ func (m Model) resizeViewports() Model {
 	}
 	m.routeVP.SetContent(m.buildRoutesContent())
 
+	if !m.settingsVPReady {
+		m.settingsVP = viewport.New(m.width, vpH)
+		m.settingsVPReady = true
+	} else {
+		m.settingsVP.Width = m.width
+		m.settingsVP.Height = vpH
+	}
+	m.settingsVP.SetContent(m.buildSettingsContent())
+
 	return m
 }
 
@@ -1124,6 +1284,8 @@ func (m Model) View() string {
 		vp = m.logVP.View()
 	case tabRoutes:
 		vp = m.routeVP.View()
+	case tabSettings:
+		vp = m.settingsVP.View()
 	}
 	return m.renderHeader() + vp + m.renderFooter()
 }
@@ -1169,9 +1331,9 @@ func (m Model) renderTitleLine() string {
 		versionStr += " " + styleConnecting.Render("⚡"+v)
 	}
 	appStr := "  " + styleHeader.Render("hopscotch "+versionStr)
-	meta    := m.titleLeft()
-	right   := m.renderTabBar() + "  "
-	rightW  := lipgloss.Width(right)
+	meta := m.titleLeft()
+	right := m.renderTabBar() + "  "
+	rightW := lipgloss.Width(right)
 
 	fullLeft := appStr + "  " + meta
 	if lipgloss.Width(fullLeft)+rightW <= m.width {
@@ -1207,6 +1369,7 @@ func (m Model) renderTabBar() string {
 		{"Status", tabStatus},
 		{"Rules", tabRoutes},
 		{"Logs", tabLogs},
+		{"Settings", tabSettings},
 	}
 	var parts []string
 	for _, t := range tabs {
@@ -1228,6 +1391,8 @@ func (m Model) renderHeader() string {
 
 	switch m.activeTab {
 	case tabStatus:
+		fmt.Fprintf(&b, "\n")
+	case tabSettings:
 		fmt.Fprintf(&b, "\n")
 	case tabRoutes:
 		if m.editMode {
@@ -1301,7 +1466,14 @@ func (m Model) renderHeader() string {
 
 // renderFooter returns a single-line bar: hints on the left, ports on the right.
 func (m Model) renderFooter() string {
-	hints := "q quit  tab/1/2/3 switch  ↑↓/jk scroll"
+	hints := "q quit  tab/1/2/3/4 switch"
+	if m.activeTab == tabStatus {
+		if m.statusItemCount() == 0 {
+			hints += "  ↑↓/jk scroll"
+		}
+	} else if m.activeTab != tabSettings {
+		hints += "  ↑↓/jk scroll"
+	}
 	if m.activeTab == tabRoutes {
 		if m.editMode {
 			hints = "↑↓/jk=cursor  shift+↑↓=reorder  e/enter=edit  tab=note  c=note  v=via  i=ins↑  a=add↓  d=del  ctrl+s=save  esc=cancel"
@@ -1326,8 +1498,11 @@ func (m Model) renderFooter() string {
 			hints += "  g mirror"
 		}
 		if m.statusItemCount() > 0 {
-			hints += "  ↑↓/jk cursor  r reconnect"
+			hints += "  ↑↓/jk cursor  r reconnect  p pause/resume"
 		}
+	}
+	if m.activeTab == tabSettings {
+		hints += "  ↑↓/jk cursor  space/enter toggle"
 	}
 
 	activeVP := m.vp
@@ -1336,6 +1511,8 @@ func (m Model) renderFooter() string {
 		activeVP = m.logVP
 	case tabRoutes:
 		activeVP = m.routeVP
+	case tabSettings:
+		activeVP = m.settingsVP
 	}
 	if !activeVP.AtBottom() {
 		hints += "  ↓"
@@ -1379,7 +1556,6 @@ func (m Model) renderFooter() string {
 
 	return "\n\n  " + leftStr + strings.Repeat(" ", gap) + right
 }
-
 
 // findRouteMatch returns the index of the first rule matching the input value, or -1.
 func (m Model) findRouteMatch() int {
@@ -1436,7 +1612,7 @@ func (m Model) buildRoutesContent() string {
 		default:
 			viaRendered = lipgloss.NewStyle().Foreground(colorAccent).Width(22).Render(via)
 			if t, ok := m.status.Tunnels[via]; ok {
-				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures)
+				statusStr = renderStatus(t.Status, m.tick, nil, t.KeepaliveFailures, 0, 0, false)
 			}
 		}
 
@@ -1675,6 +1851,42 @@ func (m Model) reconnectVPNCmd(name string) tea.Cmd {
 	}
 }
 
+// postActionCmd returns a Cmd that POSTs to the given admin API path
+// (relative to the base admin URL, e.g. "/api/tunnels/foo/pause") and
+// ignores the response body.
+func (m Model) postActionCmd(path string) tea.Cmd {
+	url := strings.TrimSuffix(m.adminURL, "/status") + path
+	client := m.httpClient
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPost, url, nil)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return reconnectResultMsg{}
+		}
+		res.Body.Close()
+		return reconnectResultMsg{}
+	}
+}
+
+func (m Model) pauseTunnelCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/tunnels/" + name + "/pause")
+}
+
+func (m Model) resumeTunnelCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/tunnels/" + name + "/resume")
+}
+
+func (m Model) pauseVPNCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/vpns/" + name + "/pause")
+}
+
+func (m Model) resumeVPNCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/vpns/" + name + "/resume")
+}
+
 // vpnNamesSorted returns VPN names sorted alphabetically (same order as rendered).
 func (m Model) vpnNamesSorted() []string {
 	names := make([]string, 0, len(m.status.VPNs))
@@ -1702,29 +1914,138 @@ func (m Model) saveRulesCmd() tea.Cmd {
 		rules = []admin.RouteJSON{}
 	}
 	rulesURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/rules"
-	client := m.httpClient
+	return putJSONCmd(m.httpClient, rulesURL, map[string]interface{}{"rules": rules},
+		func() tea.Msg { return rulesSavedMsg{} },
+		func(err error) tea.Msg { return rulesSaveErrMsg{err} })
+}
+
+// putJSONCmd returns a Cmd that PUTs body as JSON to url, calling onOK on a
+// 200 response or onErr on any failure (marshal, request, transport, or a
+// non-200 status with its truncated response body as the error) — the shared
+// shape behind every Settings/Rules save in the TUI.
+func putJSONCmd(client *http.Client, url string, body interface{}, onOK func() tea.Msg, onErr func(error) tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		body, err := json.Marshal(map[string]interface{}{"rules": rules})
+		b, err := json.Marshal(body)
 		if err != nil {
-			return rulesSaveErrMsg{err}
+			return onErr(err)
 		}
-		req, err := http.NewRequest(http.MethodPut, rulesURL, bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(b))
 		if err != nil {
-			return rulesSaveErrMsg{err}
+			return onErr(err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		res, err := client.Do(req)
 		if err != nil {
-			return rulesSaveErrMsg{err}
+			return onErr(err)
 		}
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			var msg [256]byte
 			n, _ := res.Body.Read(msg[:])
-			return rulesSaveErrMsg{fmt.Errorf("%s", strings.TrimSpace(string(msg[:n])))}
+			return onErr(fmt.Errorf("%s", strings.TrimSpace(string(msg[:n]))))
 		}
-		return rulesSavedMsg{}
+		return onOK()
 	}
+}
+
+// settingsRows describes the 5 fixed toggle rows on the Settings tab, in
+// display order. Cursor index maps directly into this slice.
+type settingsRow struct {
+	label string
+	get   func(admin.NotificationsJSON) bool
+	set   func(*admin.NotificationsJSON, bool)
+}
+
+var settingsRows = []settingsRow{
+	{"Enabled", func(n admin.NotificationsJSON) bool { return n.Enabled }, func(n *admin.NotificationsJSON, v bool) { n.Enabled = v }},
+	{"Notify on disconnect", func(n admin.NotificationsJSON) bool { return n.OnDisconnect }, func(n *admin.NotificationsJSON, v bool) { n.OnDisconnect = v }},
+	{"Notify on reconnect", func(n admin.NotificationsJSON) bool { return n.OnReconnect }, func(n *admin.NotificationsJSON, v bool) { n.OnReconnect = v }},
+	{"Notify on auto-pause", func(n admin.NotificationsJSON) bool { return n.OnAutoPause }, func(n *admin.NotificationsJSON, v bool) { n.OnAutoPause = v }},
+	{"Play sound", func(n admin.NotificationsJSON) bool { return n.Sound }, func(n *admin.NotificationsJSON, v bool) { n.Sound = v }},
+}
+
+// buildSettingsContent renders the Settings tab: a checkbox list of
+// notification toggles. Rows below "Enabled" are dimmed and non-interactive
+// when it's off, mirroring the web UI's disabled checkboxes (see docs/DESIGN.md).
+func (m Model) buildSettingsContent() string {
+	n := m.status.Notifications
+	var b strings.Builder
+	b.WriteString("\n")
+	for i, row := range settingsRows {
+		prefix := "  "
+		if i == m.settingsCursor {
+			prefix = styleTabActive.Render("> ")
+		}
+		box := "[ ]"
+		if row.get(n) {
+			box = "[x]"
+		}
+		label := fmt.Sprintf("%s %s", box, row.label)
+		if i > 0 && !n.Enabled {
+			label = styleMuted.Render(label)
+		} else {
+			label = styleText.Render(label)
+		}
+		fmt.Fprintf(&b, "  %s%s\n", prefix, label)
+	}
+	b.WriteString("\n")
+	if m.settingsSaving {
+		b.WriteString("  " + styleConnecting.Render("saving…") + "\n")
+	} else if m.settingsError != "" {
+		b.WriteString("  " + styleDisconnected.Render("✗ "+m.settingsError) + "\n")
+	} else if !m.settingsSavedAt.IsZero() {
+		b.WriteString("  " + styleConnected.Render("✓ saved") + "\n")
+	}
+	return b.String()
+}
+
+// toggleSettingsRow toggles the row at the cursor (unless it's a disabled
+// sub-option) and returns the updated model plus a Cmd that persists it.
+// Value receiver returning (Model, tea.Cmd) so callers can `return
+// m.toggleSettingsRow()` directly — a pointer-receiver mutator combined with
+// `return m, m.toggleSettingsRow()` would evaluate the bare `m` before the
+// mutation, silently dropping the toggle.
+func (m Model) toggleSettingsRow() (Model, tea.Cmd) {
+	if m.settingsCursor >= len(settingsRows) {
+		return m, nil
+	}
+	row := settingsRows[m.settingsCursor]
+	n := m.status.Notifications
+	if m.settingsCursor > 0 && !n.Enabled {
+		return m, nil // sub-options are inert while the master switch is off
+	}
+	row.set(&n, !row.get(n))
+	m.status.Notifications = n
+	m.settingsError = ""
+	if m.settingsVPReady {
+		m.settingsVP.SetContent(m.buildSettingsContent())
+	}
+	if m.settingsSaving {
+		// A PUT is already in flight with a now-stale snapshot; don't fire a
+		// second concurrent request, just resend the latest once it returns.
+		m.settingsResendNeeded = true
+		return m, nil
+	}
+	m.settingsSaving = true
+	return m, m.saveSettingsCmd()
+}
+
+// saveSettingsCmd returns a Cmd that PUTs the current notification settings
+// to the admin API — applied live and persisted to config.yaml server-side.
+func (m Model) saveSettingsCmd() tea.Cmd {
+	n := m.status.Notifications
+	settingsURL := strings.TrimSuffix(m.adminURL, "/status") + "/api/notifications"
+	return putJSONCmd(m.httpClient, settingsURL, n,
+		func() tea.Msg { return settingsSavedMsg{} },
+		func(err error) tea.Msg { return settingsSaveErrMsg{err} })
+}
+
+// settingsSavedTimeoutCmd clears the transient "✓ saved" state after a delay,
+// mirroring the web UI's 1500ms setTimeout on #settings-save-status.
+func settingsSavedTimeoutCmd() tea.Cmd {
+	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+		return settingsSavedTimeoutMsg{}
+	})
 }
 
 // Fixed column widths that never change with terminal size.
@@ -1765,19 +2086,29 @@ type colLayout struct {
 //	w  < 70 → name + vpn + status only
 func layoutTunnelCols(width int) colLayout {
 	var l colLayout
-	l.showHost   = width >= 70
-	l.showPort   = width >= 85
+	l.showHost = width >= 70
+	l.showPort = width >= 85
 	l.showUptime = width >= 70
-	l.showRC     = width >= 98
-	l.showBPS    = width >= 110
-	l.showConn   = width >= 144
+	l.showRC = width >= 98
+	l.showBPS = width >= 110
+	l.showConn = width >= 144
 
 	fixed := colIndent + colVPNW + colStatusW
-	if l.showPort   { fixed += colPortW }
-	if l.showUptime { fixed += colUptimeW }
-	if l.showRC     { fixed += colRCW }
-	if l.showBPS    { fixed += colBpsInW + colBpsOutW }
-	if l.showConn   { fixed += colConnW }
+	if l.showPort {
+		fixed += colPortW
+	}
+	if l.showUptime {
+		fixed += colUptimeW
+	}
+	if l.showRC {
+		fixed += colRCW
+	}
+	if l.showBPS {
+		fixed += colBpsInW + colBpsOutW
+	}
+	if l.showConn {
+		fixed += colConnW
+	}
 
 	remaining := width - fixed
 	if l.showHost {
@@ -1882,24 +2213,24 @@ func (m Model) buildStatusContent() string {
 	}
 
 	// Per-render styles — widths computed from terminal size.
-	tName   := lipgloss.NewStyle().Foreground(colorBright).Width(tl.nameW)
-	tHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(tl.hostW)
-	tVPN    := lipgloss.NewStyle().Width(colVPNW)
-	tPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	tName := lipgloss.NewStyle().Foreground(colorBright).Width(tl.nameW)
+	tHost := lipgloss.NewStyle().Foreground(colorMuted).Width(tl.hostW)
+	tVPN := lipgloss.NewStyle().Width(colVPNW)
+	tPort := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
 	tStatus := lipgloss.NewStyle().Width(colStatusW)
 	tUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
-	tRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
-	tBpsIn  := lipgloss.NewStyle().Foreground(colorBpsIn).Width(colBpsInW)
+	tRC := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
+	tBpsIn := lipgloss.NewStyle().Foreground(colorBpsIn).Width(colBpsInW)
 	tBpsOut := lipgloss.NewStyle().Foreground(colorBpsOut).Width(colBpsOutW)
-	tConn   := lipgloss.NewStyle().Foreground(colorText).Width(colConnW)
+	tConn := lipgloss.NewStyle().Foreground(colorText).Width(colConnW)
 
-	vName   := lipgloss.NewStyle().Foreground(colorBright).Width(vl.nameW)
-	vHost   := lipgloss.NewStyle().Foreground(colorMuted).Width(vl.hostW)
-	vIface  := lipgloss.NewStyle().Foreground(colorMuted).Width(colVPNW)
-	vPort   := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
+	vName := lipgloss.NewStyle().Foreground(colorBright).Width(vl.nameW)
+	vHost := lipgloss.NewStyle().Foreground(colorMuted).Width(vl.hostW)
+	vIface := lipgloss.NewStyle().Foreground(colorMuted).Width(colVPNW)
+	vPort := lipgloss.NewStyle().Foreground(colorText).Width(colPortW)
 	vStatus := lipgloss.NewStyle().Width(colStatusW)
 	vUptime := lipgloss.NewStyle().Foreground(colorText).Width(colUptimeW)
-	vRC     := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
+	vRC := lipgloss.NewStyle().Foreground(colorMuted).Width(colRCW)
 
 	hdr := func(s lipgloss.Style, label string) string {
 		return s.Foreground(colorMuted).Render(label)
@@ -1911,12 +2242,20 @@ func (m Model) buildStatusContent() string {
 	if len(m.status.VPNs) > 0 {
 		b.WriteString("  ")
 		b.WriteString(hdr(vName, "VPN"))
-		if vl.showHost   { b.WriteString(hdr(vHost, "HOST")) }
+		if vl.showHost {
+			b.WriteString(hdr(vHost, "HOST"))
+		}
 		b.WriteString(hdr(vIface, "IFACE"))
-		if vl.showPort   { b.WriteString(hdr(vPort, "")) }
+		if vl.showPort {
+			b.WriteString(hdr(vPort, ""))
+		}
 		b.WriteString(hdr(vStatus, "STATUS"))
-		if vl.showUptime { b.WriteString(hdr(vUptime, "UPTIME")) }
-		if vl.showRC     { b.WriteString(hdr(vRC, "RC")) }
+		if vl.showUptime {
+			b.WriteString(hdr(vUptime, "UPTIME"))
+		}
+		if vl.showRC {
+			b.WriteString(hdr(vRC, "RC"))
+		}
 		b.WriteString("\n")
 		b.WriteString(m.sectionSep())
 
@@ -1951,12 +2290,20 @@ func (m Model) buildStatusContent() string {
 			}
 			b.WriteString(prefix)
 			b.WriteString(vName.Foreground(colorVPN).Render(name))
-			if vl.showHost   { b.WriteString(vHost.Render(v.Host)) }
+			if vl.showHost {
+				b.WriteString(vHost.Render(v.Host))
+			}
 			b.WriteString(vIface.Render(iface))
-			if vl.showPort   { b.WriteString(vPort.Render("")) }
-			b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0)))
-			if vl.showUptime { b.WriteString(vUptime.Render(uptime)) }
-			if vl.showRC     { b.WriteString(vRC.Render(fmt.Sprintf("%d", v.Reconnects))) }
+			if vl.showPort {
+				b.WriteString(vPort.Render(""))
+			}
+			b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0, v.ConsecutiveFailures, v.AutoPauseThreshold, v.AutoPaused)))
+			if vl.showUptime {
+				b.WriteString(vUptime.Render(uptime))
+			}
+			if vl.showRC {
+				b.WriteString(vRC.Render(fmt.Sprintf("%d", v.Reconnects)))
+			}
 			b.WriteString("\n")
 
 			if v.LastError != "" && v.State != msgs.StatusConnected {
@@ -1973,14 +2320,27 @@ func (m Model) buildStatusContent() string {
 	// ── Tunnel section ────────────────────────────────────────────────────────
 	b.WriteString("  ")
 	b.WriteString(hdr(tName, "TUNNEL"))
-	if tl.showHost   { b.WriteString(hdr(tHost, "HOST")) }
+	if tl.showHost {
+		b.WriteString(hdr(tHost, "HOST"))
+	}
 	b.WriteString(hdr(tVPN, "VPN"))
-	if tl.showPort   { b.WriteString(hdr(tPort, "PORT")) }
+	if tl.showPort {
+		b.WriteString(hdr(tPort, "PORT"))
+	}
 	b.WriteString(hdr(tStatus, "STATUS"))
-	if tl.showUptime { b.WriteString(hdr(tUptime, "UPTIME")) }
-	if tl.showRC     { b.WriteString(hdr(tRC, "RC")) }
-	if tl.showBPS    { b.WriteString(hdr(tBpsIn, "↓ TOTAL")); b.WriteString(hdr(tBpsOut, "↑ TOTAL")) }
-	if tl.showConn   { b.WriteString(hdr(tConn, "CONN")) }
+	if tl.showUptime {
+		b.WriteString(hdr(tUptime, "UPTIME"))
+	}
+	if tl.showRC {
+		b.WriteString(hdr(tRC, "RC"))
+	}
+	if tl.showBPS {
+		b.WriteString(hdr(tBpsIn, "↓ TOTAL"))
+		b.WriteString(hdr(tBpsOut, "↑ TOTAL"))
+	}
+	if tl.showConn {
+		b.WriteString(hdr(tConn, "CONN"))
+	}
 	b.WriteString("\n")
 	b.WriteString(m.sectionSep())
 
@@ -2035,7 +2395,7 @@ func (m Model) buildStatusContent() string {
 		if strings.HasPrefix(t.LastError, msgs.WaitingForVPNPrefix) || t.LastError == msgs.WaitingForNetwork {
 			tunnelStatusStr = styleConnecting.Render("◌ pending")
 		} else {
-			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures)
+			tunnelStatusStr = renderStatus(t.Status, m.tick, reconnectIn, t.KeepaliveFailures, t.ConsecutiveFailures, t.AutoPauseThreshold, t.AutoPaused)
 		}
 
 		vpnLabel := "—"
@@ -2062,14 +2422,27 @@ func (m Model) buildStatusContent() string {
 		}
 		b.WriteString(prefix)
 		b.WriteString(tName.Foreground(colorAccent).Render(name))
-		if tl.showHost   { b.WriteString(tHost.Render(t.Host)) }
+		if tl.showHost {
+			b.WriteString(tHost.Render(t.Host))
+		}
 		b.WriteString(vpnColStyle.Render(vpnLabel))
-		if tl.showPort   { b.WriteString(tPort.Render(fmt.Sprintf("%d", t.LocalPort))) }
+		if tl.showPort {
+			b.WriteString(tPort.Render(fmt.Sprintf("%d", t.LocalPort)))
+		}
 		b.WriteString(tStatus.Render(tunnelStatusStr))
-		if tl.showUptime { b.WriteString(tUptime.Render(uptime)) }
-		if tl.showRC     { b.WriteString(tRC.Render(fmt.Sprintf("%d", t.ReconnectCount))) }
-		if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtTotal(bytesIn))); b.WriteString(tBpsOut.Render("↑ "+fmtTotal(bytesOut))) }
-		if tl.showConn   { b.WriteString(tConn.Render(fmtActive(active))) }
+		if tl.showUptime {
+			b.WriteString(tUptime.Render(uptime))
+		}
+		if tl.showRC {
+			b.WriteString(tRC.Render(fmt.Sprintf("%d", t.ReconnectCount)))
+		}
+		if tl.showBPS {
+			b.WriteString(tBpsIn.Render("↓ " + fmtTotal(bytesIn)))
+			b.WriteString(tBpsOut.Render("↑ " + fmtTotal(bytesOut)))
+		}
+		if tl.showConn {
+			b.WriteString(tConn.Render(fmtActive(active)))
+		}
 		b.WriteString("\n")
 
 		if errLine != "" {
@@ -2101,14 +2474,27 @@ func (m Model) buildStatusContent() string {
 	}
 	b.WriteString("  ")
 	b.WriteString(tName.Foreground(colorDirect).Render("direct"))
-	if tl.showHost   { b.WriteString(tHost.Render("")) }
+	if tl.showHost {
+		b.WriteString(tHost.Render(""))
+	}
 	b.WriteString(tVPN.Render(""))
-	if tl.showPort   { b.WriteString(tPort.Render("")) }
+	if tl.showPort {
+		b.WriteString(tPort.Render(""))
+	}
 	b.WriteString(tStatus.Render(""))
-	if tl.showUptime { b.WriteString(tUptime.Render("")) }
-	if tl.showRC     { b.WriteString(tRC.Render("")) }
-	if tl.showBPS    { b.WriteString(tBpsIn.Render("↓ "+fmtTotal(dBytesIn))); b.WriteString(tBpsOut.Render("↑ "+fmtTotal(dBytesOut))) }
-	if tl.showConn   { b.WriteString(tConn.Render(fmtActive(dActive))) }
+	if tl.showUptime {
+		b.WriteString(tUptime.Render(""))
+	}
+	if tl.showRC {
+		b.WriteString(tRC.Render(""))
+	}
+	if tl.showBPS {
+		b.WriteString(tBpsIn.Render("↓ " + fmtTotal(dBytesIn)))
+		b.WriteString(tBpsOut.Render("↑ " + fmtTotal(dBytesOut)))
+	}
+	if tl.showConn {
+		b.WriteString(tConn.Render(fmtActive(dActive)))
+	}
 	b.WriteString("\n")
 
 	if !m.compact && dw != nil {
@@ -2195,7 +2581,11 @@ func renderBadge(status string) string {
 	}
 }
 
-func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int) string {
+func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int, consecutiveFailures int, autoPauseThreshold int, autoPaused bool) string {
+	autoPauseSuffix := ""
+	if autoPauseThreshold > 0 && consecutiveFailures > 0 {
+		autoPauseSuffix = fmt.Sprintf(" ⚠%d/%d", consecutiveFailures, autoPauseThreshold)
+	}
 	switch status {
 	case msgs.StatusConnected:
 		if keepaliveFails > 0 {
@@ -2208,14 +2598,19 @@ func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int)
 			dot = "○"
 		}
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("%s next try: %ds", dot, *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("%s next try: %ds%s", dot, *reconnectIn, autoPauseSuffix))
 		}
-		return styleConnecting.Render(dot + " connecting")
+		return styleConnecting.Render(dot + " connecting" + autoPauseSuffix)
 	case msgs.StatusDisconnected:
 		if reconnectIn != nil && *reconnectIn >= 0 {
-			return styleConnecting.Render(fmt.Sprintf("○ next try: %ds", *reconnectIn))
+			return styleConnecting.Render(fmt.Sprintf("○ next try: %ds%s", *reconnectIn, autoPauseSuffix))
 		}
-		return styleDisconnected.Render("○ disconnected")
+		return styleDisconnected.Render("○ disconnected" + autoPauseSuffix)
+	case msgs.StatusPaused:
+		if autoPaused {
+			return stylePaused.Render("⏸ paused (auto)" + autoPauseSuffix)
+		}
+		return stylePaused.Render("⏸ paused")
 	default:
 		return styleMuted.Render("? " + status)
 	}
@@ -2408,7 +2803,6 @@ func fetchStatus(url string, client *http.Client) tea.Cmd {
 		return statusMsg(st)
 	}
 }
-
 
 func waitForSSE(ch <-chan ssePayload) tea.Cmd {
 	return func() tea.Msg {
