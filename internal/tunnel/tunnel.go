@@ -2,6 +2,8 @@ package tunnel
 
 import (
 	"context"
+	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -766,7 +768,7 @@ func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, io.Closer, error) {
 		return nil, nil, err
 	}
 
-	hostKey, err := t.hostKeyCallback()
+	hostKey, hostKeyAlgos, err := t.hostKeyCallback()
 	if err != nil {
 		if agentConn != nil {
 			agentConn.Close()
@@ -775,11 +777,12 @@ func (t *Tunnel) buildSSHConfig() (*ssh.ClientConfig, io.Closer, error) {
 	}
 
 	return &ssh.ClientConfig{
-		User:            t.cfg.User,
-		Auth:            auths,
-		HostKeyCallback: hostKey,
-		Timeout:         time.Duration(t.cfg.DialTimeout) * time.Second,
-		ClientVersion:   "SSH-2.0-OpenSSH_9.6",
+		User:              t.cfg.User,
+		Auth:              auths,
+		HostKeyCallback:   hostKey,
+		HostKeyAlgorithms: hostKeyAlgos,
+		Timeout:           time.Duration(t.cfg.DialTimeout) * time.Second,
+		ClientVersion:     "SSH-2.0-OpenSSH_9.6",
 	}, agentConn, nil
 }
 
@@ -843,11 +846,19 @@ func agentAuthMethod() (ssh.AuthMethod, io.Closer) {
 	return ssh.PublicKeysCallback(agent.NewClient(conn).Signers), conn
 }
 
-func (t *Tunnel) hostKeyCallback() (ssh.HostKeyCallback, error) {
+// hostKeyCallback returns the host key verifier along with the host key
+// algorithms known_hosts actually has entries for at this tunnel's address.
+//
+// The algorithm list matters: with ClientConfig.HostKeyAlgorithms left empty,
+// the Go client negotiates by its own preference order, so a server that offers
+// ssh-rsa, ecdsa and ed25519 may answer with ssh-rsa even when known_hosts pins
+// only the ed25519 key. knownhosts then reports that as "key mismatch", which
+// reads like a machine-in-the-middle but is really just a missing entry.
+func (t *Tunnel) hostKeyCallback() (ssh.HostKeyCallback, []string, error) {
 	if os.Getenv("HOPSCOTCH_INSECURE_SKIP_KNOWN_HOSTS") == "true" {
 		log.Warn("known_hosts verification disabled (HOPSCOTCH_INSECURE_SKIP_KNOWN_HOSTS=true)",
 			"tunnel", t.cfg.Name)
-		return ssh.InsecureIgnoreHostKey(), nil //nolint:gosec
+		return ssh.InsecureIgnoreHostKey(), nil, nil //nolint:gosec
 	}
 
 	knownHostsFile := t.cfg.KnownHostsFile
@@ -858,13 +869,107 @@ func (t *Tunnel) hostKeyCallback() (ssh.HostKeyCallback, error) {
 
 	cb, err := knownhosts.New(knownHostsFile)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"loading known_hosts %s: %w\n  hint: run 'hopscotch trust %s' to add this host",
 			knownHostsFile, err, t.cfg.Host,
 		)
 	}
 
-	return cb, nil
+	addr := fmt.Sprintf("%s:%d", t.cfg.Host, t.cfg.Port)
+	return t.explainHostKeyErrors(cb, knownHostsFile), pinnedHostKeyAlgorithms(cb, addr), nil
+}
+
+// explainHostKeyErrors wraps a knownhosts callback so that its single
+// "key mismatch" error is split into the two very different situations it
+// covers: the host is pinned with a different key of the same algorithm (a real
+// security event), or it is simply not pinned for the algorithm the server
+// offered (a gap in known_hosts, fixable with `hopscotch trust`).
+//
+// knownhosts.KeyError cannot distinguish these on its own - its Error() returns
+// "key mismatch" whenever Want is non-empty - and the raw message otherwise
+// reaches the log unqualified.
+func (t *Tunnel) explainHostKeyErrors(cb ssh.HostKeyCallback, knownHostsFile string) ssh.HostKeyCallback {
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := cb(hostname, remote, key)
+
+		var keyErr *knownhosts.KeyError
+		if !errors.As(err, &keyErr) || len(keyErr.Want) == 0 {
+			// Success, an unknown host, or a revoked key: nothing to clarify.
+			return err
+		}
+
+		offered := key.Type()
+		for _, want := range keyErr.Want {
+			if want.Key.Type() == offered {
+				return fmt.Errorf(
+					"host key mismatch for %s: the server presented a different %s key than the one pinned at %s:%d; "+
+						"if the host was legitimately rebuilt remove that line, otherwise treat this as a possible machine-in-the-middle",
+					hostname, offered, want.Filename, want.Line,
+				)
+			}
+		}
+
+		pinned := make([]string, 0, len(keyErr.Want))
+		seen := make(map[string]bool, len(keyErr.Want))
+		for _, want := range keyErr.Want {
+			if a := want.Key.Type(); !seen[a] {
+				seen[a] = true
+				pinned = append(pinned, a)
+			}
+		}
+
+		return fmt.Errorf(
+			"no %s host key pinned for %s (%s has only %s); "+
+				"this is a missing entry rather than a changed key - run 'hopscotch trust %s' to add it",
+			offered, hostname, knownHostsFile, strings.Join(pinned, ", "), t.cfg.Name,
+		)
+	}
+}
+
+// pinnedHostKeyAlgorithms reports which host key algorithms known_hosts has
+// entries for at addr, so the negotiation can be limited to keys we can verify.
+//
+// x/crypto/ssh/knownhosts exposes no accessor for this, so we ask the callback
+// itself: probing it with a key that cannot match any real host key yields a
+// KeyError whose Want field lists every key pinned for the address. Reusing the
+// package's own matcher this way keeps hashed entries, patterns and [host]:port
+// forms working without reimplementing them here.
+//
+// Returning nil is safe - it just restores the previous behaviour of letting the
+// client pick.
+func pinnedHostKeyAlgorithms(cb ssh.HostKeyCallback, addr string) []string {
+	// An all-zero ed25519 key: well-formed on the wire, and no real server can
+	// present it, so the probe always misses and always reports Want.
+	probe, err := ssh.NewPublicKey(ed25519.PublicKey(make([]byte, ed25519.PublicKeySize)))
+	if err != nil {
+		return nil
+	}
+
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil
+	}
+	// knownhosts parses remote.String() before preferring the address argument,
+	// so this only has to be a syntactically valid host:port.
+	remote := &net.TCPAddr{IP: net.IPv4zero, Port: 0}
+	if p, err := net.LookupPort("tcp", port); err == nil {
+		remote.Port = p
+	}
+
+	var keyErr *knownhosts.KeyError
+	if !errors.As(cb(addr, remote, probe), &keyErr) {
+		return nil
+	}
+
+	algos := make([]string, 0, len(keyErr.Want))
+	seen := make(map[string]bool, len(keyErr.Want))
+	for _, want := range keyErr.Want {
+		if a := want.Key.Type(); !seen[a] {
+			seen[a] = true
+			algos = append(algos, a)
+		}
+	}
+	return algos
 }
 
 func (t *Tunnel) setStatus(s Status) {
