@@ -42,11 +42,52 @@ type TunnelConfig struct {
 	ReconnectMaxDelay  int      `yaml:"reconnect_max_delay"`  // backoff cap seconds
 	ForcePTY           bool     `yaml:"force_pty"`            // open a PTY shell session to satisfy SPS/SCB channel policy
 	PTYPokeInterval    int      `yaml:"pty_poke_interval"`    // seconds between synthetic keystrokes on the PTY channel (only when force_pty); keeps SCB session-recording idle timeout from tearing it down
-	RequiresVPN        string   `yaml:"requires_vpn"`         // wait for this VPN before connecting
+	RequiresVPN        VPNNames `yaml:"requires_vpn"`         // wait until any one of these VPNs is connected before dialing
 	PreConnect         []string `yaml:"pre_connect"`          // commands to run before each dial attempt
 	AutoPauseThreshold int      `yaml:"auto_pause_threshold"` // consecutive failed connection attempts before auto-pausing; 0 disables
 	AutoResumeAfter    int      `yaml:"auto_resume_after"`    // seconds after an auto-pause before retrying automatically; 0 disables (stays paused until a manual reconnect/resume)
 }
+
+// VPNNames lists the VPNs a tunnel can reach its host through; the tunnel
+// dials as soon as any one of them is connected. In YAML it is either a single
+// name (`requires_vpn: corp`) or a list (`requires_vpn: [corp, corp-backup]`).
+type VPNNames []string
+
+// UnmarshalYAML accepts a scalar name or a sequence of names.
+func (v *VPNNames) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		var name string
+		if err := node.Decode(&name); err != nil {
+			return err
+		}
+		*v = nil
+		if name != "" {
+			*v = VPNNames{name}
+		}
+		return nil
+	case yaml.SequenceNode:
+		var names []string
+		if err := node.Decode(&names); err != nil {
+			return err
+		}
+		*v = names
+		return nil
+	}
+	return fmt.Errorf("line %d: requires_vpn must be a VPN name or a list of VPN names", node.Line)
+}
+
+// MarshalYAML writes zero or one name as a plain scalar, so configs that never
+// used the list form round-trip through WriteConfig unchanged.
+func (v VPNNames) MarshalYAML() (interface{}, error) {
+	if len(v) <= 1 {
+		return strings.Join(v, ""), nil
+	}
+	return []string(v), nil
+}
+
+// String joins the names for logs and messages.
+func (v VPNNames) String() string { return strings.Join(v, ", ") }
 
 // VPNConfig describes a VPN connection managed as a subprocess.
 type VPNConfig struct {
@@ -61,6 +102,7 @@ type VPNConfig struct {
 	Certificate        string   `yaml:"certificate"`     // path to client cert (cert auth)
 	Key                string   `yaml:"key"`             // path to private key (cert auth)
 	PingHost           string   `yaml:"ping_host"`       // host[:port] TCP-probed to detect connectivity
+	ConnectTimeout     int      `yaml:"connect_timeout"` // seconds ping_host may stay unreachable after launch before openconnect is restarted; default 15
 	ExtraArgs          []string `yaml:"extra_args"`      // passed through to openconnect verbatim
 	PreConnect         []string `yaml:"pre_connect"`     // commands to run before each connection attempt
 	PostDisconnect     []string `yaml:"post_disconnect"` // commands to run after each VPN disconnect
@@ -252,6 +294,9 @@ func applyDefaults(cfg *Config) {
 		if v.ReconnectMaxDelay == 0 {
 			v.ReconnectMaxDelay = DefaultVPNReconnectMaxDelay
 		}
+		if v.ConnectTimeout == 0 {
+			v.ConnectTimeout = DefaultVPNConnectTimeout
+		}
 		if home != "" {
 			if strings.HasPrefix(v.Certificate, "~/") {
 				v.Certificate = filepath.Join(home, v.Certificate[2:])
@@ -379,6 +424,9 @@ func validate(cfg *Config) error {
 		if v.AutoResumeAfter < 0 {
 			return &ConfigError{Field: fmt.Sprintf("vpn[%s].auto_resume_after", v.Name), Message: "must be >= 0 (0 disables auto-resume)"}
 		}
+		if v.ConnectTimeout < 0 {
+			return &ConfigError{Field: fmt.Sprintf("vpn[%s].connect_timeout", v.Name), Message: "must be >= 0 (0 uses the default)"}
+		}
 		if vpnNames[v.Name] {
 			return &ConfigError{Field: "vpn[].name", Message: fmt.Sprintf("duplicate vpn name %q", v.Name)}
 		}
@@ -390,10 +438,12 @@ func validate(cfg *Config) error {
 
 	// Validate requires_vpn references.
 	for _, t := range cfg.Tunnels {
-		if t.RequiresVPN != "" && !vpnNames[t.RequiresVPN] {
-			return &ConfigError{
-				Field:   fmt.Sprintf("tunnels[%s].requires_vpn", t.Name),
-				Message: fmt.Sprintf("vpn %q is not defined in the vpn section", t.RequiresVPN),
+		for _, name := range t.RequiresVPN {
+			if !vpnNames[name] {
+				return &ConfigError{
+					Field:   fmt.Sprintf("tunnels[%s].requires_vpn", t.Name),
+					Message: fmt.Sprintf("vpn %q is not defined in the vpn section", name),
+				}
 			}
 		}
 	}

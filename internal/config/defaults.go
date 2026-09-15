@@ -18,6 +18,7 @@ const (
 	DefaultVPNType              = "openconnect"
 	DefaultVPNReconnectDelay    = 10 // seconds
 	DefaultVPNReconnectMaxDelay = 60 // seconds
+	DefaultVPNConnectTimeout    = 15 // seconds
 
 	DefaultPTYPokeInterval = 60 // seconds; only used when force_pty is true
 )

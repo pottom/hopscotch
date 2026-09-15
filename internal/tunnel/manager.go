@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/log"
 	"golang.org/x/sync/errgroup"
@@ -15,8 +16,8 @@ import (
 // VPNGater is implemented by vpn.Manager. Defined here as an interface
 // to avoid an import cycle between the tunnel and vpn packages.
 type VPNGater interface {
-	WaitConnected(ctx context.Context, name string) error
 	IsConnected(name string) bool
+	IsPaused(name string) bool
 }
 
 // Manager owns all tunnels and exposes status and dialing.
@@ -36,19 +37,55 @@ func NewManager(tunnelCfgs []config.TunnelConfig, vpn VPNGater) *Manager {
 	return m
 }
 
-// newTunnel creates a Tunnel, wiring a VPN gate if requires_vpn is set.
+// newTunnel creates a Tunnel, wiring a VPN gate if requires_vpn is set. The
+// gate opens when any one of the listed VPNs is connected, so a host reachable
+// through either of two VPNs keeps working after switching between them.
 func (m *Manager) newTunnel(cfg config.TunnelConfig) *Tunnel {
-	if cfg.RequiresVPN != "" && m.vpn != nil {
-		name := cfg.RequiresVPN
-		gate := func(ctx context.Context) error {
-			return m.vpn.WaitConnected(ctx, name)
-		}
+	if len(cfg.RequiresVPN) > 0 && m.vpn != nil {
+		vpns, names := m.vpn, cfg.RequiresVPN
 		isConnected := func() bool {
-			return m.vpn.IsConnected(name)
+			return connectedVPN(vpns, names) != ""
 		}
-		return NewWithGate(cfg, gate, isConnected)
+		gate := func(ctx context.Context) error {
+			for !isConnected() {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Second):
+				}
+			}
+			return nil
+		}
+		t := NewWithGate(cfg, gate, isConnected)
+		t.activeVPN = func() string { return activeVPN(vpns, names) }
+		return t
 	}
 	return New(cfg)
+}
+
+// connectedVPN returns the first of names that is connected, or "".
+func connectedVPN(vpns VPNGater, names []string) string {
+	for _, name := range names {
+		if vpns.IsConnected(name) {
+			return name
+		}
+	}
+	return ""
+}
+
+// activeVPN picks the one VPN a tunnel reports as its dependency: the connected
+// one; else the first not paused (typically the one just switched to, still
+// coming up); else the first listed.
+func activeVPN(vpns VPNGater, names []string) string {
+	if name := connectedVPN(vpns, names); name != "" {
+		return name
+	}
+	for _, name := range names {
+		if !vpns.IsPaused(name) {
+			return name
+		}
+	}
+	return names[0]
 }
 
 // Run starts all tunnels and blocks until ctx is cancelled.

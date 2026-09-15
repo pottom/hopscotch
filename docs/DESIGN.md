@@ -83,6 +83,8 @@ Format: `● vpnname` if connected, `○ vpnname` if not.
 
 Color: based on the VPN's current state (`colorConnected` / `colorConnecting` / `colorDisconnected`).
 
+When `requires_vpn` lists several VPNs, the column shows one of them: the connected one, else the first non-paused, else the first listed. The server picks it (`requires_vpn` in `/status`; the full list is `requires_vpn_any`), so both surfaces render the same name without their own selection logic.
+
 ---
 
 ## Status table — Cursor and reconnect

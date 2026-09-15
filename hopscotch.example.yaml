@@ -33,12 +33,13 @@
 #     # certificate: ~/.certs/client.pem   # client certificate for cert-based auth
 #     # key: ~/.certs/client.key           # private key for cert-based auth
 #     ping_host: "10.0.0.1:22"      # TCP probe to confirm VPN is up
+#     # connect_timeout: 15         # seconds ping_host may stay unreachable before openconnect is restarted
 #     # pre_connect:                 # commands before each VPN connection attempt (rarely needed)
 #     #   - "some-custom-setup.sh"
 #     # post_disconnect:             # commands after each VPN disconnect (rarely needed)
 #     #   - "some-custom-teardown.sh"
 #     # extra_args:                  # extra openconnect flags (managed flags like --user rejected)
-#     #   - "--no-dtls"
+#     #   - "--no-dtls"              # if the log shows "DTLS handshake failed": openconnect otherwise waits ~12 s for DTLS before configuring the tunnel
 #     reconnect_delay: 15
 #     reconnect_max_delay: 120
 #     # auto_pause_threshold: 5      # pause automatically after this many consecutive failed connects; 0 (default) disables
@@ -63,6 +64,7 @@ tunnels:
     # force_pty: true                # open a PTY shell — needed for SPS/SCB jump hosts
     # pty_poke_interval: 60          # seconds between no-op keystrokes on the PTY (force_pty only); prevents SCB idle-timeout from closing the recorded session
     # requires_vpn: corp-vpn         # wait for this VPN before connecting
+    # requires_vpn: [corp-vpn, corp-backup]  # or: any one of these VPNs is enough
     # auto_pause_threshold: 5        # pause automatically after this many consecutive failed connects; 0 (default) disables
     # auto_resume_after: 300         # retry on its own this many seconds after an auto-pause; 0 (default) disables — stays paused until you act
     # pre_connect:                   # commands before each dial attempt

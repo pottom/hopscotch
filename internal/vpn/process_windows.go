@@ -12,5 +12,5 @@ func killProcGroup(cmd *exec.Cmd) {
 	}
 }
 
-func killOrphanedProcs(name string, useSudo bool) {}  // no-op on Windows
-func terminateByName(name string, useSudo bool)    {}  // no-op on Windows
+func killOrphanedProcs(pattern string, useSudo bool) {} // no-op on Windows
+func terminateProcs(pattern string, useSudo bool)    {} // no-op on Windows

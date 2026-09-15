@@ -96,6 +96,7 @@ everything (tunnels, VPNs, routes, notification settings, header metadata).
       "reconnect_count": 0,
       "uptime_seconds": 7985.2,
       "requires_vpn": "corp-vpn",
+      "requires_vpn_any": ["corp-vpn", "corp-backup"],
       "keepalive_failures": 0,
       "last_error": "",
       "bytes_in": 1048576,

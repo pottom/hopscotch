@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -28,15 +29,16 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	if binary == "" {
 		binary = "openconnect"
 	}
-	binaryBase := filepath.Base(binary)
+	pattern := c.procPattern()
 
-	// Kill any orphaned instances left over from a previous abrupt shutdown
-	// before launching a new one — avoids route/interface conflicts.
-	killOrphanedProcs(binaryBase, c.cfg.Sudo)
+	// Kill any orphaned instance of this VPN left over from a previous abrupt
+	// shutdown before launching a new one — avoids route/interface conflicts.
+	killOrphanedProcs(pattern, c.cfg.Sudo)
 
 	// Reset tunnel interface and snapshot existing tun interfaces before openconnect starts.
 	// After connect we diff against this to identify the new VPN interface (macOS utun* detection).
 	c.tunIface.Store("")
+	c.tunIfaceIndex.Store(0)
 	before := map[string]bool{}
 	if ifaces, err := net.Interfaces(); err == nil {
 		for _, iface := range ifaces {
@@ -123,27 +125,38 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	// Force English output so log lines are predictable regardless of system locale.
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 
-	stderr, err := cmd.StderrPipe()
+	// openconnect writes errors to stderr but progress ("Connected as",
+	// "Set up tun device", ...) to stdout, so both go into one pipe. Both ends
+	// are *os.File so exec hands the write end straight to the child: an
+	// io.Writer would start a copy goroutine that cmd.Wait() blocks on for as
+	// long as an orphaned openconnect keeps the write end open.
+	output, outputW, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("stderr pipe: %w", err)
+		return fmt.Errorf("output pipe: %w", err)
 	}
-	// nil → exec routes child stdout to /dev/null via os.File (no goroutine).
-	// io.Discard would create a goroutine that blocks cmd.Wait() similarly.
-	cmd.Stdout = nil
+	cmd.Stdout = outputW
+	cmd.Stderr = outputW
 
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	outputW.Close() // the child holds its own copy; EOF arrives once it exits
+	if err != nil {
+		output.Close()
 		return fmt.Errorf("starting openconnect: %w", err)
 	}
 	log.Info("vpn subprocess started", "vpn", c.cfg.Name, "pid", cmd.Process.Pid)
 	c.lastError.Store("openconnect starting")
 
-	// stderrDone is closed when runOnce() returns so watchStderr stops
+	// outputDone is closed when runOnce() returns so watchOutput stops
 	// updating connection state after we've moved on to the reconnect cycle.
-	stderrDone := make(chan struct{})
-	defer close(stderrDone)
+	outputDone := make(chan struct{})
+	defer close(outputDone)
 
-	// Watch stderr lines for status events.
-	go c.watchStderr(stderr, stderrDone)
+	// Watch output lines for status events. The read end is closed at EOF, or
+	// earlier by the uplink-kill path below.
+	go func() {
+		c.watchOutput(output, outputDone)
+		output.Close()
+	}()
 
 	// done carries the cmd.Wait() error; died is closed after Wait() returns so
 	// multiple goroutines (pollPingHost, etc.) can all observe subprocess exit
@@ -192,7 +205,7 @@ func (c *Connection) runOnce(ctx context.Context) error {
 		// This avoids leaving 50+ routes that flushTunRoutesDarwin would have
 		// to delete one by one via sudo, which slows down shutdown significantly.
 		log.Info("vpn: shutting down, sending SIGTERM to subprocess", "vpn", c.cfg.Name)
-		terminateByName(binaryBase, c.cfg.Sudo)
+		terminateProcs(pattern, c.cfg.Sudo)
 		select {
 		case <-done:
 			// Exited cleanly — vpnc-script ran, routes cleaned up.
@@ -215,16 +228,16 @@ func (c *Connection) runOnce(ctx context.Context) error {
 	case <-killedByUplink:
 		// watchUplink() sent SIGKILL to the process group. If openconnect ran
 		// in a different process group (e.g. via sudo on some systems), it may
-		// not have received the kill and still holds the stderr pipe open,
-		// blocking cmd.Wait(). Give it 1 s then close the pipe — this stops
-		// watchStderr from updating state AND sends EPIPE/SIGPIPE to openconnect
-		// which should terminate it.
+		// not have received the kill, keeping sudo (and so cmd.Wait()) alive.
+		// Give it 1 s then close the output pipe — this stops watchOutput from
+		// updating state AND sends EPIPE/SIGPIPE to openconnect which should
+		// terminate it.
 		select {
 		case <-done:
 		case <-time.After(time.Second):
 			log.Warn("vpn subprocess still alive after uplink kill; closing pipe", "vpn", c.cfg.Name)
-			stderr.Close()
-			killOrphanedProcs(binaryBase, c.cfg.Sudo)
+			output.Close()
+			killOrphanedProcs(pattern, c.cfg.Sudo)
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
@@ -288,8 +301,25 @@ func (c *Connection) buildArgs(hasPassword bool, resolveArg string) []string {
 		args = append(args, "--resolve", resolveArg)
 	}
 	args = append(args, c.cfg.ExtraArgs...)
-	args = append(args, c.cfg.Server)
+	args = append(args, c.cfg.Server) // must stay last: procPattern anchors on it
 	return args
+}
+
+// procPattern returns the pkill -f pattern matching this VPN's openconnect.
+func (c *Connection) procPattern() string {
+	binary := c.cfg.Binary
+	if binary == "" {
+		binary = "openconnect"
+	}
+	return procPattern(filepath.Base(binary), c.cfg.Server)
+}
+
+// procPattern builds a POSIX ERE matching exactly one VPN's openconnect command
+// line: the binary as argv[0] (bare or with a path — never the "sudo ..."
+// parent) and the server URL as the final argument, which buildArgs always puts
+// last. Configured VPNs differ in server, so each one only reaches its own process.
+func procPattern(binaryBase, server string) string {
+	return "^([^ ]*/)?" + regexp.QuoteMeta(binaryBase) + "( .*)? " + regexp.QuoteMeta(server) + "$"
 }
 
 // resolveServer resolves the VPN server hostname to an IP address, retrying
@@ -349,23 +379,23 @@ func (c *Connection) resolveServer(ctx context.Context) (string, error) {
 	}
 }
 
-// pollPingHost probes host:port via TCP every 3 seconds.
-// After 2 consecutive successes it marks the VPN connected.
+// pollPingHost probes host:port via TCP every second while connecting, every
+// 3 seconds once connected. The first success marks the VPN connected.
 // After 3 consecutive failures (post-connect) it kills the subprocess.
-// If connectivity is not confirmed within 30 s it restarts — but uses SIGTERM
-// first so openconnect can send a clean disconnect to the VPN server, preventing
-// stale server sessions that would block the next reconnect.
+// If connectivity is not confirmed within connect_timeout it restarts — but uses
+// SIGTERM first so openconnect can send a clean disconnect to the VPN server,
+// preventing stale server sessions that would block the next reconnect.
 func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-chan struct{}) {
 	host := c.cfg.PingHost
 	if !strings.Contains(host, ":") {
 		host += ":443"
 	}
 
-	binary := c.cfg.Binary
-	if binary == "" {
-		binary = "openconnect"
+	pattern := c.procPattern()
+	timeout := time.Duration(c.cfg.ConnectTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 15 * time.Second
 	}
-	binaryBase := filepath.Base(binary)
 
 	var ok, fail int
 
@@ -375,7 +405,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	// Poll every 1s until connected for fast detection; switch to 3s for keepalive.
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-	connectTimeout := time.NewTimer(30 * time.Second)
+	connectTimeout := time.NewTimer(timeout)
 	defer connectTimeout.Stop()
 
 	for {
@@ -413,6 +443,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				case newIface != "":
 					log.Warn("vpn connect timeout: interface appeared but ping_host still unreachable, restarting",
 						"vpn", c.cfg.Name, "host", host, "iface", newIface)
+					c.retryNow.Store(true)
 				default:
 					log.Warn("vpn connect timeout: subprocess alive but no interface appeared, restarting",
 						"vpn", c.cfg.Name, "host", host)
@@ -423,31 +454,33 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				// SIGTERM lets openconnect send a proper goodbye to the VPN server
 				// so the server session is released immediately — without this, the
 				// stale session blocks ping_host on the next reconnect attempt too.
-				terminateByName(binaryBase, c.cfg.Sudo)
+				terminateProcs(pattern, c.cfg.Sudo)
 				select {
 				case <-died:
 				case <-time.After(3 * time.Second):
 					killProcGroup(cmd)
 				}
-				killOrphanedProcs(binaryBase, c.cfg.Sudo)
+				killOrphanedProcs(pattern, c.cfg.Sudo)
 				return
 			}
 		case <-ticker.C:
-			// watchStderr may have already set StateConnected via "Established DTLS" line.
-			if c.State() == StateConnected {
-				connectTimeout.Stop()
+			// Short probe while connecting: until routes exist the SYN is
+			// silently dropped, and a 2 s timeout on a 1 s ticker halves the
+			// probe rate exactly when fast detection matters.
+			dialTimeout := 2 * time.Second
+			if c.State() != StateConnected {
+				dialTimeout = time.Second
 			}
-			conn, err := net.DialTimeout("tcp", host, 2*time.Second)
+			conn, err := net.DialTimeout("tcp", host, dialTimeout)
 			if err == nil {
 				conn.Close()
 				fail = 0
 				ok++
 				log.Debug("vpn: ping_host reachable", "vpn", c.cfg.Name, "host", host, "consecutive", ok)
-				if ok == 1 {
-					c.lastError.Store("probing " + host)
-					log.Info("vpn: probing tunnel connectivity", "vpn", c.cfg.Name, "host", host)
-				}
-				if ok >= 2 && c.State() != StateConnected {
+				// One successful TCP handshake to an internal host already
+				// proves traffic flows both ways; waiting for a second probe
+				// only delayed every connect by a tick.
+				if c.State() != StateConnected {
 					c.setState(StateConnected)
 					c.detectTunIface()
 					connectTimeout.Stop()
@@ -468,12 +501,12 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 						// stderr pipe cleanly — without this, cmd.Wait() blocks
 						// indefinitely because the orphaned openconnect holds the
 						// pipe write end open.
-						terminateByName(binaryBase, c.cfg.Sudo)
+						terminateProcs(pattern, c.cfg.Sudo)
 						select {
 						case <-died:
 						case <-time.After(3 * time.Second):
 							killProcGroup(cmd)
-							killOrphanedProcs(binaryBase, c.cfg.Sudo)
+							killOrphanedProcs(pattern, c.cfg.Sudo)
 						}
 						return
 					}
@@ -510,6 +543,10 @@ func (c *Connection) runPostDisconnect() {
 		c.restoreSystemDNSDarwin(ctx)
 	}
 	c.flushTunRoutes(ctx)
+	// The interface belonged to the session that just ended; don't keep
+	// showing it on a paused or reconnecting VPN.
+	c.tunIface.Store("")
+	c.tunIfaceIndex.Store(0)
 }
 
 // flushTunRoutes removes any routes still attached to the tunnel interface after disconnect.
@@ -519,6 +556,17 @@ func (c *Connection) flushTunRoutes(ctx context.Context) {
 	iface, _ := c.tunIface.Load().(string)
 	if iface == "" {
 		return
+	}
+	// Skip only when the name now refers to a different device: when switching
+	// VPNs the next openconnect can already have created its own interface
+	// under the same name (tun0, or the same utunN on macOS), and flushing it
+	// would wipe the new VPN's routes. A device that is gone is still flushed —
+	// on macOS routes can outlive an abruptly killed utun.
+	if cur, err := net.InterfaceByName(iface); err == nil {
+		if want := c.tunIfaceIndex.Load(); want == 0 || int32(cur.Index) != want {
+			log.Debug("vpn route flush skipped: interface name now belongs to another device", "vpn", c.cfg.Name, "iface", iface)
+			return
+		}
 	}
 	switch runtime.GOOS {
 	case "darwin":
@@ -738,9 +786,10 @@ func (c *Connection) deleteStaleServerRouteDarwin(ctx context.Context, ip string
 	}
 }
 
-// watchStderr logs openconnect output and promotes connection events.
-// done is closed when runOnce() returns; after that we only log, never update state.
-func (c *Connection) watchStderr(r io.Reader, done <-chan struct{}) {
+// watchOutput logs openconnect output (stdout and stderr) and promotes
+// connection events. done is closed when runOnce() returns; after that we only
+// log, never update state.
+func (c *Connection) watchOutput(r io.Reader, done <-chan struct{}) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -759,14 +808,19 @@ func (c *Connection) watchStderr(r io.Reader, done <-chan struct{}) {
 			strings.Contains(line, "Established TLS connection"),
 			strings.Contains(line, "Connected as"):
 			log.Info("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
-			if c.State() != StateConnected {
+			// With ping_host configured these lines only prove the session is
+			// up, not that internal hosts answer: right after switching between
+			// two VPNs into the same network, ping_host stayed unreachable for
+			// 15-35 s. ping_host stays authoritative then, so tunnels don't dial
+			// (and burn auto-pause attempts) into a network that isn't routed yet.
+			if c.cfg.PingHost == "" && c.State() != StateConnected {
 				c.setState(StateConnected)
 				c.detectTunIface()
 			}
 		case strings.HasPrefix(line, "Set up tun device "):
 			// Extract interface name (e.g. "Set up tun device utun2" → "utun2").
 			if fields := strings.Fields(line); len(fields) >= 5 {
-				c.tunIface.Store(fields[4])
+				c.setTunIface(fields[4])
 				log.Info("vpn: "+line, "vpn", c.cfg.Name)
 			}
 		case strings.Contains(line, "error") || strings.Contains(line, "Error") ||

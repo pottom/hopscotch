@@ -10,6 +10,7 @@ Loads, validates, writes, and hot-reloads `config.yaml`: tunnels, VPNs, proxy ru
 
 ## Local Contracts
 
+- `TunnelConfig.RequiresVPN` is `VPNNames`: YAML accepts a scalar name or a list, and `MarshalYAML` writes zero/one name back as a scalar (`""` / `name`) so `WriteConfig` doesn't turn existing single-name configs into lists. Keep that round-trip property (`TestVPNNamesMarshalKeepsScalarForm`).
 - `resolvePath` search order: `--config` flag > `$HOPSCOTCH_CONFIG` > `<binary dir>/hopscotch.yaml` > `~/.config/hopscotch/config.yaml` — first existing file wins.
 - `ApplyDefaults`/`Validate` are thin exported wrappers around the unexported `applyDefaults`/`validate` that `Load` already runs after parsing — added so a CLI wizard (`cmd/tunnel.go`'s `hopscotch tunnel add`) can normalize and check an in-memory `*Config` it just mutated by hand, in the same order `Load` uses (defaults first, then validate), before calling `WriteConfig`. Any future `<subcommand> add`-style command should reuse these rather than re-deriving normalization/validation.
 - `WriteConfig` always round-trips the whole `*Config` through `yaml.Marshal` and prepends a "generated, manual edits will be overwritten" header — hand-written comments in `config.yaml` do not survive an app-triggered write. Anything that writes `config.yaml` (the rules editor `internal/admin/rules.go` and the notifications settings handler `internal/admin/notifications.go`) must accept this.
