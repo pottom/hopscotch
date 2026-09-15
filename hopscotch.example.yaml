@@ -34,6 +34,7 @@
 #     # key: ~/.certs/client.key           # private key for cert-based auth
 #     ping_host: "10.0.0.1:22"      # TCP probe to confirm VPN is up
 #     # connect_timeout: 15         # seconds ping_host may stay unreachable before openconnect is restarted
+#     # hold_dark_session: false    # experimental: keep a session that gets no traffic back open during its cooldown
 #     # pre_connect:                 # commands before each VPN connection attempt (rarely needed)
 #     #   - "some-custom-setup.sh"
 #     # post_disconnect:             # commands after each VPN disconnect (rarely needed)
