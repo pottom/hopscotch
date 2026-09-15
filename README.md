@@ -257,6 +257,7 @@ docker pull ghcr.io/pottom/hopscotch:latest
    ```bash
    hopscotch trust all
    ```
+   This fetches every host key type each server offers (ED25519, ECDSA, RSA), shows their SHA256 fingerprints, and appends the types not yet in `~/.ssh/known_hosts` after confirmation (`-y` skips the prompt). Pinning all types keeps plain `ssh` through the proxy working whatever `HostKeyAlgorithms` your OpenSSH config prefers. Re-running it is safe: it only adds missing types. If known_hosts already pins a *different* key of the same type, nothing is added for that host and the command fails. Verify the new fingerprint out of band before removing the old line.
 
 3. Load shell integration (once, in `~/.zshrc` or `~/.bashrc`):
    ```bash
@@ -487,7 +488,7 @@ hopscotch tunnel add                # interactive wizard: add a tunnel to the co
 hopscotch tunnel add <name> --host db.internal --user alice --local-port 1081 -y  # non-interactive (scripting)
 hopscotch update                   # check for newer release and update the binary
 hopscotch update --check           # check only, do not download
-hopscotch trust <name|host|all>    # add SSH host key to known_hosts
+hopscotch trust <name|host|all>    # pin every host key type the server offers (ED25519/ECDSA/RSA) in known_hosts
 hopscotch validate                 # validate the config file without starting
 hopscotch version                  # print version info
 hopscotch ssh-config               # print SSH ProxyCommand config block
