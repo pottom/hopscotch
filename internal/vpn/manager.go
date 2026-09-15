@@ -14,12 +14,17 @@ type Manager struct {
 	connections map[string]*Connection
 }
 
-// NewManager creates a Manager from the given VPN configs.
-func NewManager(vpnCfgs []config.VPNConfig) *Manager {
+// NewManager creates a Manager from the given VPN configs. historyPath is the
+// session history file the dark-retry policy learns from (see history.go);
+// "" keeps the history in memory only.
+func NewManager(vpnCfgs []config.VPNConfig, historyPath string) *Manager {
 	m := &Manager{connections: make(map[string]*Connection, len(vpnCfgs))}
 	// One gate for all VPNs: switching back and forth between them is exactly
 	// the burst of sessions it guards against.
 	gate := newSessionGate()
+	// One history for all VPNs, so each session's context (time since the
+	// other VPN's last session, recent starts) is complete.
+	history := newSessionHistory(historyPath)
 	for _, cfg := range vpnCfgs {
 		conn := newConnection(connConfig{
 			Name:               cfg.Name,
@@ -45,6 +50,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			AutoResumeAfter:    cfg.AutoResumeAfter,
 		})
 		conn.gate = gate
+		conn.history = history
 		m.connections[cfg.Name] = conn
 	}
 	return m

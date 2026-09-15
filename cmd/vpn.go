@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -15,11 +17,27 @@ import (
 
 	"github.com/pottom/hopscotch/internal/config"
 	"github.com/pottom/hopscotch/internal/keychain"
+	"github.com/pottom/hopscotch/internal/state"
+	"github.com/pottom/hopscotch/internal/vpn"
 )
 
 var vpnCmd = &cobra.Command{
 	Use:   "vpn",
-	Short: "Manage VPN credentials",
+	Short: "VPN credentials and connection statistics",
+}
+
+var vpnStatsCmd = &cobra.Command{
+	Use:   "stats",
+	Short: "Show recorded VPN sessions and what the dark-session retry policy learned",
+	Long: `Reads the session history the daemon records in the cache directory
+(vpn-sessions.jsonl: the last 30 days, at most 500 sessions) and prints, per VPN,
+how sessions ended and how retries after a "dark" session (tunnel up, gateway
+returning no traffic) worked out for each wait. The last line is the wait the
+daemon would choose after a dark session right now.
+
+Deleting the file resets what was learned.`,
+	Args: cobra.NoArgs,
+	RunE: runVPNStats,
 }
 
 var vpnPasswordCmd = &cobra.Command{
@@ -36,7 +54,45 @@ Run this command again to update a stored password.`,
 
 func init() {
 	vpnCmd.AddCommand(vpnPasswordCmd)
+	vpnCmd.AddCommand(vpnStatsCmd)
 	rootCmd.AddCommand(vpnCmd)
+}
+
+func runVPNStats(cmd *cobra.Command, _ []string) error {
+	stateMgr, err := state.NewManager()
+	if err != nil {
+		return fmt.Errorf("state manager: %w", err)
+	}
+	path := filepath.Join(filepath.Dir(stateMgr.PIDFile()), vpn.HistoryFileName)
+	writeVPNStats(cmd.OutOrStdout(), path, vpn.ReadReports(path, time.Now()))
+	return nil
+}
+
+func writeVPNStats(w io.Writer, path string, reports []vpn.Report) {
+	if len(reports) == 0 {
+		fmt.Fprintf(w, "No VPN sessions recorded yet (%s).\n", path)
+		return
+	}
+	fmt.Fprintf(w, "Session history: %s\n", path)
+	for _, r := range reports {
+		fmt.Fprintf(w, "\n%s: %d sessions (ok %d, dark %d, failed %d, cut %d), last %s\n",
+			r.VPN, r.Sessions, r.OK, r.Dark, r.Failed, r.Cut, r.Last.Local().Format("2006-01-02 15:04"))
+		fmt.Fprintln(w, "  retries after a dark session:")
+		for _, wait := range r.RetriesAfterDark {
+			fmt.Fprintf(w, "    wait ~%-4s worked %d/%d  (estimate %.0f%%)\n",
+				shortDuration(wait.Wait), wait.Worked, wait.Tried, wait.SuccessRate*100)
+		}
+		fmt.Fprintf(w, "  next wait after a dark session: %s (%s)\n", shortDuration(r.NextWait), r.NextReason)
+	}
+}
+
+// shortDuration prints 15s, 30s, 1m, 2m rather than 1m0s.
+func shortDuration(d time.Duration) string {
+	s := d.Round(time.Second).String()
+	if strings.HasSuffix(s, "m0s") {
+		return strings.TrimSuffix(s, "0s")
+	}
+	return s
 }
 
 func runVPNPassword(_ *cobra.Command, args []string) error {

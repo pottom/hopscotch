@@ -23,20 +23,3 @@ func TestGatewayDark(t *testing.T) {
 		}
 	}
 }
-
-func TestDarkCooldown(t *testing.T) {
-	for streak, want := range map[int]time.Duration{
-		-1: 0,
-		0:  0,
-		1:  0, // first dark session: only the normal reconnect delay
-		2:  2 * time.Minute,
-		3:  4 * time.Minute,
-		4:  8 * time.Minute,
-		5:  8 * time.Minute, // capped
-		60: 8 * time.Minute, // no shift overflow
-	} {
-		if got := darkCooldown(streak); got != want {
-			t.Errorf("darkCooldown(%d) = %v, want %v", streak, got, want)
-		}
-	}
-}

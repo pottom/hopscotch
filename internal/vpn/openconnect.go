@@ -400,7 +400,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	var ok, fail int
 	var iface string        // the tunnel interface this attempt created, once seen
 	var ifaceUpAt time.Time // when iface was first seen
-	holding := false        // a dark session kept open for its cooldown (hold_dark_session)
+	holding := false        // a dark session kept open for the dark-streak floor (hold_dark_session)
 
 	c.lastError.Store(msgs.WaitingForVPNTunnel)
 	log.Info("vpn: waiting for VPN tunnel", "vpn", c.cfg.Name, "host", host)
@@ -426,7 +426,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 
 	// endDark handles a session whose gateway returns no traffic (see dark.go).
 	// It reports whether the session was torn down; false means it is being kept
-	// open for its cooldown under hold_dark_session and polling continues.
+	// open for the dark-streak floor under hold_dark_session and polling continues.
 	endDark := func(reason string) bool {
 		c.lastAttemptDark.Store(true)
 		if hold := c.holdDarkSessionFor(); hold > 0 && !holding {
@@ -865,6 +865,12 @@ func (c *Connection) watchOutput(r io.Reader, done <-chan struct{}) {
 		default:
 		}
 		switch {
+		case strings.HasPrefix(line, "Configured as "):
+			// "Configured as 10.4.1.126, with SSL connected and DTLS connected"
+			if fields := strings.Fields(line); len(fields) >= 3 {
+				c.sessionIP.Store(strings.TrimSuffix(fields[2], ","))
+			}
+			log.Debug("vpn: "+line, "vpn", c.cfg.Name, "server", c.cfg.Server)
 		case strings.Contains(line, "Established DTLS connection"),
 			strings.Contains(line, "Established TLS connection"),
 			strings.Contains(line, "Connected as"):
