@@ -97,10 +97,10 @@ subgraph VPN["🔒  VPN — Connection.Run (minden VPN-re külön goroutine)"]
   vn6 --> vn7["openconnect subprocess indítása\n(sudo if configured)"]
   vn7 --> vn8[["párhuzamos watcherek"]]
 
-  vn8 --> ws["watchStderr:\nDTLS/TLS → Connected\nSet up tun device → iface\nError/Failed → lastError"]
+  vn8 --> ws["watchOutput stdout+stderr:\nDTLS/TLS/Connected as → Connected, csak ping_host nélkül\nSet up tun device → iface\nError/Failed → lastError"]
   vn8 --> wu["watchUplink 2s poll:\nhálózat nélkül → killProcGroup → killedByUplink"]
   vn8 --> pp{ping_host konfigurálva?}
-  pp -->|igen| ppy["pollPingHost 1s poll:\n2x TCP OK → Connected\n3x fail post-connect → SIGTERM\n30s timeout → SIGTERM restart"]
+  pp -->|igen| ppy["pollPingHost 1s poll:\n1x TCP OK → Connected\n3x fail post-connect → SIGTERM\nconnect_timeout 15s → SIGTERM restart\ninterfész fent volt → azonnali retry, max 2x egymás után"]
   pp -->|nem| ppn["8s delay → assume Connected"]
   vn8 --> vn9{subprocess kilép}
 

@@ -339,7 +339,7 @@ admin:
 | `user` | — | SSH username |
 | `identity_file` | — | Path to private key; omit to use SSH agent (YubiKey, gpg-agent, ssh-agent). On auth failure, hopscotch watches the agent for new keys and retries immediately when one appears — no need to wait for the backoff timer after inserting a YubiKey. |
 | `local_port` | — | Local SOCKS5 port for this tunnel |
-| `requires_vpn` | — | Name of a `vpn` entry; tunnel waits for VPN before connecting |
+| `requires_vpn` | — | Name of a `vpn` entry, or a list of names; tunnel waits until any one of them is connected before dialing (e.g. `[corp, corp-backup]` for a host reachable through either VPN) |
 | `pre_connect` | — | Shell commands to run before each dial attempt |
 | `dial_timeout` | `30` | TCP connect + SSH handshake timeout (seconds) |
 | `keepalive_interval` | `5` | Keepalive probe interval (seconds) |
@@ -414,7 +414,8 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `dns_resolver` | `1.1.1.1:53` | DNS server used for pre-connect hostname resolution; bypasses system DNS |
 | `password_env` | — | Environment variable name containing the password |
 | `password_cmd` | — | Shell command whose stdout is the password |
-| `ping_host` | — | `host:port` TCP probe to confirm VPN is up |
+| `ping_host` | — | `host:port` TCP probe to confirm VPN is up; the VPN counts as connected only once this answers |
+| `connect_timeout` | `15` | Seconds `ping_host` may stay unreachable after launch before openconnect is restarted. If the tunnel interface did come up, the restart skips the reconnect delay (up to 2 times in a row, so a struggling gateway isn't flooded with sessions): a session that is up but passes no traffic doesn't heal by waiting, while a fresh one usually works within seconds |
 | `pre_connect` | — | Shell commands to run before each connection attempt |
 | `post_disconnect` | — | Shell commands to run after each VPN disconnect; route cleanup is automatic, rarely needed |
 | `extra_args` | — | Additional openconnect flags |
