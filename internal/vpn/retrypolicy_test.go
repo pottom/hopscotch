@@ -99,9 +99,7 @@ func TestDarkRetryIgnoresIrrelevantRecords(t *testing.T) {
 		r.PrevDark = false
 		records = append(records, r)
 	}
-	for _, r := range retryAfterDark("4ig", 2*time.Minute, OutcomeCut, 20, now) {
-		records = append(records, r)
-	}
+	records = append(records, retryAfterDark("4ig", 2*time.Minute, OutcomeCut, 20, now)...)
 
 	if d := chooseDarkRetry(records, "4ig", 2, now, never); d.Delay != darkRetryDefault || !strings.Contains(d.Reason, "learning") {
 		t.Errorf("decision = %+v, want the learning default", d)
