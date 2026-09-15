@@ -416,7 +416,8 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `password_env` | — | Environment variable name containing the password |
 | `password_cmd` | — | Shell command whose stdout is the password |
 | `ping_host` | — | `host:port` TCP probe to confirm VPN is up; the VPN counts as connected only once this answers |
-| `connect_timeout` | `15` | Seconds `ping_host` may stay unreachable after launch before openconnect is restarted. If the tunnel interface did come up, the restart skips the reconnect delay (up to 2 times in a row, so a struggling gateway isn't flooded with sessions): a session that is up but passes no traffic doesn't heal by waiting, while a fresh one usually works within seconds |
+| `connect_timeout` | `15` | Seconds `ping_host` may stay unreachable after launch before openconnect is restarted. On Linux, a session whose tunnel sends packets but receives none at all is recognised as "dark" after about 6 s instead. Dark sessions are not restarted right away: a second one in a row starts a quiet period of 2, 4, then at most 8 minutes, because new sessions kept the gateway stuck. Session starts across all VPNs are also spaced out (at most 3 per 2 minutes, plus a 3 s settle when switching back and forth) |
+| `hold_dark_session` | `false` | Experimental: during that quiet period keep the dark session open, so it connects by itself if the gateway recovers, instead of tearing it down |
 | `pre_connect` | — | Shell commands to run before each connection attempt |
 | `post_disconnect` | — | Shell commands to run after each VPN disconnect; route cleanup is automatic, rarely needed |
 | `extra_args` | — | Additional openconnect flags |

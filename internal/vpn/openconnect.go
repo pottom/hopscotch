@@ -398,6 +398,9 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	}
 
 	var ok, fail int
+	var iface string        // the tunnel interface this attempt created, once seen
+	var ifaceUpAt time.Time // when iface was first seen
+	holding := false        // a dark session kept open for its cooldown (hold_dark_session)
 
 	c.lastError.Store(msgs.WaitingForVPNTunnel)
 	log.Info("vpn: waiting for VPN tunnel", "vpn", c.cfg.Name, "host", host)
@@ -408,6 +411,39 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	connectTimeout := time.NewTimer(timeout)
 	defer connectTimeout.Stop()
 
+	// stopSession tears the session down. SIGTERM lets openconnect send a proper
+	// goodbye to the VPN server so the server session is released immediately.
+	stopSession := func() {
+		c.setState(StateDisconnected)
+		terminateProcs(pattern, c.cfg.Sudo)
+		select {
+		case <-died:
+		case <-time.After(3 * time.Second):
+			killProcGroup(cmd)
+		}
+		killOrphanedProcs(pattern, c.cfg.Sudo)
+	}
+
+	// endDark handles a session whose gateway returns no traffic (see dark.go).
+	// It reports whether the session was torn down; false means it is being kept
+	// open for its cooldown under hold_dark_session and polling continues.
+	endDark := func(reason string) bool {
+		c.lastAttemptDark.Store(true)
+		if hold := c.holdDarkSessionFor(); hold > 0 && !holding {
+			holding = true
+			c.heldCooldown.Store(true)
+			log.Warn("vpn: gateway returns no traffic, holding this session open instead of starting new ones",
+				"vpn", c.cfg.Name, "reason", reason, "hold", hold)
+			c.lastError.Store("gateway returned no traffic (" + reason + "); holding the session for " + hold.String())
+			resetTimer(connectTimeout, hold)
+			return false
+		}
+		log.Warn("vpn: gateway returns no traffic, ending session", "vpn", c.cfg.Name, "reason", reason, "iface", iface)
+		c.lastError.Store("gateway returned no traffic (" + reason + ")")
+		stopSession()
+		return true
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -415,54 +451,51 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 		case <-died:
 			return
 		case <-connectTimeout.C:
-			if c.State() != StateConnected {
-				// Diagnose: is the subprocess still alive?
-				procAlive := true
-				select {
-				case <-died:
-					procAlive = false
-				default:
-				}
-
-				// Did a new tun interface appear even though ping_host is unreachable?
-				var newIface string
-				before, _ := c.tunIfacesBefore.Load().(map[string]bool)
-				if ifaces, err := net.Interfaces(); err == nil {
-					for _, iface := range ifaces {
-						if (strings.HasPrefix(iface.Name, "utun") || strings.HasPrefix(iface.Name, "tun")) && !before[iface.Name] {
-							newIface = iface.Name
-							break
-						}
-					}
-				}
-
-				switch {
-				case !procAlive:
-					log.Warn("vpn connect timeout: subprocess exited before tunnel was ready, restarting",
-						"vpn", c.cfg.Name, "host", host)
-				case newIface != "":
-					log.Warn("vpn connect timeout: interface appeared but ping_host still unreachable, restarting",
-						"vpn", c.cfg.Name, "host", host, "iface", newIface)
-					c.retryNow.Store(true)
-				default:
-					log.Warn("vpn connect timeout: subprocess alive but no interface appeared, restarting",
-						"vpn", c.cfg.Name, "host", host)
-				}
-
-				c.lastError.Store("connect timeout: " + host + " unreachable")
-				c.setState(StateDisconnected)
-				// SIGTERM lets openconnect send a proper goodbye to the VPN server
-				// so the server session is released immediately — without this, the
-				// stale session blocks ping_host on the next reconnect attempt too.
-				terminateProcs(pattern, c.cfg.Sudo)
-				select {
-				case <-died:
-				case <-time.After(3 * time.Second):
-					killProcGroup(cmd)
-				}
-				killOrphanedProcs(pattern, c.cfg.Sudo)
-				return
+			if c.State() == StateConnected {
+				continue
 			}
+			// Diagnose: is the subprocess still alive?
+			procAlive := true
+			select {
+			case <-died:
+				procAlive = false
+			default:
+			}
+			if iface == "" {
+				iface = c.newTunIface()
+			}
+
+			switch {
+			case !procAlive:
+				log.Warn("vpn connect timeout: subprocess exited before tunnel was ready, restarting",
+					"vpn", c.cfg.Name, "host", host)
+			case iface != "":
+				rx, tx, countersOK := ifaceCounters(iface)
+				if !countersOK || rx == 0 {
+					// Nothing came back through the tunnel (or we can't tell, e.g.
+					// on macOS): the gateway is dark.
+					reason := host + " unreachable for " + timeout.String()
+					if countersOK {
+						reason = fmt.Sprintf("tx %d, rx 0", tx)
+					}
+					if !endDark(reason) {
+						continue
+					}
+					return
+				}
+				// Traffic does come back, so the gateway works and ping_host
+				// itself is the problem (wrong host/port, firewalled). Not dark:
+				// the normal backoff applies.
+				log.Warn("vpn connect timeout: tunnel receives traffic but ping_host is unreachable (check ping_host), restarting",
+					"vpn", c.cfg.Name, "host", host, "iface", iface, "rx", rx)
+			default:
+				log.Warn("vpn connect timeout: subprocess alive but no interface appeared, restarting",
+					"vpn", c.cfg.Name, "host", host)
+			}
+
+			c.lastError.Store("connect timeout: " + host + " unreachable")
+			stopSession()
+			return
 		case <-ticker.C:
 			// Short probe while connecting: until routes exist the SYN is
 			// silently dropped, and a 2 s timeout on a 1 s ticker halves the
@@ -482,6 +515,9 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 				// only delayed every connect by a tick.
 				if c.State() != StateConnected {
 					c.setState(StateConnected)
+					c.lastAttemptDark.Store(false)
+					c.heldCooldown.Store(false)
+					holding = false
 					c.detectTunIface()
 					connectTimeout.Stop()
 					// Switch to a slower keepalive interval to reduce load.
@@ -491,6 +527,20 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 			} else {
 				ok = 0
 				log.Debug("vpn: ping_host unreachable", "vpn", c.cfg.Name, "host", host, "err", err, "state", c.State())
+				if c.State() != StateConnected && !holding {
+					// Detect a dark gateway from the tunnel's own counters instead
+					// of waiting out connect_timeout (Linux only; see ifaceCounters).
+					if iface == "" {
+						if iface = c.newTunIface(); iface != "" {
+							ifaceUpAt = time.Now()
+						}
+					} else if rx, tx, countersOK := ifaceCounters(iface); countersOK && gatewayDark(rx, tx, time.Since(ifaceUpAt)) {
+						if endDark(fmt.Sprintf("tx %d, rx 0 after %s", tx, time.Since(ifaceUpAt).Round(time.Second))) {
+							return
+						}
+						continue
+					}
+				}
 				if c.State() == StateConnected {
 					fail++
 					log.Debug("vpn ping failed", "vpn", c.cfg.Name, "host", host, "consecutive", fail)
@@ -514,6 +564,17 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 			}
 		}
 	}
+}
+
+// resetTimer re-arms t to fire after d, whether or not it already fired.
+func resetTimer(t *time.Timer, d time.Duration) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
 }
 
 // runPostDisconnect executes each post_disconnect command after the VPN subprocess exits,

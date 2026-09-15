@@ -95,19 +95,20 @@ type VPNConfig struct {
 	Type               string   `yaml:"type"` // currently only "openconnect"
 	Server             string   `yaml:"server"`
 	User               string   `yaml:"user"`
-	Binary             string   `yaml:"binary"`          // path to openconnect binary; default: "openconnect" (PATH)
-	AuthGroup          string   `yaml:"authgroup"`       // --authgroup value (Cisco AnyConnect groups)
-	PasswordEnv        string   `yaml:"password_env"`    // env var containing the password
-	PasswordCmd        string   `yaml:"password_cmd"`    // shell command whose stdout is the password
-	Certificate        string   `yaml:"certificate"`     // path to client cert (cert auth)
-	Key                string   `yaml:"key"`             // path to private key (cert auth)
-	PingHost           string   `yaml:"ping_host"`       // host[:port] TCP-probed to detect connectivity
-	ConnectTimeout     int      `yaml:"connect_timeout"` // seconds ping_host may stay unreachable after launch before openconnect is restarted; default 15
-	ExtraArgs          []string `yaml:"extra_args"`      // passed through to openconnect verbatim
-	PreConnect         []string `yaml:"pre_connect"`     // commands to run before each connection attempt
-	PostDisconnect     []string `yaml:"post_disconnect"` // commands to run after each VPN disconnect
-	Sudo               bool     `yaml:"sudo"`            // prepend sudo (needed on most platforms)
-	DNSResolver        string   `yaml:"dns_resolver"`    // DNS server for pre-connect hostname resolution; default: 1.1.1.1:53
+	Binary             string   `yaml:"binary"`            // path to openconnect binary; default: "openconnect" (PATH)
+	AuthGroup          string   `yaml:"authgroup"`         // --authgroup value (Cisco AnyConnect groups)
+	PasswordEnv        string   `yaml:"password_env"`      // env var containing the password
+	PasswordCmd        string   `yaml:"password_cmd"`      // shell command whose stdout is the password
+	Certificate        string   `yaml:"certificate"`       // path to client cert (cert auth)
+	Key                string   `yaml:"key"`               // path to private key (cert auth)
+	PingHost           string   `yaml:"ping_host"`         // host[:port] TCP-probed to detect connectivity
+	ConnectTimeout     int      `yaml:"connect_timeout"`   // seconds ping_host may stay unreachable after launch before openconnect is restarted; default 15
+	HoldDarkSession    bool     `yaml:"hold_dark_session"` // experimental: keep a session whose gateway returns no traffic open during its cooldown instead of tearing it down; default false
+	ExtraArgs          []string `yaml:"extra_args"`        // passed through to openconnect verbatim
+	PreConnect         []string `yaml:"pre_connect"`       // commands to run before each connection attempt
+	PostDisconnect     []string `yaml:"post_disconnect"`   // commands to run after each VPN disconnect
+	Sudo               bool     `yaml:"sudo"`              // prepend sudo (needed on most platforms)
+	DNSResolver        string   `yaml:"dns_resolver"`      // DNS server for pre-connect hostname resolution; default: 1.1.1.1:53
 	ReconnectDelay     int      `yaml:"reconnect_delay"`
 	ReconnectMaxDelay  int      `yaml:"reconnect_max_delay"`
 	AutoPauseThreshold int      `yaml:"auto_pause_threshold"` // consecutive failed connection attempts before auto-pausing; 0 disables
