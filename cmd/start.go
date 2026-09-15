@@ -100,7 +100,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	var vpnGater tunnel.VPNGater
 	if len(cfg.VPNs) > 0 {
-		vpnGater = vpn.NewManager(cfg.VPNs)
+		vpnGater = vpn.NewManager(cfg.VPNs, filepath.Join(filepath.Dir(stateMgr.PIDFile()), vpn.HistoryFileName))
 	}
 
 	mgr := tunnel.NewManager(cfg.Tunnels, vpnGater)

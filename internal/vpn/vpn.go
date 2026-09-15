@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/url"
 	"strings"
@@ -105,12 +106,21 @@ type Connection struct {
 	// reconnect.
 	darkStreak atomic.Int32
 	// heldCooldown is set by pollPingHost when hold_dark_session already kept a
-	// dark session open for its cooldown, so Run() doesn't wait it out again.
+	// dark session open for the dark-streak floor, so Run() doesn't wait it out
+	// again.
 	heldCooldown atomic.Bool
+	// sessionIP is the client address the gateway assigned in the current
+	// attempt ("Configured as ..."); "" until seen.
+	sessionIP atomic.Value
 
 	// gate spaces out session starts across all of the Manager's VPNs (see
 	// sessionGate); nil disables spacing.
 	gate *sessionGate
+	// history records every attempt and feeds the dark-retry policy
+	// (retrypolicy.go). Shared by the Manager's VPNs; nil records nothing.
+	history *sessionHistory
+	// rnd drives the policy's exploration; replaced in tests.
+	rnd func() float64
 	// attempt runs one connection attempt: runOnce, replaced in tests.
 	attempt func(ctx context.Context) error
 
@@ -148,6 +158,8 @@ func newConnection(cfg connConfig) *Connection {
 	c.tunIface.Store("")
 	c.tunIfacesBefore.Store(map[string]bool{})
 	c.attempt = c.runOnce
+	c.sessionIP.Store("")
+	c.rnd = rand.Float64
 	return c
 }
 
@@ -231,12 +243,13 @@ func (c *Connection) newTunIface() string {
 
 // holdDarkSessionFor returns how long pollPingHost should keep a dark session
 // open instead of tearing it down, or 0. Only with hold_dark_session, and only
-// once the dark session about to end would trigger a cooldown anyway.
+// when the dark session about to end reaches the streak floor, where a long
+// pause without new sessions is enforced anyway (retrypolicy.go).
 func (c *Connection) holdDarkSessionFor() time.Duration {
-	if !c.cfg.HoldDarkSession {
+	if !c.cfg.HoldDarkSession || int(c.darkStreak.Load())+1 < darkRetryFloorStreak {
 		return 0
 	}
-	return darkCooldown(int(c.darkStreak.Load()) + 1)
+	return darkRetryFloor
 }
 
 // setTunIface records the tunnel interface name together with its kernel
@@ -363,6 +376,9 @@ func (c *Connection) Run(ctx context.Context) error {
 			continue
 		}
 		beforeRun := time.Now()
+		c.sessionIP.Store("")
+		session := c.history.startContext(c.cfg.Name, beforeRun)
+		session.DarkStreak = int(c.darkStreak.Load())
 
 		// Run the subprocess in a goroutine so forceReconnect/Pause can interrupt
 		// it even while the VPN is connected (not just during the backoff countdown).
@@ -408,6 +424,7 @@ func (c *Connection) Run(ctx context.Context) error {
 
 		connectedThisRun := c.connectedAt.Load().(time.Time).After(beforeRun)
 		dark := !connectedThisRun && c.lastAttemptDark.Load()
+		c.recordSession(session, time.Now(), connectedThisRun, dark, forceSkipDelay || pausedThisRound)
 		if dark {
 			c.darkStreak.Add(1)
 		}
@@ -460,22 +477,24 @@ func (c *Connection) Run(ctx context.Context) error {
 			continue
 		}
 
-		delay := b.next()
+		var delay time.Duration
 		if dark {
-			// New sessions keep a dark gateway stuck; only quiet time brought it
-			// back (see dark.go). The first dark session gets the normal delay,
-			// later ones a growing cooldown.
+			// How long to wait after a dark session is learned from the
+			// recorded history (retrypolicy.go); the exponential backoff below
+			// is for other failures.
 			streak := int(c.darkStreak.Load())
-			if c.heldCooldown.Swap(false) {
-				// hold_dark_session already kept the session open for the cooldown.
-			} else if cooldown := darkCooldown(streak); cooldown > delay {
-				delay = cooldown
+			decision := chooseDarkRetry(c.history.snapshot(), c.cfg.Name, streak, time.Now(), c.rnd)
+			delay = decision.Delay
+			if c.heldCooldown.Swap(false) && delay >= darkRetryFloor {
+				// hold_dark_session already kept the session open for the floor.
+				delay = darkRetryDefault
 			}
-			c.lastError.Store(fmt.Sprintf("gateway returned no traffic (%d session(s) in a row); next session in %s",
-				streak, delay.Round(time.Second)))
+			c.lastError.Store(fmt.Sprintf("gateway returned no traffic (%d session(s) in a row); next session in %s — %s",
+				streak, delay.Round(time.Second), decision.Reason))
 			log.Warn("vpn: gateway returned no traffic, waiting before the next session",
-				"vpn", c.cfg.Name, "dark_in_a_row", streak, "delay", delay)
+				"vpn", c.cfg.Name, "dark_in_a_row", streak, "delay", delay, "why", decision.Reason, "evidence", decision.Detail)
 		} else {
+			delay = b.next()
 			log.Warn("vpn disconnected, reconnecting", "vpn", c.cfg.Name, "delay", delay)
 		}
 		c.nextReconnectAt.Store(time.Now().Add(delay))
@@ -549,6 +568,45 @@ func (c *Connection) holdSessionStart(ctx context.Context, d time.Duration, msg 
 			return nil
 		}
 	}
+}
+
+// recordSession completes the start context of an attempt with its outcome,
+// adds it to the history and logs one summary line per attempt.
+func (c *Connection) recordSession(r SessionRecord, end time.Time, connected, dark, cut bool) {
+	r.End = end
+	switch {
+	case connected:
+		r.Outcome = OutcomeOK
+		if at := c.connectedAt.Load().(time.Time); at.After(r.Start) {
+			r.ConnectedAfter = at.Sub(r.Start).Seconds()
+		}
+	case dark:
+		r.Outcome = OutcomeDark
+	case cut:
+		r.Outcome = OutcomeCut
+	default:
+		r.Outcome = OutcomeFailed
+	}
+	r.IP, _ = c.sessionIP.Load().(string)
+	c.history.add(r)
+	log.Info("vpn session",
+		"vpn", r.VPN,
+		"outcome", r.Outcome,
+		"lasted", end.Sub(r.Start).Round(time.Second),
+		"since_own", fmtSince(r.SinceOwn),
+		"prev_dark", r.PrevDark,
+		"dark_streak", r.DarkStreak,
+		"starts_10m", r.Starts10m,
+		"after_switch", r.AfterSwitch,
+		"ip", r.IP,
+	)
+}
+
+func fmtSince(seconds float64) string {
+	if seconds < 0 {
+		return "none"
+	}
+	return time.Duration(seconds * float64(time.Second)).Round(time.Second).String()
 }
 
 type backoff struct {
