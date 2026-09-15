@@ -7,6 +7,7 @@ window.isVPNProgressMsg = function(msg) {
     msg.startsWith('DNS retry: ') ||
     msg.startsWith('pre_connect: ') ||
     msg.startsWith('probing ') ||
+    msg.startsWith('waiting: ') ||
     msg === 'openconnect starting' ||
     msg === 'waiting for VPN tunnel' ||
     msg === 'waiting for network';

@@ -17,8 +17,11 @@ type Manager struct {
 // NewManager creates a Manager from the given VPN configs.
 func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 	m := &Manager{connections: make(map[string]*Connection, len(vpnCfgs))}
+	// One gate for all VPNs: switching back and forth between them is exactly
+	// the burst of sessions it guards against.
+	gate := newSessionGate()
 	for _, cfg := range vpnCfgs {
-		m.connections[cfg.Name] = newConnection(connConfig{
+		conn := newConnection(connConfig{
 			Name:               cfg.Name,
 			Binary:             cfg.Binary,
 			Server:             cfg.Server,
@@ -30,6 +33,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			Key:                cfg.Key,
 			PingHost:           cfg.PingHost,
 			ConnectTimeout:     cfg.ConnectTimeout,
+			HoldDarkSession:    cfg.HoldDarkSession,
 			ExtraArgs:          cfg.ExtraArgs,
 			PreConnect:         cfg.PreConnect,
 			PostDisconnect:     cfg.PostDisconnect,
@@ -40,6 +44,8 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			AutoPauseThreshold: cfg.AutoPauseThreshold,
 			AutoResumeAfter:    cfg.AutoResumeAfter,
 		})
+		conn.gate = gate
+		m.connections[cfg.Name] = conn
 	}
 	return m
 }

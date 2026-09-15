@@ -3,6 +3,8 @@ package vpn
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -66,6 +68,7 @@ type connConfig struct {
 	Key                string
 	PingHost           string // host[:port] TCP-probed to confirm VPN connectivity
 	ConnectTimeout     int    // seconds ping_host may stay unreachable after launch; <= 0 means 15
+	HoldDarkSession    bool   // keep a dark session open during its cooldown instead of tearing it down (experimental)
 	ExtraArgs          []string
 	PreConnect         []string // commands to run before each connection attempt
 	PostDisconnect     []string // commands to run after each VPN disconnect
@@ -93,10 +96,23 @@ type Connection struct {
 	pauseRequest    chan struct{} // buffered(1); signals a pause request
 	resume          chan struct{} // buffered(1); signals resume from pause
 
-	// retryNow is set by pollPingHost when the connect timeout fires although
-	// the tunnel interface did come up, asking Run() to restart without the
-	// backoff delay. Cleared at the start of every attempt.
-	retryNow atomic.Bool
+	// lastAttemptDark is set by pollPingHost when the attempt ended because the
+	// gateway returned no traffic (see dark.go); cleared when an attempt starts
+	// or the VPN connects.
+	lastAttemptDark atomic.Bool
+	// darkStreak counts dark attempts in a row. Written by Run(), read by
+	// pollPingHost (hold_dark_session); reset on connect, resume and force
+	// reconnect.
+	darkStreak atomic.Int32
+	// heldCooldown is set by pollPingHost when hold_dark_session already kept a
+	// dark session open for its cooldown, so Run() doesn't wait it out again.
+	heldCooldown atomic.Bool
+
+	// gate spaces out session starts across all of the Manager's VPNs (see
+	// sessionGate); nil disables spacing.
+	gate *sessionGate
+	// attempt runs one connection attempt: runOnce, replaced in tests.
+	attempt func(ctx context.Context) error
 
 	// consecutiveFailures counts connection attempts in a row that never
 	// reached StateConnected; reset to 0 on a successful connect or a manual
@@ -131,6 +147,7 @@ func newConnection(cfg connConfig) *Connection {
 	c.lastError.Store("")
 	c.tunIface.Store("")
 	c.tunIfacesBefore.Store(map[string]bool{})
+	c.attempt = c.runOnce
 	return c
 }
 
@@ -190,19 +207,36 @@ func (c *Connection) detectTunIface() {
 	if c.tunIface.Load().(string) != "" {
 		return
 	}
-	before := c.tunIfacesBefore.Load().(map[string]bool)
+	if name := c.newTunIface(); name != "" {
+		c.setTunIface(name)
+		log.Info("vpn tunnel interface detected", "vpn", c.cfg.Name, "iface", name)
+	}
+}
+
+// newTunIface returns a tunnel interface that didn't exist when this attempt
+// started, or "".
+func (c *Connection) newTunIface() string {
+	before, _ := c.tunIfacesBefore.Load().(map[string]bool)
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return
+		return ""
 	}
 	for _, iface := range ifaces {
-		name := iface.Name
-		if (strings.HasPrefix(name, "utun") || strings.HasPrefix(name, "tun")) && !before[name] {
-			c.setTunIface(name)
-			log.Info("vpn tunnel interface detected", "vpn", c.cfg.Name, "iface", name)
-			return
+		if (strings.HasPrefix(iface.Name, "utun") || strings.HasPrefix(iface.Name, "tun")) && !before[iface.Name] {
+			return iface.Name
 		}
 	}
+	return ""
+}
+
+// holdDarkSessionFor returns how long pollPingHost should keep a dark session
+// open instead of tearing it down, or 0. Only with hold_dark_session, and only
+// once the dark session about to end would trigger a cooldown anyway.
+func (c *Connection) holdDarkSessionFor() time.Duration {
+	if !c.cfg.HoldDarkSession {
+		return 0
+	}
+	return darkCooldown(int(c.darkStreak.Load()) + 1)
 }
 
 // setTunIface records the tunnel interface name together with its kernel
@@ -264,9 +298,6 @@ func (c *Connection) Run(ctx context.Context) error {
 		current: initial,
 		max:     time.Duration(c.cfg.ReconnectMaxDelay) * time.Second,
 	}
-	// quickRetries counts backoff-free restarts in a row (see retryNow); reset
-	// on a successful connect or resume.
-	quickRetries := 0
 
 	for {
 		if c.paused.Load() {
@@ -287,7 +318,7 @@ func (c *Connection) Run(ctx context.Context) error {
 				return nil
 			case <-c.resume:
 				b.reset()
-				quickRetries = 0
+				c.darkStreak.Store(0)
 			case <-autoResume:
 				// Re-check under pauseMu: a manual Pause()/Resume() may have landed
 				// while the cooldown was armed, and must not be clobbered by this
@@ -302,6 +333,7 @@ func (c *Connection) Run(ctx context.Context) error {
 					c.consecutiveFailures.Store(0)
 					c.autoPaused.Store(false)
 					b.reset()
+					c.darkStreak.Store(0)
 				}
 				c.pauseMu.Unlock()
 			}
@@ -318,14 +350,25 @@ func (c *Connection) Run(ctx context.Context) error {
 		}
 
 		c.setState(StateConnecting)
-		c.retryNow.Store(false)
+		c.lastAttemptDark.Store(false)
+		c.heldCooldown.Store(false)
+
+		// Space out session starts across VPNs (see sessionGate). A pause while
+		// waiting re-enters the loop, where the paused branch takes over.
+		if err := c.waitForSessionSlot(ctx); err != nil {
+			if ctx.Err() != nil {
+				c.setState(StateDisconnected)
+				return nil
+			}
+			continue
+		}
 		beforeRun := time.Now()
 
 		// Run the subprocess in a goroutine so forceReconnect/Pause can interrupt
 		// it even while the VPN is connected (not just during the backoff countdown).
 		runCtx, cancelRun := context.WithCancel(ctx)
 		errCh := make(chan error, 1)
-		go func() { errCh <- c.runOnce(runCtx) }()
+		go func() { errCh <- c.attempt(runCtx) }()
 
 		forceSkipDelay := false
 		pausedThisRound := false
@@ -346,6 +389,7 @@ func (c *Connection) Run(ctx context.Context) error {
 			// Signal the UI immediately — don't wait for the subprocess to exit first.
 			c.setState(StateConnecting)
 			log.Info("force reconnect requested", "vpn", c.cfg.Name)
+			c.darkStreak.Store(0)
 			cancelRun()
 			<-errCh // wait for subprocess to exit
 			forceSkipDelay = true
@@ -362,12 +406,18 @@ func (c *Connection) Run(ctx context.Context) error {
 		}
 		c.reconnects.Add(1)
 
+		connectedThisRun := c.connectedAt.Load().(time.Time).After(beforeRun)
+		dark := !connectedThisRun && c.lastAttemptDark.Load()
+		if dark {
+			c.darkStreak.Add(1)
+		}
+
 		// If the VPN reached StateConnected during this run, reset the backoff —
 		// only runs that never connected (e.g. auth failures, bad routes) should
 		// accumulate reconnect delay.
-		if c.connectedAt.Load().(time.Time).After(beforeRun) {
+		if connectedThisRun {
 			b.reset()
-			quickRetries = 0
+			c.darkStreak.Store(0)
 			c.consecutiveFailures.Store(0)
 		} else if !pausedThisRound && c.cfg.AutoPauseThreshold > 0 {
 			n := c.consecutiveFailures.Add(1)
@@ -394,19 +444,6 @@ func (c *Connection) Run(ctx context.Context) error {
 			continue
 		}
 
-		// The session came up (interface, routes) but ping_host never answered.
-		// Measured on two VPNs into the same network: such a session does not
-		// heal by waiting — one stayed dark for the full 60 s — while the next
-		// session often answered within ~2 s. So restart immediately, but only
-		// maxQuickRetries times in a row: after ~25 sessions in ten minutes the
-		// gateway stayed dark for 16 minutes, so beyond that, back off normally.
-		if c.retryNow.Swap(false) && quickRetries < maxQuickRetries {
-			quickRetries++
-			log.Info("vpn: session up but ping_host unreachable, restarting immediately",
-				"vpn", c.cfg.Name, "attempt", quickRetries, "max", maxQuickRetries)
-			continue
-		}
-
 		// If there's no network at all, wait for it before the next attempt.
 		// Skip the backoff countdown after restore — waiting for the network
 		// already served as the delay.
@@ -424,7 +461,23 @@ func (c *Connection) Run(ctx context.Context) error {
 		}
 
 		delay := b.next()
-		log.Warn("vpn disconnected, reconnecting", "vpn", c.cfg.Name, "delay", delay)
+		if dark {
+			// New sessions keep a dark gateway stuck; only quiet time brought it
+			// back (see dark.go). The first dark session gets the normal delay,
+			// later ones a growing cooldown.
+			streak := int(c.darkStreak.Load())
+			if c.heldCooldown.Swap(false) {
+				// hold_dark_session already kept the session open for the cooldown.
+			} else if cooldown := darkCooldown(streak); cooldown > delay {
+				delay = cooldown
+			}
+			c.lastError.Store(fmt.Sprintf("gateway returned no traffic (%d session(s) in a row); next session in %s",
+				streak, delay.Round(time.Second)))
+			log.Warn("vpn: gateway returned no traffic, waiting before the next session",
+				"vpn", c.cfg.Name, "dark_in_a_row", streak, "delay", delay)
+		} else {
+			log.Warn("vpn disconnected, reconnecting", "vpn", c.cfg.Name, "delay", delay)
+		}
 		c.nextReconnectAt.Store(time.Now().Add(delay))
 		select {
 		case <-ctx.Done():
@@ -434,6 +487,7 @@ func (c *Connection) Run(ctx context.Context) error {
 			c.nextReconnectAt.Store(time.Time{})
 		case <-c.forceReconnect:
 			c.nextReconnectAt.Store(time.Time{})
+			c.darkStreak.Store(0)
 			log.Info("force reconnect requested, skipping delay", "vpn", c.cfg.Name)
 		case <-c.pauseRequest:
 			c.nextReconnectAt.Store(time.Time{})
@@ -442,9 +496,60 @@ func (c *Connection) Run(ctx context.Context) error {
 	}
 }
 
-// maxQuickRetries caps consecutive backoff-free restarts of sessions whose
-// interface came up but never reached ping_host.
-const maxQuickRetries = 2
+// errSessionWaitPaused ends a session-start wait because the VPN was paused.
+var errSessionWaitPaused = errors.New("paused while waiting to start a session")
+
+// waitForSessionSlot blocks until the shared session gate lets this VPN start a
+// session: first a short settle if another VPN started one moments ago (a
+// back-and-forth switch), then until the burst allowance has room. Returns
+// errSessionWaitPaused or ctx's error when the wait was cut short.
+func (c *Connection) waitForSessionSlot(ctx context.Context) error {
+	if c.gate == nil {
+		return nil
+	}
+	if d := c.gate.settleFor(c.cfg.Name); d > 0 {
+		log.Info("vpn: another VPN started a session moments ago, settling before this one", "vpn", c.cfg.Name, "wait", d)
+		if err := c.holdSessionStart(ctx, d, msgs.SessionSettle); err != nil {
+			return err
+		}
+	}
+	for {
+		wait := c.gate.reserve(c.cfg.Name)
+		if wait == 0 {
+			return nil
+		}
+		log.Warn("vpn: too many VPN sessions started recently, delaying this one",
+			"vpn", c.cfg.Name, "wait", wait.Round(time.Second))
+		if err := c.holdSessionStart(ctx, wait, msgs.SessionRateLimited); err != nil {
+			return err
+		}
+	}
+}
+
+// holdSessionStart waits d before a session start, showing msg. A pause ends
+// the wait early. A force reconnect does not — the spacing exists precisely to
+// stop rapid restarts — and is consumed here, so the buffered request can't
+// tear down the session that starts right after the wait.
+func (c *Connection) holdSessionStart(ctx context.Context, d time.Duration, msg string) error {
+	c.lastError.Store(msg)
+	c.nextReconnectAt.Store(time.Now().Add(d))
+	defer c.nextReconnectAt.Store(time.Time{})
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.pauseRequest:
+			return errSessionWaitPaused
+		case <-c.forceReconnect:
+			log.Info("vpn: reconnect requested while session starts are spaced out; keeping the wait", "vpn", c.cfg.Name)
+		case <-timer.C:
+			c.lastError.Store("")
+			return nil
+		}
+	}
+}
 
 type backoff struct {
 	initial time.Duration

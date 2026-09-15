@@ -24,4 +24,10 @@ const (
 	// WaitingForVPNTunnel is stored by the VPN subprocess while probing for a
 	// working layer-3 interface after openconnect reports "connected".
 	WaitingForVPNTunnel = "waiting for VPN tunnel"
+
+	// SessionWaitPrefix starts every message a VPN stores while it holds back
+	// a session start (vpn.sessionGate). Both UIs treat the prefix as progress.
+	SessionWaitPrefix  = "waiting: "
+	SessionSettle      = SessionWaitPrefix + "another VPN just started a session"
+	SessionRateLimited = SessionWaitPrefix + "too many VPN sessions started in the last 2 minutes"
 )
