@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -75,12 +76,47 @@ func assetName() string {
 	return name
 }
 
-// IsNewer reports whether tag is newer than current (simple string compare
-// after stripping the leading "v"; good enough for semver x.y.z).
+// IsNewer reports whether the release tag is newer than the running version,
+// comparing MAJOR.MINOR.PATCH numerically. A plain string compare got
+// "0.10.0" > "0.9.1" wrong ('1' < '9'), so no v0.9.x install ever saw v0.10.0.
+// Anything after the first "-" or "+" is ignored, so a git-describe dev build
+// such as "v0.9.1-2-g7f16327-dirty" still counts as 0.9.1. A version that
+// isn't MAJOR.MINOR.PATCH (e.g. "dev") never reports an update.
 func IsNewer(current, tag string) bool {
-	cur := strings.TrimPrefix(current, "v")
-	latest := strings.TrimPrefix(tag, "v")
-	return latest > cur
+	cur, ok := parseVersion(current)
+	if !ok {
+		return false
+	}
+	latest, ok := parseVersion(tag)
+	if !ok {
+		return false
+	}
+	for i := range cur {
+		if latest[i] != cur[i] {
+			return latest[i] > cur[i]
+		}
+	}
+	return false
+}
+
+// parseVersion extracts the numeric MAJOR.MINOR.PATCH core of a version string.
+func parseVersion(s string) (v [3]int, ok bool) {
+	s = strings.TrimPrefix(s, "v")
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) != len(v) {
+		return v, false
+	}
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 {
+			return v, false
+		}
+		v[i] = n
+	}
+	return v, true
 }
 
 // Download fetches url and writes it to dst atomically (temp file + rename).
