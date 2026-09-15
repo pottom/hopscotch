@@ -416,8 +416,8 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `password_env` | — | Environment variable name containing the password |
 | `password_cmd` | — | Shell command whose stdout is the password |
 | `ping_host` | — | `host:port` TCP probe to confirm VPN is up; the VPN counts as connected only once this answers |
-| `connect_timeout` | `15` | Seconds `ping_host` may stay unreachable after launch before openconnect is restarted. On Linux, a session whose tunnel sends packets but receives none at all is recognised as "dark" after about 6 s instead. Dark sessions are not restarted right away: a second one in a row starts a quiet period of 2, 4, then at most 8 minutes, because new sessions kept the gateway stuck. Session starts across all VPNs are also spaced out (at most 3 per 2 minutes, plus a 3 s settle when switching back and forth) |
-| `hold_dark_session` | `false` | Experimental: during that quiet period keep the dark session open, so it connects by itself if the gateway recovers, instead of tearing it down |
+| `connect_timeout` | `15` | Seconds `ping_host` may stay unreachable after launch before openconnect is restarted. On Linux, a session whose tunnel sends packets but receives none at all is recognised as "dark" after about 6 s instead. How long to wait before the next session after a dark one is **learned**: every attempt is recorded (`vpn-sessions.jsonl` in the cache directory, last 30 days), and hopscotch picks the wait (15 s, 30 s, 1 m or 2 m) that recovered fastest after earlier dark sessions, starting from 15 s while it has little evidence. The reason is shown next to the countdown, and `hopscotch vpn stats` prints what was learned. Hard limits are never learned: at most 3 session starts per 2 minutes across all VPNs (plus a 3 s settle when switching back and forth), and at least 2 minutes after 6 dark sessions in a row |
+| `hold_dark_session` | `false` | Experimental: during the 2-minute pause after 6 dark sessions in a row, keep the last dark session open (it connects by itself if the gateway recovers) instead of tearing it down |
 | `pre_connect` | — | Shell commands to run before each connection attempt |
 | `post_disconnect` | — | Shell commands to run after each VPN disconnect; route cleanup is automatic, rarely needed |
 | `extra_args` | — | Additional openconnect flags |
@@ -485,6 +485,7 @@ hopscotch enable                   # activate proxy in current shell
 hopscotch disable                  # deactivate proxy, restore previous env
 hopscotch shell-init               # print shell integration (eval once in .zshrc)
 hopscotch vpn password <name>      # store or update VPN password in OS keychain
+hopscotch vpn stats                # recorded VPN sessions and the learned wait after a dark session
 hopscotch tunnel add                # interactive wizard: add a tunnel to the config file
 hopscotch tunnel add <name> --host db.internal --user alice --local-port 1081 -y  # non-interactive (scripting)
 hopscotch update                   # check for newer release and update the binary
