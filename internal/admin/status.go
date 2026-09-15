@@ -20,19 +20,20 @@ type RouteJSON struct {
 
 // TunnelStatusJSON is the per-tunnel block in the /status response.
 type TunnelStatusJSON struct {
-	Status              string  `json:"status"`
-	Host                string  `json:"host"`
-	LocalPort           int     `json:"local_port"`
-	ReconnectCount      int     `json:"reconnect_count"`
-	UptimeSeconds       float64 `json:"uptime_seconds"`
-	RequiresVPN         string  `json:"requires_vpn,omitempty"`
-	KeepaliveFailures   int     `json:"keepalive_failures,omitempty"`
-	LastError           string  `json:"last_error,omitempty"`
-	BytesIn             uint64  `json:"bytes_in"`
-	BytesOut            uint64  `json:"bytes_out"`
-	ConsecutiveFailures int     `json:"consecutive_failures,omitempty"`
-	AutoPauseThreshold  int     `json:"auto_pause_threshold,omitempty"`
-	AutoPaused          bool    `json:"auto_paused,omitempty"`
+	Status              string   `json:"status"`
+	Host                string   `json:"host"`
+	LocalPort           int      `json:"local_port"`
+	ReconnectCount      int      `json:"reconnect_count"`
+	UptimeSeconds       float64  `json:"uptime_seconds"`
+	RequiresVPN         string   `json:"requires_vpn,omitempty"`     // the VPN currently depended on; see tunnel.Stats
+	RequiresVPNAny      []string `json:"requires_vpn_any,omitempty"` // every VPN listed in requires_vpn
+	KeepaliveFailures   int      `json:"keepalive_failures,omitempty"`
+	LastError           string   `json:"last_error,omitempty"`
+	BytesIn             uint64   `json:"bytes_in"`
+	BytesOut            uint64   `json:"bytes_out"`
+	ConsecutiveFailures int      `json:"consecutive_failures,omitempty"`
+	AutoPauseThreshold  int      `json:"auto_pause_threshold,omitempty"`
+	AutoPaused          bool     `json:"auto_paused,omitempty"`
 }
 
 // VPNStatusJSON is the per-VPN block in the /status response.
@@ -93,6 +94,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			ReconnectCount:      st.ReconnectCount,
 			UptimeSeconds:       uptime,
 			RequiresVPN:         st.RequiresVPN,
+			RequiresVPNAny:      st.RequiresVPNAny,
 			KeepaliveFailures:   st.KeepaliveFailures,
 			LastError:           st.LastError,
 			BytesIn:             st.BytesIn,

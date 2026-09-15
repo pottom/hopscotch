@@ -2,8 +2,6 @@ package vpn
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/charmbracelet/log"
 	"golang.org/x/sync/errgroup"
@@ -11,7 +9,7 @@ import (
 	"github.com/pottom/hopscotch/internal/config"
 )
 
-// Manager owns all VPN connections and provides WaitConnected for tunnel dependency.
+// Manager owns all VPN connections and reports their state for tunnel gating.
 type Manager struct {
 	connections map[string]*Connection
 }
@@ -31,6 +29,7 @@ func NewManager(vpnCfgs []config.VPNConfig) *Manager {
 			Certificate:        cfg.Certificate,
 			Key:                cfg.Key,
 			PingHost:           cfg.PingHost,
+			ConnectTimeout:     cfg.ConnectTimeout,
 			ExtraArgs:          cfg.ExtraArgs,
 			PreConnect:         cfg.PreConnect,
 			PostDisconnect:     cfg.PostDisconnect,
@@ -100,23 +99,15 @@ func (m *Manager) IsConnected(name string) bool {
 	return conn.State() == StateConnected
 }
 
-// WaitConnected blocks until the named VPN reaches StateConnected or ctx is cancelled.
-// Returns fmt.Errorf if the VPN name is not configured (config validation should catch this first).
-func (m *Manager) WaitConnected(ctx context.Context, name string) error {
+// IsPaused reports whether the named VPN is paused (manually or automatically).
+// Reads the pause flag rather than State so a just-requested pause counts
+// before Run() has torn the subprocess down.
+func (m *Manager) IsPaused(name string) bool {
 	conn, ok := m.connections[name]
 	if !ok {
-		return fmt.Errorf("vpn %q not configured", name)
+		return false
 	}
-	for {
-		if conn.State() == StateConnected {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(1 * time.Second):
-		}
-	}
+	return conn.paused.Load()
 }
 
 // AllStats returns a Stats snapshot of every VPN connection, keyed by name.

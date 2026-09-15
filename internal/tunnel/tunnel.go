@@ -43,6 +43,7 @@ type Tunnel struct {
 	clock          Clock
 	vpnGate        func(ctx context.Context) error // non-nil when requires_vpn is set
 	vpnIsConnected func() bool                     // non-nil when requires_vpn is set; instant state check
+	activeVPN      func() string                   // set by Manager when requires_vpn is set; see requiredVPN
 	stats          atomic.Value                    // holds Stats (without traffic counters)
 	client         *ssh.Client                     // guarded by the reconnect loop (single goroutine writer)
 	ptySession     *ssh.Session                    // held open when force_pty is set; closed after keepalive exits
@@ -177,7 +178,8 @@ func (t *Tunnel) beginAttempt(parent context.Context) (ctx context.Context, end 
 // Stats returns a snapshot of the tunnel's current metrics including traffic.
 func (t *Tunnel) Stats() Stats {
 	s := t.stats.Load().(Stats)
-	s.RequiresVPN = t.cfg.RequiresVPN
+	s.RequiresVPN = t.requiredVPN()
+	s.RequiresVPNAny = t.cfg.RequiresVPN
 	s.BytesIn = t.bytesIn.Load()
 	s.BytesOut = t.bytesOut.Load()
 	s.ActiveConns = t.activeConns.Load()
@@ -189,6 +191,19 @@ func (t *Tunnel) Stats() Stats {
 
 // Name returns the tunnel's configured name.
 func (t *Tunnel) Name() string { return t.cfg.Name }
+
+// requiredVPN returns the single VPN this tunnel currently depends on, used for
+// Stats and "waiting for VPN: X" messages: the Manager's pick among
+// requires_vpn (see activeVPN), or the first listed without a Manager.
+func (t *Tunnel) requiredVPN() string {
+	if t.activeVPN != nil {
+		return t.activeVPN()
+	}
+	if len(t.cfg.RequiresVPN) > 0 {
+		return t.cfg.RequiresVPN[0]
+	}
+	return ""
+}
 
 // DialContext dials a TCP address through the SSH tunnel.
 // Implements socks5.Dialer and proxy.Dialer.
@@ -318,11 +333,11 @@ func (t *Tunnel) Run(ctx context.Context) error {
 		// isn't already connected (e.g. after an SSH auth failure the VPN stays up).
 		if t.vpnGate != nil && (t.vpnIsConnected == nil || !t.vpnIsConnected()) {
 			s := t.Stats()
-			s.LastError = msgs.WaitingForVPNPrefix + t.cfg.RequiresVPN
+			s.LastError = msgs.WaitingForVPNPrefix + t.requiredVPN()
 			s.NextReconnectAt = time.Time{} // clear stale countdown from previous delay
 			t.stats.Store(s)
 
-			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN)
+			log.Info("tunnel waiting for vpn", "tunnel", t.cfg.Name, "vpn", t.cfg.RequiresVPN.String())
 			if err := t.vpnGate(attemptCtx); err != nil {
 				endAttempt()
 				if ctx.Err() != nil {
@@ -437,6 +452,15 @@ func (t *Tunnel) Run(ctx context.Context) error {
 			t.stats.Store(s)
 			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
 			log.Info("network up, reconnecting tunnel immediately", "tunnel", t.cfg.Name)
+			continue
+		}
+
+		// The required VPN is down (usually why the connection just dropped or
+		// the dial failed). Skip the countdown: the VPN gate at the top of the
+		// loop waits for it and dials the moment it is back, instead of sitting
+		// out up to reconnect_max_delay after a VPN switch.
+		if t.vpnIsConnected != nil && !t.vpnIsConnected() {
+			backoff.reset(time.Duration(t.cfg.ReconnectDelay) * time.Second)
 			continue
 		}
 
@@ -729,7 +753,7 @@ func (t *Tunnel) watchDeps(ctx context.Context, lost chan<- string) {
 			}
 			if t.vpnIsConnected != nil && !t.vpnIsConnected() {
 				select {
-				case lost <- msgs.WaitingForVPNPrefix + t.cfg.RequiresVPN:
+				case lost <- msgs.WaitingForVPNPrefix + t.requiredVPN():
 				default:
 				}
 				return
@@ -957,7 +981,10 @@ func pinnedHostKeyAlgorithms(cb ssh.HostKeyCallback, addr string) []string {
 	}
 
 	var keyErr *knownhosts.KeyError
-	if !errors.As(cb(addr, remote, probe), &keyErr) {
+	if !errors.As(cb(addr, remote, probe), &keyErr) || len(keyErr.Want) == 0 {
+		// Must be nil, not an empty slice: x/crypto/ssh treats a non-nil empty
+		// HostKeyAlgorithms as "offer nothing", so every handshake to a host
+		// missing from known_hosts failed with "we offered: []".
 		return nil
 	}
 

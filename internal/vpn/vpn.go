@@ -65,6 +65,7 @@ type connConfig struct {
 	Certificate        string
 	Key                string
 	PingHost           string // host[:port] TCP-probed to confirm VPN connectivity
+	ConnectTimeout     int    // seconds ping_host may stay unreachable after launch; <= 0 means 15
 	ExtraArgs          []string
 	PreConnect         []string // commands to run before each connection attempt
 	PostDisconnect     []string // commands to run after each VPN disconnect
@@ -85,11 +86,17 @@ type Connection struct {
 	nextReconnectAt atomic.Value // stores time.Time; non-zero while waiting to reconnect
 	lastError       atomic.Value // stores string; last subprocess error
 	tunIface        atomic.Value // stores string; tunnel interface name
+	tunIfaceIndex   atomic.Int32 // kernel index of tunIface when recorded; 0 = unknown
 	tunIfacesBefore atomic.Value // stores map[string]bool; tun interfaces before this runOnce
 	forceReconnect  chan struct{}
 	paused          atomic.Bool
 	pauseRequest    chan struct{} // buffered(1); signals a pause request
 	resume          chan struct{} // buffered(1); signals resume from pause
+
+	// retryNow is set by pollPingHost when the connect timeout fires although
+	// the tunnel interface did come up, asking Run() to restart without the
+	// backoff delay. Cleared at the start of every attempt.
+	retryNow atomic.Bool
 
 	// consecutiveFailures counts connection attempts in a row that never
 	// reached StateConnected; reset to 0 on a successful connect or a manual
@@ -191,11 +198,24 @@ func (c *Connection) detectTunIface() {
 	for _, iface := range ifaces {
 		name := iface.Name
 		if (strings.HasPrefix(name, "utun") || strings.HasPrefix(name, "tun")) && !before[name] {
-			c.tunIface.Store(name)
+			c.setTunIface(name)
 			log.Info("vpn tunnel interface detected", "vpn", c.cfg.Name, "iface", name)
 			return
 		}
 	}
+}
+
+// setTunIface records the tunnel interface name together with its kernel
+// index. Every VPN gets the same name after a switch (tun0 on Linux: the old
+// device is gone, so the next one reuses the name), so the index is what tells
+// this connection's device apart from a later, same-named one.
+func (c *Connection) setTunIface(name string) {
+	var index int32
+	if iface, err := net.InterfaceByName(name); err == nil {
+		index = int32(iface.Index)
+	}
+	c.tunIface.Store(name)
+	c.tunIfaceIndex.Store(index)
 }
 
 // State returns the current VPN connection state.
@@ -244,6 +264,9 @@ func (c *Connection) Run(ctx context.Context) error {
 		current: initial,
 		max:     time.Duration(c.cfg.ReconnectMaxDelay) * time.Second,
 	}
+	// quickRetries counts backoff-free restarts in a row (see retryNow); reset
+	// on a successful connect or resume.
+	quickRetries := 0
 
 	for {
 		if c.paused.Load() {
@@ -264,6 +287,7 @@ func (c *Connection) Run(ctx context.Context) error {
 				return nil
 			case <-c.resume:
 				b.reset()
+				quickRetries = 0
 			case <-autoResume:
 				// Re-check under pauseMu: a manual Pause()/Resume() may have landed
 				// while the cooldown was armed, and must not be clobbered by this
@@ -294,6 +318,7 @@ func (c *Connection) Run(ctx context.Context) error {
 		}
 
 		c.setState(StateConnecting)
+		c.retryNow.Store(false)
 		beforeRun := time.Now()
 
 		// Run the subprocess in a goroutine so forceReconnect/Pause can interrupt
@@ -342,6 +367,7 @@ func (c *Connection) Run(ctx context.Context) error {
 		// accumulate reconnect delay.
 		if c.connectedAt.Load().(time.Time).After(beforeRun) {
 			b.reset()
+			quickRetries = 0
 			c.consecutiveFailures.Store(0)
 		} else if !pausedThisRound && c.cfg.AutoPauseThreshold > 0 {
 			n := c.consecutiveFailures.Add(1)
@@ -365,6 +391,19 @@ func (c *Connection) Run(ctx context.Context) error {
 		}
 
 		if forceSkipDelay {
+			continue
+		}
+
+		// The session came up (interface, routes) but ping_host never answered.
+		// Measured on two VPNs into the same network: such a session does not
+		// heal by waiting — one stayed dark for the full 60 s — while the next
+		// session often answered within ~2 s. So restart immediately, but only
+		// maxQuickRetries times in a row: after ~25 sessions in ten minutes the
+		// gateway stayed dark for 16 minutes, so beyond that, back off normally.
+		if c.retryNow.Swap(false) && quickRetries < maxQuickRetries {
+			quickRetries++
+			log.Info("vpn: session up but ping_host unreachable, restarting immediately",
+				"vpn", c.cfg.Name, "attempt", quickRetries, "max", maxQuickRetries)
 			continue
 		}
 
@@ -402,6 +441,10 @@ func (c *Connection) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// maxQuickRetries caps consecutive backoff-free restarts of sessions whose
+// interface came up but never reached ping_host.
+const maxQuickRetries = 2
 
 type backoff struct {
 	initial time.Duration

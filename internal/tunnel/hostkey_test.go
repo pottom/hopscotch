@@ -88,8 +88,10 @@ func TestHostKeyAlgorithmsEmptyForUnknownHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hostKeyCallback: %v", err)
 	}
-	if len(algos) != 0 {
-		t.Fatalf("algorithms = %v, want none", algos)
+	// nil, not merely empty: x/crypto/ssh reads a non-nil empty slice as
+	// "offer no host key algorithms" and every handshake fails.
+	if algos != nil {
+		t.Fatalf("algorithms = %#v, want nil", algos)
 	}
 }
 

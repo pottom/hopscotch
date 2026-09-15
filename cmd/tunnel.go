@@ -52,7 +52,7 @@ func init() {
 	tunnelAddCmd.Flags().StringVar(&tunnelAddUser, "user", "", "SSH username")
 	tunnelAddCmd.Flags().StringVar(&tunnelAddIdentityFile, "identity-file", "", "path to private key (omit to use SSH agent)")
 	tunnelAddCmd.Flags().IntVar(&tunnelAddLocalPort, "local-port", 0, "local SOCKS5 port for this tunnel")
-	tunnelAddCmd.Flags().StringVar(&tunnelAddRequiresVPN, "requires-vpn", "", "name of a vpn entry this tunnel waits for")
+	tunnelAddCmd.Flags().StringVar(&tunnelAddRequiresVPN, "requires-vpn", "", "vpn entries this tunnel waits for, comma-separated; any one connected is enough")
 	tunnelAddCmd.Flags().IntVar(&tunnelAddAutoPauseThreshold, "auto-pause-threshold", 0, "consecutive failures before auto-pausing (0 disables)")
 	tunnelAddCmd.Flags().IntVar(&tunnelAddAutoResumeAfter, "auto-resume-after", 0, "seconds before retrying an auto-paused tunnel (0 disables)")
 	tunnelAddCmd.Flags().BoolVarP(&tunnelAddYes, "yes", "y", false, "don't prompt; use flag values/defaults as-is")
@@ -154,7 +154,7 @@ func runTunnelAdd(_ *cobra.Command, args []string) error {
 			vpnNames[i] = v.Name
 		}
 		requiresVPN, err = fieldString(reader,
-			fmt.Sprintf("Requires VPN (blank = none; available: %s)", strings.Join(vpnNames, ", ")),
+			fmt.Sprintf("Requires VPN (blank = none; comma-separated = any of them; available: %s)", strings.Join(vpnNames, ", ")),
 			requiresVPN, tunnelAddYes, false)
 		if err != nil {
 			return err
@@ -181,7 +181,7 @@ func runTunnelAdd(_ *cobra.Command, args []string) error {
 		User:               user,
 		IdentityFile:       identityFile,
 		LocalPort:          localPort,
-		RequiresVPN:        requiresVPN,
+		RequiresVPN:        parseVPNNames(requiresVPN),
 		AutoPauseThreshold: autoPauseThreshold,
 		AutoResumeAfter:    autoResumeAfter,
 	}
@@ -223,6 +223,17 @@ func runTunnelAdd(_ *cobra.Command, args []string) error {
 	fmt.Println(good.Render(fmt.Sprintf("✓ tunnel %q added to %s", name, cfg.Path)))
 	fmt.Println(muted.Render("  next: hopscotch trust " + name + "   (then reload: SIGHUP, or 'hopscotch start --restart')"))
 	return nil
+}
+
+// parseVPNNames splits the comma-separated requires_vpn answer, dropping blanks.
+func parseVPNNames(s string) config.VPNNames {
+	var names config.VPNNames
+	for _, name := range strings.Split(s, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // fieldString prompts for a string field, pre-filled with flagVal as the

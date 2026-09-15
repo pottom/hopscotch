@@ -34,13 +34,14 @@ type Stats struct {
 	NextReconnectAt     time.Time // non-zero only while waiting to reconnect
 	ReconnectCount      int
 	LocalPort           int
-	Host                string // SSH server address (host:port)
-	RequiresVPN         string // VPN name this tunnel depends on; empty if none
-	KeepaliveFailures   int    // consecutive failures; resets to 0 on success or reconnect
-	ConsecutiveFailures int    // consecutive failed connection attempts; resets to 0 on success or resume
-	AutoPauseThreshold  int    // config value; 0 = auto-pause disabled
-	AutoPaused          bool   // true if the current pause (if any) was triggered by auto_pause_threshold, not a manual Pause()
-	LastError           string // last connection failure reason; empty when connected
+	Host                string   // SSH server address (host:port)
+	RequiresVPN         string   // VPN this tunnel currently depends on (connected one among requires_vpn, else first non-paused, else first listed); empty if none
+	RequiresVPNAny      []string // every VPN in requires_vpn; any one connected opens the gate
+	KeepaliveFailures   int      // consecutive failures; resets to 0 on success or reconnect
+	ConsecutiveFailures int      // consecutive failed connection attempts; resets to 0 on success or resume
+	AutoPauseThreshold  int      // config value; 0 = auto-pause disabled
+	AutoPaused          bool     // true if the current pause (if any) was triggered by auto_pause_threshold, not a manual Pause()
+	LastError           string   // last connection failure reason; empty when connected
 	// Traffic counters — cumulative since process start.
 	BytesIn     uint64
 	BytesOut    uint64
