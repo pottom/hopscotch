@@ -991,12 +991,26 @@ func pinnedHostKeyAlgorithms(cb ssh.HostKeyCallback, addr string) []string {
 	algos := make([]string, 0, len(keyErr.Want))
 	seen := make(map[string]bool, len(keyErr.Want))
 	for _, want := range keyErr.Want {
-		if a := want.Key.Type(); !seen[a] {
-			seen[a] = true
-			algos = append(algos, a)
+		for _, a := range hostKeyAlgorithmsFor(want.Key.Type()) {
+			if !seen[a] {
+				seen[a] = true
+				algos = append(algos, a)
+			}
 		}
 	}
 	return algos
+}
+
+// hostKeyAlgorithmsFor maps a pinned key type to the host key algorithms that
+// can present it. An RSA key is stored as "ssh-rsa", but that algorithm name
+// means the SHA-1 signature, which OpenSSH 8.8+ servers refuse by default; a
+// tunnel pinned only to an RSA key would then fail with "no common algorithm".
+// Offer the SHA-2 variants first and keep ssh-rsa last for old servers.
+func hostKeyAlgorithmsFor(keyType string) []string {
+	if keyType == ssh.KeyAlgoRSA {
+		return []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}
+	}
+	return []string{keyType}
 }
 
 func (t *Tunnel) setStatus(s Status) {

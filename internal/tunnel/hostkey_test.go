@@ -79,6 +79,22 @@ func TestHostKeyAlgorithmsFollowKnownHosts(t *testing.T) {
 	}
 }
 
+// An RSA key is stored as ssh-rsa, but negotiating that name means a SHA-1
+// signature, which modern OpenSSH servers refuse. A host pinned only to RSA
+// must offer the SHA-2 variants first.
+func TestHostKeyAlgorithmsRSAPrefersSHA2(t *testing.T) {
+	tun := writeKnownHosts(t, newRSAKey(t))
+
+	_, algos, err := tun.hostKeyCallback()
+	if err != nil {
+		t.Fatalf("hostKeyCallback: %v", err)
+	}
+	want := []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}
+	if strings.Join(algos, ",") != strings.Join(want, ",") {
+		t.Fatalf("algorithms = %v, want %v", algos, want)
+	}
+}
+
 // An unknown host pins nothing, so negotiation must stay unconstrained rather
 // than be narrowed to an empty set.
 func TestHostKeyAlgorithmsEmptyForUnknownHost(t *testing.T) {
