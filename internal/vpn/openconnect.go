@@ -394,7 +394,7 @@ func (c *Connection) pollPingHost(ctx context.Context, cmd *exec.Cmd, died <-cha
 	pattern := c.procPattern()
 	timeout := time.Duration(c.cfg.ConnectTimeout) * time.Second
 	if timeout <= 0 {
-		timeout = 15 * time.Second
+		timeout = 30 * time.Second
 	}
 
 	var ok, fail int

@@ -2652,7 +2652,6 @@ func isVPNProgressMsg(msg string) bool {
 		strings.HasPrefix(msg, "DNS retry: ") ||
 		strings.HasPrefix(msg, "pre_connect: ") ||
 		strings.HasPrefix(msg, "probing ") ||
-		strings.HasPrefix(msg, msgs.SessionWaitPrefix) ||
 		msg == "openconnect starting" ||
 		msg == msgs.WaitingForVPNTunnel ||
 		msg == msgs.WaitingForNetwork

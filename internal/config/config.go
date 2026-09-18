@@ -102,7 +102,7 @@ type VPNConfig struct {
 	Certificate        string   `yaml:"certificate"`       // path to client cert (cert auth)
 	Key                string   `yaml:"key"`               // path to private key (cert auth)
 	PingHost           string   `yaml:"ping_host"`         // host[:port] TCP-probed to detect connectivity
-	ConnectTimeout     int      `yaml:"connect_timeout"`   // seconds ping_host may stay unreachable after launch before openconnect is restarted; default 15
+	ConnectTimeout     int      `yaml:"connect_timeout"`   // seconds ping_host may stay unreachable after launch before openconnect is restarted; default 30
 	HoldDarkSession    bool     `yaml:"hold_dark_session"` // experimental: keep a session whose gateway returns no traffic open during its cooldown instead of tearing it down; default false
 	ExtraArgs          []string `yaml:"extra_args"`        // passed through to openconnect verbatim
 	PreConnect         []string `yaml:"pre_connect"`       // commands to run before each connection attempt

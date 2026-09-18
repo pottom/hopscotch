@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pottom/hopscotch/internal/msgs"
 )
 
 // runWithAttempt runs c with its connection attempts replaced by attempt and
@@ -159,72 +158,6 @@ func TestSessionRecordOutcomes(t *testing.T) {
 	}
 	if recs[1].Outcome != OutcomeCut {
 		t.Errorf("second record outcome = %s, want cut", recs[1].Outcome)
-	}
-}
-
-// Session starts beyond the gate's allowance wait, show a progress message,
-// and a reconnect request made meanwhile must not tear down the session that
-// finally starts.
-func TestSessionGateDelaysStartAndSwallowsReconnect(t *testing.T) {
-	c := newConnection(testConnConfig("gated"))
-	c.gate = newSessionGate()
-	c.gate.window = 2 * time.Second
-	c.gate.maxStarts = 1
-
-	var starts atomic.Int32
-	secondCancelled := make(chan bool, 1)
-	stop := runWithAttempt(c, func(ctx context.Context) error {
-		if starts.Add(1) == 1 {
-			return errors.New("first attempt fails immediately")
-		}
-		select {
-		case <-ctx.Done():
-			secondCancelled <- true
-		case <-time.After(500 * time.Millisecond):
-			secondCancelled <- false
-		}
-		<-ctx.Done()
-		return ctx.Err()
-	})
-	defer stop()
-
-	waitUntil(t, 3*time.Second, "the second start to be held back by the gate", func() bool {
-		return c.Stats().LastError == msgs.SessionRateLimited
-	})
-	if got := starts.Load(); got != 1 {
-		t.Fatalf("sessions started while rate-limited = %d, want 1", got)
-	}
-	c.ForceReconnect()
-
-	waitUntil(t, 3*time.Second, "the second session once the window rolled", func() bool { return starts.Load() >= 2 })
-	if <-secondCancelled {
-		t.Fatal("a reconnect requested during the wait tore down the session that started after it")
-	}
-}
-
-func TestPauseDuringSessionWait(t *testing.T) {
-	c := newConnection(testConnConfig("gated-pause"))
-	c.gate = newSessionGate()
-	c.gate.window = time.Minute
-	c.gate.maxStarts = 1
-
-	var starts atomic.Int32
-	stop := runWithAttempt(c, func(context.Context) error {
-		starts.Add(1)
-		return errors.New("fails")
-	})
-	defer stop()
-
-	waitUntil(t, 3*time.Second, "the gate to hold back the second start", func() bool {
-		return c.Stats().LastError == msgs.SessionRateLimited
-	})
-	c.Pause()
-	waitForVPNState(t, c, StatePaused, 2*time.Second)
-	if got := starts.Load(); got != 1 {
-		t.Errorf("sessions started = %d, want 1", got)
-	}
-	if !c.Stats().NextReconnectAt.IsZero() {
-		t.Error("paused VPN still shows a countdown")
 	}
 }
 

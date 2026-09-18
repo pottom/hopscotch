@@ -18,8 +18,11 @@ const (
 	// darkDetectAfter and darkMinTx: a tunnel that has been up this long and
 	// has sent at least this many packets (ping_host probes alone send one per
 	// second) without receiving any is dark. Healthy sessions receive their
-	// first reply within about two seconds.
-	darkDetectAfter = 6 * time.Second
+	// first reply within about two seconds, but a session can also sit for
+	// 15 s with its routes not yet installed and then come up at once
+	// (measured 2026-09-19), so the verdict waits half of the default
+	// connect_timeout rather than jumping at the first quiet seconds.
+	darkDetectAfter = 15 * time.Second
 	darkMinTx       = 3
 )
 

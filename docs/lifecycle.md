@@ -94,13 +94,13 @@ subgraph VPN["🔒  VPN — Connection.Run (minden VPN-re külön goroutine)"]
   vn5 --> vn5e{DNS timeout?}
   vn5e -->|igen| vn_rc([reconnect])
   vn5e -->|nem| vn6["macOS: stale VPN server host route törlése"]
-  vn6 --> vn7["sessionGate: max 3 session / 2 perc,\noda-vissza váltásnál 3s várakozás\nopenconnect subprocess indítása\n(sudo if configured)"]
+  vn6 --> vn7["openconnect subprocess indítása\n(sudo if configured)"]
   vn7 --> vn8[["párhuzamos watcherek"]]
 
   vn8 --> ws["watchOutput stdout+stderr:\nDTLS/TLS/Connected as → Connected, csak ping_host nélkül\nSet up tun device → iface\nError/Failed → lastError"]
   vn8 --> wu["watchUplink 2s poll:\nhálózat nélkül → killProcGroup → killedByUplink"]
   vn8 --> pp{ping_host konfigurálva?}
-  pp -->|igen| ppy["pollPingHost 1s poll:\n1x TCP OK → Connected\n3x fail post-connect → SIGTERM\nconnect_timeout 15s → SIGTERM restart\nLinux: tx>0, rx=0 6s után → sötét session\nsötét után: tanult várakozás 15s/30s/1m/2m\n(vpn-sessions.jsonl), 6 sötét egymás után → min. 2 perc"]
+  pp -->|igen| ppy["pollPingHost 1s poll:\n1x TCP OK → Connected\n3x fail post-connect → SIGTERM\nconnect_timeout 30s → SIGTERM restart\nLinux: tx>0, rx=0 15s után → sötét session\nsötét után: tanult várakozás 15s/30s/1m/2m\n(vpn-sessions.jsonl), 6 sötét egymás után → min. 2 perc"]
   pp -->|nem| ppn["8s delay → assume Connected"]
   vn8 --> vn9{subprocess kilép}
 

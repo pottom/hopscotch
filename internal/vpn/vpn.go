@@ -3,7 +3,6 @@ package vpn
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net"
@@ -68,7 +67,7 @@ type connConfig struct {
 	Certificate        string
 	Key                string
 	PingHost           string // host[:port] TCP-probed to confirm VPN connectivity
-	ConnectTimeout     int    // seconds ping_host may stay unreachable after launch; <= 0 means 15
+	ConnectTimeout     int    // seconds ping_host may stay unreachable after launch; <= 0 means 30
 	HoldDarkSession    bool   // keep a dark session open during its cooldown instead of tearing it down (experimental)
 	ExtraArgs          []string
 	PreConnect         []string // commands to run before each connection attempt
@@ -113,9 +112,6 @@ type Connection struct {
 	// attempt ("Configured as ..."); "" until seen.
 	sessionIP atomic.Value
 
-	// gate spaces out session starts across all of the Manager's VPNs (see
-	// sessionGate); nil disables spacing.
-	gate *sessionGate
 	// history records every attempt and feeds the dark-retry policy
 	// (retrypolicy.go). Shared by the Manager's VPNs; nil records nothing.
 	history *sessionHistory
@@ -366,15 +362,6 @@ func (c *Connection) Run(ctx context.Context) error {
 		c.lastAttemptDark.Store(false)
 		c.heldCooldown.Store(false)
 
-		// Space out session starts across VPNs (see sessionGate). A pause while
-		// waiting re-enters the loop, where the paused branch takes over.
-		if err := c.waitForSessionSlot(ctx); err != nil {
-			if ctx.Err() != nil {
-				c.setState(StateDisconnected)
-				return nil
-			}
-			continue
-		}
 		beforeRun := time.Now()
 		c.sessionIP.Store("")
 		session := c.history.startContext(c.cfg.Name, beforeRun)
@@ -511,61 +498,6 @@ func (c *Connection) Run(ctx context.Context) error {
 		case <-c.pauseRequest:
 			c.nextReconnectAt.Store(time.Time{})
 			log.Info("pause requested, skipping delay", "vpn", c.cfg.Name)
-		}
-	}
-}
-
-// errSessionWaitPaused ends a session-start wait because the VPN was paused.
-var errSessionWaitPaused = errors.New("paused while waiting to start a session")
-
-// waitForSessionSlot blocks until the shared session gate lets this VPN start a
-// session: first a short settle if another VPN started one moments ago (a
-// back-and-forth switch), then until the burst allowance has room. Returns
-// errSessionWaitPaused or ctx's error when the wait was cut short.
-func (c *Connection) waitForSessionSlot(ctx context.Context) error {
-	if c.gate == nil {
-		return nil
-	}
-	if d := c.gate.settleFor(c.cfg.Name); d > 0 {
-		log.Info("vpn: another VPN started a session moments ago, settling before this one", "vpn", c.cfg.Name, "wait", d)
-		if err := c.holdSessionStart(ctx, d, msgs.SessionSettle); err != nil {
-			return err
-		}
-	}
-	for {
-		wait := c.gate.reserve(c.cfg.Name)
-		if wait == 0 {
-			return nil
-		}
-		log.Warn("vpn: too many VPN sessions started recently, delaying this one",
-			"vpn", c.cfg.Name, "wait", wait.Round(time.Second))
-		if err := c.holdSessionStart(ctx, wait, msgs.SessionRateLimited); err != nil {
-			return err
-		}
-	}
-}
-
-// holdSessionStart waits d before a session start, showing msg. A pause ends
-// the wait early. A force reconnect does not — the spacing exists precisely to
-// stop rapid restarts — and is consumed here, so the buffered request can't
-// tear down the session that starts right after the wait.
-func (c *Connection) holdSessionStart(ctx context.Context, d time.Duration, msg string) error {
-	c.lastError.Store(msg)
-	c.nextReconnectAt.Store(time.Now().Add(d))
-	defer c.nextReconnectAt.Store(time.Time{})
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-c.pauseRequest:
-			return errSessionWaitPaused
-		case <-c.forceReconnect:
-			log.Info("vpn: reconnect requested while session starts are spaced out; keeping the wait", "vpn", c.cfg.Name)
-		case <-timer.C:
-			c.lastError.Store("")
-			return nil
 		}
 	}
 }

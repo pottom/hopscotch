@@ -19,9 +19,6 @@ type Manager struct {
 // "" keeps the history in memory only.
 func NewManager(vpnCfgs []config.VPNConfig, historyPath string) *Manager {
 	m := &Manager{connections: make(map[string]*Connection, len(vpnCfgs))}
-	// One gate for all VPNs: switching back and forth between them is exactly
-	// the burst of sessions it guards against.
-	gate := newSessionGate()
 	// One history for all VPNs, so each session's context (time since the
 	// other VPN's last session, recent starts) is complete.
 	history := newSessionHistory(historyPath)
@@ -49,7 +46,6 @@ func NewManager(vpnCfgs []config.VPNConfig, historyPath string) *Manager {
 			AutoPauseThreshold: cfg.AutoPauseThreshold,
 			AutoResumeAfter:    cfg.AutoResumeAfter,
 		})
-		conn.gate = gate
 		conn.history = history
 		m.connections[cfg.Name] = conn
 	}

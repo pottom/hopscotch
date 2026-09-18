@@ -14,8 +14,8 @@ func TestGatewayDark(t *testing.T) {
 	}{
 		{"healthy: replies arrived", 5, 12, 10 * time.Second, false},
 		{"one reply is enough to not be dark", 1, 40, time.Minute, false},
-		{"dark: sending, nothing back", 0, 8, 7 * time.Second, true},
-		{"too early to judge", 0, 8, 5 * time.Second, false},
+		{"dark: sending, nothing back", 0, 8, 20 * time.Second, true},
+		{"too early to judge", 0, 8, 10 * time.Second, false},
 		{"not enough traffic sent to judge", 0, 2, 30 * time.Second, false},
 	} {
 		if got := gatewayDark(tc.rx, tc.tx, tc.up); got != tc.want {
