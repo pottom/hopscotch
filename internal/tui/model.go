@@ -2081,7 +2081,7 @@ const (
 	colIndent  = 2
 	colVPNW    = 14 // VPN label col in tunnel rows; also IFACE col in VPN rows
 	colPortW   = 7
-	colStatusW = 20
+	colStatusW = 22 // "⏸ paused (auto) ⚠5/5" is 21 cells
 	colUptimeW = 10
 	colRCW     = 5
 	colBpsInW  = 15

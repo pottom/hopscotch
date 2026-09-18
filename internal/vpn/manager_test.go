@@ -66,23 +66,32 @@ func TestAllStatsSkipsRouteCheckWithOneVPNConnected(t *testing.T) {
 	}
 }
 
-// Switch brings the target up and pauses only the VPN whose routes it took
-// over; a VPN into another network stays up.
-func TestSwitchPausesOnlyTheVPNItTookOver(t *testing.T) {
+// Switch brings the target up and pauses only the VPN whose pushed routes
+// overlap it; a VPN into another network stays up.
+func TestSwitchPausesOnlyTheOverlappingVPN(t *testing.T) {
 	m := &Manager{connections: map[string]*Connection{}}
 	stops := []func(){}
+	// a and b share 10.0.0.0/8; other pushes a disjoint network.
+	routes := map[string][]string{
+		"a":     {"10.0.0.0/8", "10.4.0.0/22"},
+		"b":     {"10.0.0.0/8", "10.6.0.0/22"},
+		"other": {"192.168.50.0/24"},
+	}
 	for _, name := range []string{"a", "b", "other"} {
 		cfg := testConnConfig(name)
-		cfg.PingHost = "10.4.60.100:53"
 		cfg.ConnectTimeout = 1
 		c := newConnection(cfg)
 		iface := "tun-" + name
+		rs := routes[name]
 		stops = append(stops, runWithAttempt(c, func(ctx context.Context) error {
 			c.tunIface.Store(iface)
+			// Expose the pushed routes through Stats without a real wrapper.
+			c.cfg.StateDir = ""
 			c.setState(StateConnected)
 			<-ctx.Done()
 			return ctx.Err()
 		}))
+		c.testPushed = rs
 		m.connections[name] = c
 	}
 	defer func() {
@@ -90,32 +99,16 @@ func TestSwitchPausesOnlyTheVPNItTookOver(t *testing.T) {
 			stop()
 		}
 	}()
-	// a and other are up; b is paused and about to be switched to.
 	m.connections["b"].Pause()
 	waitForVPNState(t, m.connections["b"], StatePaused, 2*time.Second)
 	waitForVPNState(t, m.connections["a"], StateConnected, 2*time.Second)
-
-	orig := routeInterface
-	defer func() { routeInterface = orig }()
-	// Once b is up its interface carries the traffic that a used to carry;
-	// other probes a host in its own network and is unaffected.
-	m.connections["other"].cfg.PingHost = "10.99.0.1:53"
-	routeInterface = func(host string) string {
-		if host == "10.99.0.1:53" {
-			return "tun-other"
-		}
-		if m.connections["b"].State() == StateConnected {
-			return "tun-b"
-		}
-		return "tun-a"
-	}
 
 	paused, err := m.Switch(context.Background(), "b")
 	if err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 	if len(paused) != 1 || paused[0] != "a" {
-		t.Errorf("paused = %v, want [a]", paused)
+		t.Errorf("paused = %v, want [a] (only the VPN sharing 10.0.0.0/8)", paused)
 	}
 	waitForVPNState(t, m.connections["a"], StatePaused, 2*time.Second)
 	if st := m.connections["other"].State(); st != StateConnected {
@@ -126,13 +119,10 @@ func TestSwitchPausesOnlyTheVPNItTookOver(t *testing.T) {
 	}
 }
 
-// When the target never takes over, nothing else is paused and the error
-// says so.
+// When the target never connects, nothing else is paused and the error says so.
 func TestSwitchTimesOutWithoutTouchingOthers(t *testing.T) {
 	m := &Manager{connections: map[string]*Connection{}}
-	cfgA := testConnConfig("a")
-	cfgA.PingHost = "10.4.60.100:53"
-	a := newConnection(cfgA)
+	a := newConnection(testConnConfig("a"))
 	stopA := runWithAttempt(a, func(ctx context.Context) error {
 		a.tunIface.Store("tun-a")
 		a.setState(StateConnected)
@@ -140,10 +130,7 @@ func TestSwitchTimesOutWithoutTouchingOthers(t *testing.T) {
 		return ctx.Err()
 	})
 	defer stopA()
-	cfgB := testConnConfig("b")
-	cfgB.PingHost = "10.4.60.100:53"
-	cfgB.ConnectTimeout = -1 // <= 0 falls back to the default; keep the test short below
-	b := newConnection(cfgB)
+	b := newConnection(testConnConfig("b"))
 	stopB := runWithAttempt(b, func(ctx context.Context) error {
 		<-ctx.Done() // never connects
 		return ctx.Err()

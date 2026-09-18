@@ -113,6 +113,54 @@ func TestVPNCWrapperRecordsPushedConfig(t *testing.T) {
 	}
 }
 
+// On macOS the wrapper must add before it changes: "route change" on a
+// route that doesn't exist rewrites the default route (seen live 2026-09-19).
+func TestVPNCWrapperDarwinAddsBeforeChange(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(dir, "calls.log")
+	// route: log every call; "add" of 10.0.0.0/8 fails as if it existed.
+	route := "#!/bin/sh\necho \"route $*\" >> '" + calls + "'\ncase \"$*\" in *\"add -net 10.0.0.0/8\"*) exit 1;; esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "route"), []byte(route), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"netstat", "ifconfig", "uname"} {
+		if err := os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wrapper, err := writeVPNCWrapper(dir, "mac", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(sh, wrapper)
+	cmd.Env = append(os.Environ(),
+		"PATH="+bin+":"+os.Getenv("PATH"), "HOPSCOTCH_WRAPPER_OS=Darwin",
+		"reason=connect", "TUNDEV=utun9", "INTERNAL_IP4_ADDRESS=10.4.1.5",
+		"CISCO_SPLIT_INC=2",
+		"CISCO_SPLIT_INC_0_ADDR=10.4.0.0", "CISCO_SPLIT_INC_0_MASKLEN=22",
+		"CISCO_SPLIT_INC_1_ADDR=10.0.0.0", "CISCO_SPLIT_INC_1_MASKLEN=8",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("wrapper failed: %v\n%s", err, out)
+	}
+	log, _ := os.ReadFile(calls)
+	got := strings.TrimSpace(string(log))
+	want := "route -n add -net 10.4.0.0/22 -interface utun9\n" +
+		"route -n add -net 10.0.0.0/8 -interface utun9\n" +
+		"route -n change -net 10.0.0.0/8 -interface utun9"
+	if got != want {
+		t.Errorf("route calls:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestReadPushedIgnoresGarbage(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, pushedFileName("x")), []byte("{not json"), 0o644); err != nil {

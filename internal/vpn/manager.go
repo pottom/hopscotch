@@ -157,14 +157,20 @@ func (m *Manager) Has(name string) bool {
 // ErrSwitchTimeout means the target VPN did not take over the traffic in time.
 var ErrSwitchTimeout = errors.New("did not take over the traffic in time")
 
-// Switch hands the traffic to the VPN named to: it resumes to, waits until
-// to's own interface carries the traffic to its ping_host, and only then
-// pauses every other connected VPN whose traffic that interface took over
-// (Stats.RoutedVia == to). VPNs pushing other networks are left alone, so two
+// Switch hands the traffic to the VPN named to: it resumes to, waits until to
+// is connected, and then pauses every other connected VPN whose pushed routes
+// overlap to's — those are the ones whose tunnel would otherwise keep the
+// shared networks. VPNs that push only other networks are left alone, so two
 // VPNs into different networks keep running side by side. Returns the VPNs it
-// paused. If to doesn't take over within its connect_timeout plus a margin it
-// is left running (it keeps retrying like any resumed VPN) and nothing else is
-// touched; the caller decides what to do with it.
+// paused. If to doesn't connect within its connect_timeout plus a margin it is
+// left running (it keeps retrying like any resumed VPN) and nothing else is
+// touched.
+//
+// The decision is by route overlap, not by which interface currently carries
+// the traffic: on macOS both openconnects re-point the shared routes on every
+// reconnect and race for them (measured 2026-09-19), so "who owns the route
+// right now" flaps. Overlap is stable, and once the losing VPN is paused its
+// disconnect hook (see vpncscript.go) hands the shared routes back to to.
 func (m *Manager) Switch(ctx context.Context, to string) ([]string, error) {
 	conn, ok := m.connections[to]
 	if !ok {
@@ -180,19 +186,25 @@ func (m *Manager) Switch(ctx context.Context, to string) ([]string, error) {
 	deadline := time.Now().Add(timeout + 15*time.Second)
 	for {
 		stats := m.AllStats()
-		if st := stats[to]; st.State == StateConnected && st.RoutedVia == "" {
+		if stats[to].State == StateConnected {
+			target := routeSet(stats[to].PushedRoutes)
 			var paused []string
 			for name, other := range stats {
-				if name != to && other.State == StateConnected && other.RoutedVia == to {
-					log.Info("vpn: switch complete, pausing the VPN whose routes were taken over", "vpn", to, "paused", name)
-					m.connections[name].Pause()
-					paused = append(paused, name)
+				if name == to || other.State != StateConnected {
+					continue
 				}
+				if !routesOverlap(target, other.PushedRoutes) {
+					log.Info("vpn: switch keeps a VPN into another network up", "vpn", to, "kept", name)
+					continue
+				}
+				log.Info("vpn: switch complete, pausing the overlapping VPN", "vpn", to, "paused", name)
+				m.connections[name].Pause()
+				paused = append(paused, name)
 			}
 			return paused, nil
 		}
 		if time.Now().After(deadline) {
-			log.Warn("vpn: switch gave up waiting, leaving everything as it is", "vpn", to, "waited", timeout+15*time.Second)
+			log.Warn("vpn: switch gave up waiting for the VPN to connect, leaving everything as it is", "vpn", to, "waited", timeout+15*time.Second)
 			return nil, ErrSwitchTimeout
 		}
 		select {
@@ -201,6 +213,31 @@ func (m *Manager) Switch(ctx context.Context, to string) ([]string, error) {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+}
+
+// routeSet indexes pushed route prefixes for overlap tests.
+func routeSet(routes []string) map[string]bool {
+	set := make(map[string]bool, len(routes))
+	for _, r := range routes {
+		set[r] = true
+	}
+	return set
+}
+
+// routesOverlap reports whether any of routes is in target. When neither side
+// has any pushed routes recorded (no wrapper, e.g. openconnect built without
+// one), it returns true so the old pause-the-other behaviour is kept — a
+// switch between two route-less VPNs still switches.
+func routesOverlap(target map[string]bool, routes []string) bool {
+	if len(target) == 0 && len(routes) == 0 {
+		return true
+	}
+	for _, r := range routes {
+		if target[r] {
+			return true
+		}
+	}
+	return false
 }
 
 // AllStats returns a Stats snapshot of every VPN connection, keyed by name.

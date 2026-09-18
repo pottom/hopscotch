@@ -124,6 +124,9 @@ type Connection struct {
 	rnd func() float64
 	// attempt runs one connection attempt: runOnce, replaced in tests.
 	attempt func(ctx context.Context) error
+	// testPushed, when non-nil, is returned as Stats().PushedRoutes instead of
+	// reading the wrapper's file — set by tests that have no real wrapper.
+	testPushed []string
 
 	// consecutiveFailures counts connection attempts in a row that never
 	// reached StateConnected; reset to 0 on a successful connect or a manual
@@ -280,8 +283,12 @@ func (c *Connection) Stats() Stats {
 	}
 	tunIface := c.tunIface.Load().(string)
 	pushed := readPushed(c.cfg.StateDir, c.cfg.Name, tunIface)
+	pushedRoutes := pushed.Routes
+	if c.testPushed != nil {
+		pushedRoutes = c.testPushed
+	}
 	return Stats{
-		PushedRoutes:        pushed.Routes,
+		PushedRoutes:        pushedRoutes,
 		PushedDNS:           pushed.DNS,
 		State:               State(c.state.Load()),
 		Reconnects:          int(c.reconnects.Load()),
