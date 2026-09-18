@@ -2,6 +2,10 @@ package vpn
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/log"
 	"golang.org/x/sync/errgroup"
@@ -27,8 +31,29 @@ func NewManager(vpnCfgs []config.VPNConfig, historyPath string) *Manager {
 	// One history for all VPNs, so each session's context (time since the
 	// other VPN's last session, recent starts) is complete.
 	history := newSessionHistory(historyPath)
+	// The vpnc wrapper and its records live next to the history.
+	stateDir := ""
+	if historyPath != "" {
+		stateDir = filepath.Dir(historyPath)
+	}
 	for _, cfg := range vpnCfgs {
+		wrapper := ""
+		if stateDir != "" {
+			systemScript := cfg.VPNCScript
+			if systemScript == "" {
+				systemScript = findSystemVPNCScript()
+			}
+			path, err := writeVPNCWrapper(stateDir, cfg.Name, systemScript)
+			if err != nil {
+				log.Warn("vpn: cannot write the vpnc-script wrapper, openconnect keeps its default script", "vpn", cfg.Name, "err", err)
+			} else {
+				wrapper = path
+				log.Debug("vpn: vpnc-script wrapper written", "vpn", cfg.Name, "path", path, "wraps", systemScript)
+			}
+		}
 		conn := newConnection(connConfig{
+			ScriptWrapper:      wrapper,
+			StateDir:           stateDir,
 			Name:               cfg.Name,
 			Binary:             cfg.Binary,
 			Server:             cfg.Server,
@@ -121,6 +146,61 @@ func (m *Manager) IsPaused(name string) bool {
 		return false
 	}
 	return conn.paused.Load()
+}
+
+// Has reports whether a VPN with this name is configured.
+func (m *Manager) Has(name string) bool {
+	_, ok := m.connections[name]
+	return ok
+}
+
+// ErrSwitchTimeout means the target VPN did not take over the traffic in time.
+var ErrSwitchTimeout = errors.New("did not take over the traffic in time")
+
+// Switch hands the traffic to the VPN named to: it resumes to, waits until
+// to's own interface carries the traffic to its ping_host, and only then
+// pauses every other connected VPN whose traffic that interface took over
+// (Stats.RoutedVia == to). VPNs pushing other networks are left alone, so two
+// VPNs into different networks keep running side by side. Returns the VPNs it
+// paused. If to doesn't take over within its connect_timeout plus a margin it
+// is left running (it keeps retrying like any resumed VPN) and nothing else is
+// touched; the caller decides what to do with it.
+func (m *Manager) Switch(ctx context.Context, to string) ([]string, error) {
+	conn, ok := m.connections[to]
+	if !ok {
+		return nil, fmt.Errorf("vpn %q not configured", to)
+	}
+	log.Info("vpn: switching", "vpn", to)
+	conn.Resume()
+
+	timeout := time.Duration(conn.cfg.ConnectTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout + 15*time.Second)
+	for {
+		stats := m.AllStats()
+		if st := stats[to]; st.State == StateConnected && st.RoutedVia == "" {
+			var paused []string
+			for name, other := range stats {
+				if name != to && other.State == StateConnected && other.RoutedVia == to {
+					log.Info("vpn: switch complete, pausing the VPN whose routes were taken over", "vpn", to, "paused", name)
+					m.connections[name].Pause()
+					paused = append(paused, name)
+				}
+			}
+			return paused, nil
+		}
+		if time.Now().After(deadline) {
+			log.Warn("vpn: switch gave up waiting, leaving everything as it is", "vpn", to, "waited", timeout+15*time.Second)
+			return nil, ErrSwitchTimeout
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 // AllStats returns a Stats snapshot of every VPN connection, keyed by name.

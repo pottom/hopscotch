@@ -70,6 +70,7 @@ One binary. One config file. Start it once and stop thinking about infrastructur
 | **Self-update** | `hopscotch update` atomically replaces the binary. Container-aware — prints a notice instead of updating inside Docker. |
 | **Force reconnect** | `r` in TUI or ↻ button in web UI reconnects a tunnel or VPN immediately, skipping the backoff timer. |
 | **Pause/resume** | `p` in TUI or ⏸/▶ button in web UI manually pauses a tunnel or VPN — even mid-connect — until resumed. |
+| **Switch VPN** | `s` in TUI or ⇄ button in web UI on a paused VPN brings it up and, once its own interface carries the traffic, pauses the VPN it took the routes from. Two VPNs into different networks are never touched by this and can stay up together. |
 | **Auto-pause / resume** | Stop retrying a tunnel or VPN that keeps failing after N attempts (`auto_pause_threshold`); optionally retry on its own after a cooldown (`auto_resume_after`). |
 | **Desktop notifications** | Native OS notifications on unexpected disconnect, recovery, or auto-pause — toggle per-event from the Settings tab or config. |
 | **Prometheus metrics** | `/metrics` endpoint with per-tunnel bytes, connections, reconnects, keepalive failures, uptime. |
@@ -98,6 +99,7 @@ Each tunnel shows: connection status, host, local port, uptime, reconnect counte
 | `↑` `↓` / `j` `k` | **Status tab:** move cursor between tunnels and VPNs (viewport follows) · **Other tabs:** scroll |
 | `r` | **Status tab:** force reconnect selected tunnel or VPN immediately (skips backoff) |
 | `p` | **Status tab:** pause/resume selected tunnel or VPN (aborts an in-flight connect immediately) · **Logs tab:** toggle proxy source filter |
+| `s` | **Status tab:** switch to the selected (paused) VPN — bring it up, then pause the VPN whose routes it took over · **Logs tab:** toggle system source filter |
 | `f` | **Status tab:** toggle graphs on/off (compact mode) |
 | `g` | **Status tab:** toggle mirror graph (dual-channel ↔ download only) |
 | `/` | **Rules tab:** focus URL tester · **Logs tab:** focus text filter |
@@ -417,6 +419,7 @@ password_cmd: "cat /run/secrets/vpn_pass"   # Docker / Kubernetes secret mount
 | `password_cmd` | — | Shell command whose stdout is the password |
 | `ping_host` | — | `host:port` TCP probe to confirm VPN is up; the VPN counts as connected only once this answers |
 | `connect_timeout` | `30` | Seconds `ping_host` may stay unreachable after launch before openconnect is restarted. On Linux, a session whose tunnel sends packets but receives none at all is recognised as "dark" after about 15 s instead. How long to wait before the next session after a dark one is **learned**: every attempt is recorded (`vpn-sessions.jsonl` in the cache directory, last 30 days), and hopscotch picks the wait (15 s, 30 s, 1 m or 2 m) that recovered fastest after earlier dark sessions, starting from 15 s while it has little evidence. The reason is shown next to the countdown, and `hopscotch vpn stats` prints what was learned. Hard limits are never learned: at most 3 session starts per 2 minutes across all VPNs (plus a 3 s settle when switching back and forth), and at least 2 minutes after 6 dark sessions in a row |
+| `vpnc_script` | the system one | The vpnc-script hopscotch's own wrapper runs. openconnect is always started with `--script` pointing at a wrapper hopscotch writes to its cache directory (one per VPN): it runs this script, then points every pushed route at the new session's tunnel (so the VPN that came up last carries the traffic, on macOS too), on disconnect removes only that tunnel's routes and restores those of any other VPN still up, and records what the gateway pushed (`pushed_routes`, `pushed_dns` in `/status`). `--script` in `extra_args` is rejected; set this instead. |
 | `hold_dark_session` | `false` | Experimental: during the 2-minute pause after 6 dark sessions in a row, keep the last dark session open (it connects by itself if the gateway recovers) instead of tearing it down |
 | `pre_connect` | — | Shell commands to run before each connection attempt |
 | `post_disconnect` | — | Shell commands to run after each VPN disconnect; route cleanup is automatic, rarely needed |

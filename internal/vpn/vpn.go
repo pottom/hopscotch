@@ -31,6 +31,8 @@ type Stats struct {
 	AutoPauseThreshold  int       // config value; 0 = auto-pause disabled
 	AutoPaused          bool      // true if the current pause (if any) was triggered by auto_pause_threshold, not a manual Pause()
 	RoutedVia           string    // set by Manager.AllStats when another VPN's interface carries this VPN's traffic: that VPN's name, or the interface when no VPN owns it
+	PushedRoutes        []string  // networks the gateway pushed (addr/len), recorded by the vpnc wrapper; nil until connected or without the wrapper
+	PushedDNS           []string  // DNS servers the gateway pushed; see PushedRoutes
 }
 
 // State represents the lifecycle state of a VPN connection.
@@ -70,6 +72,8 @@ type connConfig struct {
 	PingHost           string // host[:port] TCP-probed to confirm VPN connectivity
 	ConnectTimeout     int    // seconds ping_host may stay unreachable after launch; <= 0 means 30
 	HoldDarkSession    bool   // keep a dark session open during its cooldown instead of tearing it down (experimental)
+	ScriptWrapper      string // hopscotch's vpnc-script wrapper passed as --script (vpncscript.go); "" leaves openconnect's default
+	StateDir           string // where the wrapper records what the gateway pushed (pushed.go); "" disables
 	ExtraArgs          []string
 	PreConnect         []string // commands to run before each connection attempt
 	PostDisconnect     []string // commands to run after each VPN disconnect
@@ -274,14 +278,18 @@ func (c *Connection) Stats() Stats {
 	if u, err := url.Parse(c.cfg.Server); err == nil && u.Host != "" {
 		server = u.Host
 	}
+	tunIface := c.tunIface.Load().(string)
+	pushed := readPushed(c.cfg.StateDir, c.cfg.Name, tunIface)
 	return Stats{
+		PushedRoutes:        pushed.Routes,
+		PushedDNS:           pushed.DNS,
 		State:               State(c.state.Load()),
 		Reconnects:          int(c.reconnects.Load()),
 		ConnectedAt:         c.connectedAt.Load().(time.Time),
 		Server:              server,
 		NextReconnectAt:     c.nextReconnectAt.Load().(time.Time),
 		LastError:           c.lastError.Load().(string),
-		TunIface:            c.tunIface.Load().(string),
+		TunIface:            tunIface,
 		ConsecutiveFailures: int(c.consecutiveFailures.Load()),
 		AutoPauseThreshold:  c.cfg.AutoPauseThreshold,
 		AutoPaused:          c.autoPaused.Load(),

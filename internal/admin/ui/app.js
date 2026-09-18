@@ -172,7 +172,8 @@ function tunnelActionHtml(name, status) {
 
 function vpnActionHtml(name, state) {
   if (state === 'paused') {
-    return `<button class="reconnect-btn" title="Resume" onclick="event.stopPropagation();resumeVPN('${escHtml(name)}')">▶</button>`;
+    return `<button class="reconnect-btn" title="Resume" onclick="event.stopPropagation();resumeVPN('${escHtml(name)}')">▶</button>` +
+      `<button class="reconnect-btn" title="Switch to this VPN: bring it up, then pause the VPN it takes the routes from" onclick="event.stopPropagation();switchVPN('${escHtml(name)}')">⇄</button>`;
   }
   return `<button class="reconnect-btn" title="Force reconnect" onclick="event.stopPropagation();reconnectVPN('${escHtml(name)}')">↻</button>` +
     `<button class="reconnect-btn" title="Pause" onclick="event.stopPropagation();pauseVPN('${escHtml(name)}')">⏸</button>`;
@@ -418,6 +419,13 @@ window.resumeTunnel = async function(name) {
 window.pauseVPN = async function(name) {
   try {
     await fetch('/api/vpns/' + encodeURIComponent(name) + '/pause', { method: 'POST' });
+    refreshStatus();
+  } catch (_) {}
+};
+
+window.switchVPN = async function(name) {
+  try {
+    await fetch('/api/vpns/' + encodeURIComponent(name) + '/switch', { method: 'POST' });
     refreshStatus();
   } catch (_) {}
 };

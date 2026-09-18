@@ -101,6 +101,8 @@ The viewport automatically scrolls to the cursor position (`lineOffsetForCursor(
 
 In the web UI: a ↻ button, hover-reveal (per row, on the right edge). Color: `var(--muted)` by default, `var(--accent)` on hover.
 
+VPN rows also get ⏸ (connected/connecting) or ▶ and ⇄ (paused): ▶ resumes, ⇄ switches to the VPN (`POST /api/vpns/{name}/switch` — bring it up, then pause the VPN whose routes it took over). TUI: `p` and `s` on the selected VPN row; `s` does nothing unless the row is paused.
+
 ---
 
 ## Status table — ↓ / ↑ columns (traffic)

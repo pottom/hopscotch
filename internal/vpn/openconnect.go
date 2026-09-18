@@ -300,6 +300,9 @@ func (c *Connection) buildArgs(hasPassword bool, resolveArg string) []string {
 	if resolveArg != "" {
 		args = append(args, "--resolve", resolveArg)
 	}
+	if c.cfg.ScriptWrapper != "" {
+		args = append(args, "--script", c.cfg.ScriptWrapper)
+	}
 	args = append(args, c.cfg.ExtraArgs...)
 	args = append(args, c.cfg.Server) // must stay last: procPattern anchors on it
 	return args

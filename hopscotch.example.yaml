@@ -34,6 +34,7 @@
 #     # key: ~/.certs/client.key           # private key for cert-based auth
 #     ping_host: "10.0.0.1:22"      # TCP probe to confirm VPN is up
 #     # connect_timeout: 30         # seconds ping_host may stay unreachable before openconnect is restarted
+#     # vpnc_script: /etc/vpnc/vpnc-script  # the script hopscotch's --script wrapper runs; default: the system one
 #     # hold_dark_session: false    # experimental: after 6 dark sessions in a row, keep the last one open during the 2-minute pause
 #     # pre_connect:                 # commands before each VPN connection attempt (rarely needed)
 #     #   - "some-custom-setup.sh"

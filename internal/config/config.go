@@ -103,6 +103,7 @@ type VPNConfig struct {
 	Key                string   `yaml:"key"`               // path to private key (cert auth)
 	PingHost           string   `yaml:"ping_host"`         // host[:port] TCP-probed to detect connectivity
 	ConnectTimeout     int      `yaml:"connect_timeout"`   // seconds ping_host may stay unreachable after launch before openconnect is restarted; default 30
+	VPNCScript         string   `yaml:"vpnc_script"`       // vpnc-script hopscotch's wrapper runs; default: the system one openconnect is built with
 	HoldDarkSession    bool     `yaml:"hold_dark_session"` // experimental: keep a session whose gateway returns no traffic open during its cooldown instead of tearing it down; default false
 	ExtraArgs          []string `yaml:"extra_args"`        // passed through to openconnect verbatim
 	PreConnect         []string `yaml:"pre_connect"`       // commands to run before each connection attempt
@@ -337,6 +338,8 @@ var managedVPNFlags = map[string]string{
 	"-c":                "certificate",
 	"--sslkey":          "key",
 	"-k":                "key",
+	"--script":          "(automatic — hopscotch passes its own vpnc-script wrapper; set vpnc_script to change the script it runs)",
+	"-s":                "(automatic — hopscotch passes its own vpnc-script wrapper; set vpnc_script to change the script it runs)",
 }
 
 // validateVPNExtraArgs returns an error if extra_args contains a flag that is

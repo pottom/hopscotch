@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -30,6 +32,16 @@ func (f *fakeReconnecter) Resume(name string) bool {
 	}
 	f.resumeCalls = append(f.resumeCalls, name)
 	return true
+}
+
+func (f *fakeReconnecter) Has(name string) bool { return f.names[name] }
+
+func (f *fakeReconnecter) Switch(_ context.Context, name string) ([]string, error) {
+	if !f.names[name] {
+		return nil, errors.New("unknown")
+	}
+	f.resumeCalls = append(f.resumeCalls, name)
+	return nil, nil
 }
 
 func newPauseTestRequest(path, name string) *http.Request {

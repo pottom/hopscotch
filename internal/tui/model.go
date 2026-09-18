@@ -873,14 +873,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "s", "S":
-			if m.activeTab == tabLogs {
-				m.logSources["system"] = !m.logSources["system"]
-				m.ensureMinLogSource()
-				m.rebuildLogVP()
-			}
-			return m, nil
-
 		case "f", "F":
 			if m.activeTab == tabStatus {
 				m.compact = !m.compact
@@ -980,6 +972,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.vp, cmd = m.vp.Update(msg)
 			}
 			return m, cmd
+
+		case "s", "S":
+			if m.activeTab == tabLogs {
+				m.logSources["system"] = !m.logSources["system"]
+				m.ensureMinLogSource()
+				m.rebuildLogVP()
+				return m, nil
+			}
+			// Status tab, cursor on a paused VPN: switch to it (see switchVPNCmd).
+			if m.activeTab == tabStatus && m.statusItemCount() > 0 && m.statusCursor < len(m.status.VPNs) {
+				name := m.vpnNamesSorted()[m.statusCursor]
+				v, ok := m.status.VPNs[name]
+				if !ok || v.State != msgs.StatusPaused {
+					return m, nil
+				}
+				v.State = msgs.StatusConnecting
+				v.LastError = ""
+				m.status.VPNs[name] = v
+				if m.vpReady {
+					m.vp.SetContent(m.buildStatusContent())
+				}
+				return m, m.switchVPNCmd(name)
+			}
+			return m, nil
 
 		case "r", "R":
 			if m.activeTab == tabStatus && m.statusItemCount() > 0 {
@@ -1503,7 +1519,7 @@ func (m Model) renderFooter() string {
 			hints += "  g mirror"
 		}
 		if m.statusItemCount() > 0 {
-			hints += "  ↑↓/jk cursor  r reconnect  p pause/resume"
+			hints += "  ↑↓/jk cursor  r reconnect  p pause/resume  s switch"
 		}
 	}
 	if m.activeTab == tabSettings {
@@ -1890,6 +1906,13 @@ func (m Model) pauseVPNCmd(name string) tea.Cmd {
 
 func (m Model) resumeVPNCmd(name string) tea.Cmd {
 	return m.postActionCmd("/api/vpns/" + name + "/resume")
+}
+
+// switchVPNCmd asks the daemon to bring the VPN up and pause the one it takes
+// the routes from (vpn.Manager.Switch), through the same HTTP API as the web
+// UI's ⇄ button.
+func (m Model) switchVPNCmd(name string) tea.Cmd {
+	return m.postActionCmd("/api/vpns/" + name + "/switch")
 }
 
 // vpnNamesSorted returns VPN names sorted alphabetically (same order as rendered).

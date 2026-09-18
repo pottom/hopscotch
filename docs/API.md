@@ -304,6 +304,20 @@ Same semantics as the tunnel endpoints above, for a configured VPN.
 - `204 No Content` on success
 - `404` — `vpn not found`, or `no vpns configured` if the daemon has none at all
 
+## POST /api/vpns/{name}/switch
+
+Switch to this VPN: resume it and, once its own interface carries the traffic
+to its `ping_host`, pause every other connected VPN whose traffic it took over
+(the ones `GET /status` would report with `routed_via` = this VPN). VPNs into
+other networks are left alone. The switch runs in the background; the target
+counts as resumed at once and the VPNs it pauses are persisted as paused when
+that happens. If the target doesn't take over within its `connect_timeout`
+plus 15 s it is left running (retrying like any resumed VPN) and nothing else
+is touched.
+
+- `202 Accepted` — the switch was started
+- `404` — `vpn not found`, or `no vpns configured`
+
 ---
 
 ## Auto-pause is not an API action

@@ -84,6 +84,7 @@ subgraph VPN["🔒  VPN — Connection.Run (minden VPN-re külön goroutine)"]
   vn_par --> vn1
   adm_vp_pause(["Admin API / TUI / Web UI\nPOST /api/vpns/NAME/pause"]):::term_ext -.-> vn_pw
   adm_vp_resume(["POST /api/vpns/NAME/resume"]):::term_ext -.-> vn_psel
+  adm_vp_switch(["POST /api/vpns/NAME/switch\nresume, then pause the VPN\nwhose routes it took over"]):::term_ext -.-> vn_psel
   vn1 --> vn2["orphaned openconnect procs kill"]
   vn2 --> vn3["tun-interfész snapshot: utun*, tun* before"]
   vn3 --> vn4[runPreConnect parancsok]
@@ -94,7 +95,7 @@ subgraph VPN["🔒  VPN — Connection.Run (minden VPN-re külön goroutine)"]
   vn5 --> vn5e{DNS timeout?}
   vn5e -->|igen| vn_rc([reconnect])
   vn5e -->|nem| vn6["macOS: stale VPN server host route törlése"]
-  vn6 --> vn7["openconnect subprocess indítása\n(sudo if configured)"]
+  vn6 --> vn7["openconnect subprocess indítása\n(sudo if configured)\n--script: hopscotch vpnc wrapper"]
   vn7 --> vn8[["párhuzamos watcherek"]]
 
   vn8 --> ws["watchOutput stdout+stderr:\nDTLS/TLS/Connected as → Connected, csak ping_host nélkül\nSet up tun device → iface\nError/Failed → lastError"]

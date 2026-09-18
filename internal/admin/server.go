@@ -195,6 +195,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	protected.HandleFunc("POST /api/vpns/{name}/reconnect", s.handleVPNReconnect)
 	protected.HandleFunc("POST /api/vpns/{name}/pause", s.handleVPNPause)
 	protected.HandleFunc("POST /api/vpns/{name}/resume", s.handleVPNResume)
+	protected.HandleFunc("POST /api/vpns/{name}/switch", s.handleVPNSwitch)
 	sub, _ := fs.Sub(uiFiles, "ui")
 	protected.Handle("GET /", noCacheFS(http.FileServerFS(sub)))
 

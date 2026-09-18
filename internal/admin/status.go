@@ -48,7 +48,9 @@ type VPNStatusJSON struct {
 	ConsecutiveFailures int     `json:"consecutive_failures,omitempty"`
 	AutoPauseThreshold  int     `json:"auto_pause_threshold,omitempty"`
 	AutoPaused          bool    `json:"auto_paused,omitempty"`
-	RoutedVia           string  `json:"routed_via,omitempty"` // another VPN (or interface) carrying this VPN's traffic; see vpn.Stats
+	RoutedVia           string   `json:"routed_via,omitempty"`    // another VPN (or interface) carrying this VPN's traffic; see vpn.Stats
+	PushedRoutes        []string `json:"pushed_routes,omitempty"` // networks the gateway pushed (addr/len), from hopscotch's vpnc-script wrapper
+	PushedDNS           []string `json:"pushed_dns,omitempty"`    // DNS servers the gateway pushed
 }
 
 // StatusResponse is the full /status JSON response.
@@ -144,6 +146,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 				AutoPauseThreshold:  st.AutoPauseThreshold,
 				AutoPaused:          st.AutoPaused,
 				RoutedVia:           st.RoutedVia,
+				PushedRoutes:        st.PushedRoutes,
+				PushedDNS:           st.PushedDNS,
 			}
 		}
 	}
