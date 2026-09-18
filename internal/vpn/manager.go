@@ -7,7 +7,12 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pottom/hopscotch/internal/config"
+	"github.com/pottom/hopscotch/internal/netcheck"
 )
+
+// routeInterface resolves which interface carries traffic to a host;
+// replaced in tests.
+var routeInterface = netcheck.RouteInterface
 
 // Manager owns all VPN connections and reports their state for tunnel gating.
 type Manager struct {
@@ -119,10 +124,48 @@ func (m *Manager) IsPaused(name string) bool {
 }
 
 // AllStats returns a Stats snapshot of every VPN connection, keyed by name.
+//
+// With two VPNs connected at once their routes overlap (both push the same
+// internal networks), and only one interface actually carries the traffic:
+// on Linux the later session replaces the routes, on macOS the earlier one
+// keeps them. ping_host answers through whichever interface owns the route,
+// so both VPNs report connected even though one of them is idle. RoutedVia
+// names the VPN (or bare interface) that really carries a connected VPN's
+// traffic when it isn't its own tunnel, so the UIs can say so.
 func (m *Manager) AllStats() map[string]Stats {
 	out := make(map[string]Stats, len(m.connections))
+	connected := 0
 	for name, conn := range m.connections {
-		out[name] = conn.Stats()
+		st := conn.Stats()
+		if st.State == StateConnected {
+			connected++
+		}
+		out[name] = st
+	}
+	if connected < 2 {
+		return out
+	}
+	owner := make(map[string]string, connected) // interface -> VPN name
+	for name, st := range out {
+		if st.State == StateConnected && st.TunIface != "" {
+			owner[st.TunIface] = name
+		}
+	}
+	for name, conn := range m.connections {
+		st := out[name]
+		if st.State != StateConnected || st.TunIface == "" || conn.cfg.PingHost == "" {
+			continue
+		}
+		via := routeInterface(conn.cfg.PingHost)
+		if via == "" || via == st.TunIface {
+			continue
+		}
+		if vpnName, ok := owner[via]; ok {
+			st.RoutedVia = vpnName
+		} else {
+			st.RoutedVia = via
+		}
+		out[name] = st
 	}
 	return out
 }

@@ -51,6 +51,12 @@
     <template x-if="!$store.hop.meta.public_ip && $store.hop.meta.uplink && !$store.hop.meta.internet">
       <span class="internet-badge down">○ no internet</span>
     </template>
+    <template x-if="$store.hop.meta.dns_servers && $store.hop.meta.dns_servers.length">
+      <span class="header-sep">·</span>
+    </template>
+    <template x-if="$store.hop.meta.dns_servers && $store.hop.meta.dns_servers.length">
+      <span x-text="'DNS ' + $store.hop.meta.dns_servers.join(', ')"></span>
+    </template>
     <span class="header-sep">·</span>
     <span x-text="'PID ' + $store.hop.meta.pid"></span>
     <span class="header-sep">·</span>

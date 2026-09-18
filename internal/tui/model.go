@@ -1316,10 +1316,15 @@ func (m Model) titleLeft() string {
 	} else if m.status.Uplink && !m.status.Internet {
 		internetStr = "  " + lipgloss.NewStyle().Foreground(colorDisconnected).Render("○ no internet")
 	}
-	return fmt.Sprintf("%s  %s%s  %s  %s",
+	var dnsStr string
+	if len(m.status.DNSServers) > 0 {
+		dnsStr = "  " + styleMuted.Render("DNS "+strings.Join(m.status.DNSServers, ", "))
+	}
+	return fmt.Sprintf("%s  %s%s%s  %s  %s",
 		renderBadge(m.status.Status),
 		uplinkStr,
 		internetStr,
+		dnsStr,
 		styleMuted.Render(fmt.Sprintf("PID %d", m.status.PID)),
 		styleMuted.Render("up "+m.status.Uptime),
 	)
@@ -2297,7 +2302,11 @@ func (m Model) buildStatusContent() string {
 			if vl.showPort {
 				b.WriteString(vPort.Render(""))
 			}
-			b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0, v.ConsecutiveFailures, v.AutoPauseThreshold, v.AutoPaused)))
+			if v.State == msgs.StatusConnected && v.RoutedVia != "" {
+				b.WriteString(vStatus.Render(renderRoutedVia(v.RoutedVia)))
+			} else {
+				b.WriteString(vStatus.Render(renderStatus(v.State, m.tick, reconnectIn, 0, v.ConsecutiveFailures, v.AutoPauseThreshold, v.AutoPaused)))
+			}
 			if vl.showUptime {
 				b.WriteString(vUptime.Render(uptime))
 			}
@@ -2312,6 +2321,8 @@ func (m Model) buildStatusContent() string {
 				} else {
 					b.WriteString(renderErrMsg("└ ✗ ", v.LastError, lipgloss.NewStyle().Foreground(colorDisconnected), m.width) + "\n")
 				}
+			} else if v.State == msgs.StatusConnected && v.RoutedVia != "" {
+				b.WriteString(renderErrMsg("◌ ", routedViaMsg(v.RoutedVia), styleConnecting, m.width) + "\n")
 			}
 		}
 		b.WriteString("\n")
@@ -2614,6 +2625,20 @@ func renderStatus(status string, tick int, reconnectIn *int, keepaliveFails int,
 	default:
 		return styleMuted.Render("? " + status)
 	}
+}
+
+// renderRoutedVia is the status of a connected VPN whose traffic actually
+// leaves through another VPN's interface (see vpn.Stats.RoutedVia): amber, so
+// two connected VPNs never both look like they carry the traffic. The
+// sub-row below the VPN names the interface (routedViaMsg).
+func renderRoutedVia(via string) string {
+	return styleConnecting.Render("● connected ⚠")
+}
+
+// routedViaMsg is the sub-row text under a connected VPN whose traffic leaves
+// through via. Mirrored verbatim by the web UI (app.js renderVPNTable).
+func routedViaMsg(via string) string {
+	return "traffic leaves via " + via + " — routes overlap"
 }
 
 func fmtBytes(n uint64) string {

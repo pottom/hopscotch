@@ -43,7 +43,7 @@ saved on every `@change`. See `internal/notify/AGENTS.md`, `internal/admin/AGENT
 **Canonical order (left → right):**
 
 ```
-hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface localIP / ○ no link]  [⊕ internet publicIP / ○ no internet]  PID XXXXX  up Xh Xm
+hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface localIP / ○ no link]  [⊕ internet publicIP / ○ no internet]  [DNS a, b]  PID XXXXX  up Xh Xm
 ```
 
 | Element | Always visible | Condition |
@@ -54,6 +54,7 @@ hopscotch vX.Y.Z  [⚡new_version]  [badge]  [● iface localIP / ○ no link]  
 | `● iface localIP` / `○ no link` | yes | based on uplink state; localIP = the interface's local IP; red if there's no link |
 | `⊕ internet publicIP` | no | when `admin.show_public_ip: true` and internet is available |
 | `○ no internet` | no | when there's a link but no internet (`admin.show_public_ip: true`) |
+| `DNS a, b` | no | when `dns_servers` is non-empty: the system's current upstream resolvers, comma-separated, muted color. Never a local stub (127.0.0.53): on Linux systemd-resolved's upstream list, on macOS the default resolver from `scutil --dns`, so a VPN's pushed resolvers show while it is up |
 | `PID XXXXX` | yes | — |
 | `up Xh Xm` | yes | — |
 
@@ -122,7 +123,7 @@ The per-second rate (bps) is shown exclusively in the graph area — the graph's
 
 ## Status table — Error/progress sub-row
 
-Appears under every tunnel and VPN row when `last_error` is non-empty and the state isn't `connected`.
+Appears under every tunnel and VPN row when `last_error` is non-empty and the state isn't `connected`; under a connected VPN row it instead carries the `routed_via` note (see the VPN status text below).
 
 | Type | Prefix | Color |
 |-------|--------|------|
@@ -140,6 +141,8 @@ Root-cause propagation: if a tunnel has `last_error = "waiting for VPN: X"` and 
 ```
 
 Identical text on both surfaces. TUI: `renderStatus()`, web UI: `tunnelStatusHtml()` / `vpnStatusHtml()`.
+
+VPN rows only: `● connected ⚠` in `colorConnecting` (amber) when `/status` sets `routed_via` — the VPN is up, but traffic to its `ping_host` leaves through another VPN's interface — with the message sub-row `◌ traffic leaves via X — routes overlap` (`X` is that VPN's name, or the bare interface when no VPN owns it; amber, like a progress message). This only happens with two VPNs connected at once, whose routes overlap; without it both rows would claim to carry the traffic. TUI: `renderRoutedVia()` / `routedViaMsg()`, web UI: `vpnStatusHtml()` and the sub-row in `renderVPNTable()`.
 
 ---
 

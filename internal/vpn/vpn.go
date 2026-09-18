@@ -30,6 +30,7 @@ type Stats struct {
 	ConsecutiveFailures int       // consecutive failed connection attempts; resets to 0 on success or resume
 	AutoPauseThreshold  int       // config value; 0 = auto-pause disabled
 	AutoPaused          bool      // true if the current pause (if any) was triggered by auto_pause_threshold, not a manual Pause()
+	RoutedVia           string    // set by Manager.AllStats when another VPN's interface carries this VPN's traffic: that VPN's name, or the interface when no VPN owns it
 }
 
 // State represents the lifecycle state of a VPN connection.

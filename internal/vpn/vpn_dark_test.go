@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
 )
 
 // runWithAttempt runs c with its connection attempts replaced by attempt and

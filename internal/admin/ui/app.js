@@ -124,8 +124,10 @@ function autoPauseSuffix(consecutiveFailures, autoPauseThreshold) {
   return (autoPauseThreshold > 0 && consecutiveFailures > 0) ? ` ⚠${consecutiveFailures}/${autoPauseThreshold}` : '';
 }
 
-function vpnStatusHtml(state, reconnectIn, consecutiveFailures, autoPauseThreshold, autoPaused) {
+function vpnStatusHtml(state, reconnectIn, consecutiveFailures, autoPauseThreshold, autoPaused, routedVia) {
   const aps = autoPauseSuffix(consecutiveFailures, autoPauseThreshold);
+  // Connected, but another VPN's interface carries the traffic (mirrors renderRoutedVia in tui/model.go); the sub-row says which.
+  if (state === 'connected' && routedVia) return '<span class="st-connecting">● connected ⚠</span>';
   if (state === 'connected') return '<span class="st-connected">● connected</span>';
   if (state === 'paused') return autoPaused ? `<span class="st-paused">⏸ paused (auto)${aps}</span>` : '<span class="st-paused">⏸ paused</span>';
   if (state === 'connecting' || state === 'disconnected') {
@@ -235,15 +237,20 @@ function renderVPNTable() {
       `<td data-col="host">${escHtml(v.host || '—')}</td>` +
       `<td data-col="iface">${escHtml(v.tun_iface || '—')}</td>` +
       `<td data-col="port"></td>` +
-      `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in, v.consecutive_failures, v.auto_pause_threshold, v.auto_paused)}</td>` +
+      `<td data-col="status">${vpnStatusHtml(v.state, v.reconnect_in, v.consecutive_failures, v.auto_pause_threshold, v.auto_paused, v.routed_via)}</td>` +
       `<td data-col="uptime">${fmtUptime(v.uptime_seconds)}</td>` +
       `<td data-col="rc">${v.reconnects || 0}</td>` +
       `<td></td><td></td><td></td>` +
       `<td class="col-action-cell" data-col="action">${vpnActionHtml(name, v.state)}</td>`;
     tbody.appendChild(tr);
-    // message sub-row — only when not connected and last_error is set
-    const vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
-    const vpnIsProgress = vpnMsg ? isVPNProgressMsg(vpnMsg) : false;
+    // message sub-row — last_error while not connected, or which interface really
+    // carries the traffic when another VPN's routes overlap (mirrors routedViaMsg in tui/model.go)
+    let vpnMsg = (v.state !== 'connected' && v.last_error) ? v.last_error : '';
+    let vpnIsProgress = vpnMsg ? isVPNProgressMsg(vpnMsg) : false;
+    if (!vpnMsg && v.state === 'connected' && v.routed_via) {
+      vpnMsg = `traffic leaves via ${v.routed_via} — routes overlap`;
+      vpnIsProgress = true;
+    }
     const vmtr = document.createElement('tr');
     vmtr.className = 'msg-row'; vmtr.dataset.name = name;
     vmtr.style.display = vpnMsg ? '' : 'none';
@@ -444,7 +451,7 @@ document.addEventListener('alpine:init', () => {
     direct:  { bps_in: 0, bps_out: 0, active: 0 },
     routes:  [],
     notifications: { enabled: false, on_disconnect: false, on_reconnect: false, on_auto_pause: false, sound: false },
-    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', proxy_auth_enabled: false, admin_port: 0, admin_bind: '', admin_auth_enabled: false, status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '' },
+    meta:    { version: '…', pid: 0, uptime: '…', proxy_port: 0, proxy_bind: '', proxy_auth_enabled: false, admin_port: 0, admin_bind: '', admin_auth_enabled: false, status: '…', uplink: true, uplink_iface: '', uplink_ip: '', internet: false, public_ip: '', dns_servers: [] },
 
     tunnelList() {
       return Object.keys(this.tunnels).sort((a, b) => {
@@ -521,6 +528,7 @@ async function refreshStatus() {
       uplink_ip:      st.uplink_ip || '',
       internet:       st.internet ?? true,
       public_ip:      st.public_ip || '',
+      dns_servers:    st.dns_servers || [],
     };
 
     // Rebuild tunnel map, preserving live bps/active values from SSE.
@@ -563,6 +571,7 @@ async function refreshStatus() {
         consecutive_failures: v.consecutive_failures || 0,
         auto_pause_threshold: v.auto_pause_threshold || 0,
         auto_paused:          v.auto_paused || false,
+        routed_via:           v.routed_via || '',
         reconnect_in:   prev.reconnect_in ?? null,
       };
     }
@@ -621,7 +630,7 @@ function connectSSE() {
         if (v.state) store.vpns[name].state = v.state;
         store.vpns[name].reconnect_in = v.reconnect_in ?? null;
         const row = findVPNRow(name);
-        if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in, store.vpns[name].consecutive_failures, store.vpns[name].auto_pause_threshold, store.vpns[name].auto_paused), true);
+        if (row) setCell(row, 'status', vpnStatusHtml(store.vpns[name].state, store.vpns[name].reconnect_in, store.vpns[name].consecutive_failures, store.vpns[name].auto_pause_threshold, store.vpns[name].auto_paused, store.vpns[name].routed_via), true);
       }
     }
 

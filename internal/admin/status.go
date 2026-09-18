@@ -48,6 +48,7 @@ type VPNStatusJSON struct {
 	ConsecutiveFailures int     `json:"consecutive_failures,omitempty"`
 	AutoPauseThreshold  int     `json:"auto_pause_threshold,omitempty"`
 	AutoPaused          bool    `json:"auto_paused,omitempty"`
+	RoutedVia           string  `json:"routed_via,omitempty"` // another VPN (or interface) carrying this VPN's traffic; see vpn.Stats
 }
 
 // StatusResponse is the full /status JSON response.
@@ -68,6 +69,7 @@ type StatusResponse struct {
 	UplinkIP         string                      `json:"uplink_ip,omitempty"`
 	Internet         bool                        `json:"internet"`
 	PublicIP         string                      `json:"public_ip,omitempty"`
+	DNSServers       []string                    `json:"dns_servers,omitempty"` // the system's current upstream resolvers (never a local stub)
 	Tunnels          map[string]TunnelStatusJSON `json:"tunnels"`
 	VPNs             map[string]VPNStatusJSON    `json:"vpns,omitempty"`
 	Routes           []RouteJSON                 `json:"routes"`
@@ -141,6 +143,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 				ConsecutiveFailures: st.ConsecutiveFailures,
 				AutoPauseThreshold:  st.AutoPauseThreshold,
 				AutoPaused:          st.AutoPaused,
+				RoutedVia:           st.RoutedVia,
 			}
 		}
 	}
@@ -173,6 +176,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		UplinkIP:         netcheck.UplinkIP(),
 		Internet:         uplink && netcheck.HasInternet(),
 		PublicIP:         publicIP,
+		DNSServers:       netcheck.DNSServers(),
 		Tunnels:          tunnels,
 		VPNs:             vpnMap,
 		Routes:           routes,
